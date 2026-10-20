@@ -1,0 +1,4 @@
+#!/bin/sh
+# Lança um nó overlay: ./bin/ott [opções] ...
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="$DIR/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m ott "$@"

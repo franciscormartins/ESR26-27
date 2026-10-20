@@ -1,0 +1,11 @@
+{
+  "_comment": "Cenário 2: servidor, 3 nós intermédios (O1 ligado a O2 e O3) e 2 clientes.",
+  "nodes": {
+    "S1": {"host": "10.0.0.10", "neighbors": ["O1"]},
+    "O1": {"host": "10.0.0.11", "neighbors": ["O2", "O3"]},
+    "O2": {"host": "10.0.0.12", "neighbors": ["O3", "C2"]},
+    "O3": {"host": "10.0.0.13", "neighbors": ["C1"]},
+    "C1": {"host": "10.0.0.14", "neighbors": []},
+    "C2": {"host": "10.0.0.15", "neighbors": []}
+  }
+}

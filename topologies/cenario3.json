@@ -1,0 +1,16 @@
+{
+  "_comment": "Cenário 3: overlay da Figura 1 (arestas lidas da figura; confirmar). Ajustar 'host' aos IPs do CORE.",
+  "nodes": {
+    "O1":  {"host": "10.0.0.1",  "neighbors": ["O2"]},
+    "O2":  {"host": "10.0.0.2",  "neighbors": ["O3", "O7"]},
+    "O3":  {"host": "10.0.0.3",  "neighbors": ["O4", "O5"]},
+    "O4":  {"host": "10.0.0.4",  "neighbors": []},
+    "O5":  {"host": "10.0.0.5",  "neighbors": ["O6", "O7", "O10", "O11"]},
+    "O6":  {"host": "10.0.0.6",  "neighbors": ["O7", "O9"]},
+    "O7":  {"host": "10.0.0.7",  "neighbors": ["O8"]},
+    "O8":  {"host": "10.0.0.8",  "neighbors": []},
+    "O9":  {"host": "10.0.0.9",  "neighbors": []},
+    "O10": {"host": "10.0.0.10", "neighbors": []},
+    "O11": {"host": "10.0.0.11", "neighbors": []}
+  }
+}
