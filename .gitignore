@@ -27,3 +27,4 @@ __pycache__/
 *.pyc
 .venv/
 build/
+docs/testes-core.md
