@@ -1,11 +1,10 @@
 {
-  "_comment": "Cenário 2: servidor, 3 nós intermédios (O1 ligado a O2 e O3) e 2 clientes.",
+  "_comment": "Cenário 2 (ensaio CORE): S1-O1, S1-O2, O1-O2, O1-C2, O2-C1. Cada nó tem um só 'host': escolhido de modo a que cada ligação seja alcançável a partir de um dos lados (O1->S1, O2->O1, S1->O2, O1->C2, O2->C1).",
   "nodes": {
-    "S1": {"host": "10.0.0.10", "neighbors": ["O1"]},
-    "O1": {"host": "10.0.0.11", "neighbors": ["O2", "O3"]},
-    "O2": {"host": "10.0.0.12", "neighbors": ["O3", "C2"]},
-    "O3": {"host": "10.0.0.13", "neighbors": ["C1"]},
-    "C1": {"host": "10.0.0.14", "neighbors": []},
-    "C2": {"host": "10.0.0.15", "neighbors": []}
+    "S1": {"host": "10.0.4.21", "neighbors": ["O1", "O2"]},
+    "O1": {"host": "10.0.2.20", "neighbors": ["O2", "C2"]},
+    "O2": {"host": "10.0.3.20", "neighbors": ["C1"]},
+    "C1": {"host": "10.0.1.20", "neighbors": []},
+    "C2": {"host": "10.0.0.20", "neighbors": []}
   }
 }

@@ -1,0 +1,1769 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<scenario>
+  <networks>
+    <network id="7" name="s2" icon="" canvas="2" type="SWITCH">
+      <position x="447.90899658203125" y="657.4043579101562" lat="47.57319048947741" lon="-122.12628876628712" alt="2.0"/>
+    </network>
+    <network id="8" name="s1" icon="" canvas="2" type="SWITCH">
+      <position x="873.3319702148438" y="417.4674377441406" lat="47.57537163791476" lon="-122.12055630689566" alt="2.0"/>
+    </network>
+    <network id="9" name="s4" icon="" canvas="2" type="SWITCH">
+      <position x="152.1075439453125" y="554.6307983398438" lat="47.574124764442345" lon="-122.13027461077665" alt="2.0"/>
+    </network>
+    <network id="10" name="s5" icon="" canvas="2" type="SWITCH">
+      <position x="175.03515625" y="237.5491180419922" lat="47.57700712719417" lon="-122.1299656674082" alt="2.0"/>
+    </network>
+    <network id="11" name="s3" icon="" canvas="2" type="SWITCH">
+      <position x="500.8645324707031" y="172.0723876953125" lat="47.57760230955083" lon="-122.1255752047781" alt="2.0"/>
+    </network>
+  </networks>
+  <devices>
+    <device id="5" name="Server" icon="" canvas="2" type="PC" class="" image="" compose="" compose_name="">
+      <position x="963.170654296875" y="383.6122131347656" lat="47.5756793917833" lon="-122.11934575495042" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+      </services>
+    </device>
+    <device id="12" name="R4" icon="" canvas="2" type="router" class="" image="" compose="" compose_name="">
+      <position x="691.0703125" y="514.3060913085938" lat="47.574491336316136" lon="-122.12301223338818" alt="2.0"/>
+      <services>
+        <service name="IPForward"/>
+        <service name="FRRzebra"/>
+        <service name="FRROSPFv2"/>
+      </services>
+    </device>
+    <device id="13" name="R5" icon="" canvas="2" type="router" class="" image="" compose="" compose_name="">
+      <position x="469.6473693847656" y="538.6659545898438" lat="47.574269893210605" lon="-122.125995847599" alt="2.0"/>
+      <services>
+        <service name="IPForward"/>
+        <service name="FRRzebra"/>
+        <service name="FRROSPFv2"/>
+      </services>
+    </device>
+    <device id="14" name="R3" icon="" canvas="2" type="router" class="" image="" compose="" compose_name="">
+      <position x="570.8997192382812" y="390.7383728027344" lat="47.57561461306323" lon="-122.12463149959761" alt="2.0"/>
+      <services>
+        <service name="IPForward"/>
+        <service name="FRRzebra"/>
+        <service name="FRROSPFv2"/>
+      </services>
+    </device>
+    <device id="15" name="R7" icon="" canvas="2" type="router" class="" image="" compose="" compose_name="">
+      <position x="380.2243957519531" y="396.1892395019531" lat="47.57556506315559" lon="-122.12720079795848" alt="2.0"/>
+      <services>
+        <service name="IPForward"/>
+        <service name="FRRzebra"/>
+        <service name="FRROSPFv2"/>
+      </services>
+    </device>
+    <device id="16" name="R10" icon="" canvas="2" type="router" class="" image="" compose="" compose_name="">
+      <position x="153.4136505126953" y="401.3970947265625" lat="47.575517722246616" lon="-122.13025701134426" alt="2.0"/>
+      <services>
+        <service name="IPForward"/>
+        <service name="FRRzebra"/>
+        <service name="FRROSPFv2"/>
+      </services>
+    </device>
+    <device id="18" name="R6" icon="" canvas="2" type="router" class="" image="" compose="" compose_name="">
+      <position x="487.565673828125" y="277.1168518066406" lat="47.57664745389286" lon="-122.1257544032978" alt="2.0"/>
+      <services>
+        <service name="IPForward"/>
+        <service name="FRRzebra"/>
+        <service name="FRROSPFv2"/>
+      </services>
+    </device>
+    <device id="22" name="R2" icon="" canvas="2" type="router" class="" image="" compose="" compose_name="">
+      <position x="675.5211791992188" y="275.495361328125" lat="47.576662193396466" lon="-122.12322175374966" alt="2.0"/>
+      <services>
+        <service name="IPForward"/>
+        <service name="FRRzebra"/>
+        <service name="FRROSPFv2"/>
+      </services>
+    </device>
+    <device id="23" name="R1" icon="" canvas="2" type="router" class="" image="" compose="" compose_name="">
+      <position x="780.8179931640625" y="385.179931640625" lat="47.575665140804645" lon="-122.12180290768936" alt="2.0"/>
+      <services>
+        <service name="IPForward"/>
+        <service name="FRRzebra"/>
+        <service name="FRROSPFv2"/>
+      </services>
+    </device>
+    <device id="24" name="C1" icon="" canvas="2" type="PC" class="" image="" compose="" compose_name="">
+      <position x="856.03515625" y="586.8273315429688" lat="47.573832079915455" lon="-122.12078937678092" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+      </services>
+    </device>
+    <device id="25" name="C2" icon="" canvas="2" type="PC" class="" image="" compose="" compose_name="">
+      <position x="566.9627685546875" y="716.7383422851562" lat="47.57265109942032" lon="-122.1246845489422" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+      </services>
+    </device>
+    <device id="26" name="C3" icon="" canvas="2" type="PC" class="" image="" compose="" compose_name="">
+      <position x="318.144775390625" y="715.8014526367188" lat="47.57265961648736" lon="-122.12803730403554" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+      </services>
+    </device>
+    <device id="27" name="C6" icon="" canvas="2" type="PC" class="" image="" compose="" compose_name="">
+      <position x="35.26369857788086" y="639.3340454101562" lat="47.57335476095706" lon="-122.13184904995887" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+      </services>
+    </device>
+    <device id="28" name="C5" icon="" canvas="2" type="PC" class="" image="" compose="" compose_name="">
+      <position x="457.8459167480469" y="84.6845932006836" lat="47.57839665256472" lon="-122.12615486897819" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+      </services>
+    </device>
+    <device id="29" name="C8" icon="" canvas="2" type="PC" class="" image="" compose="" compose_name="">
+      <position x="162.46742248535156" y="107.19855499267578" lat="47.57819200490587" lon="-122.13013501421813" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+      </services>
+    </device>
+    <device id="31" name="C7" icon="" canvas="2" type="PC" class="" image="" compose="" compose_name="">
+      <position x="34.63081741333008" y="518.118896484375" lat="47.57445667610876" lon="-122.13185757786121" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+      </services>
+    </device>
+    <device id="32" name="C4" icon="" canvas="2" type="PC" class="" image="" compose="" compose_name="">
+      <position x="600.2244262695312" y="97.50465393066406" lat="47.57828012073299" lon="-122.1242363571097" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+      </services>
+    </device>
+    <device id="6" name="C9" icon="" canvas="2" type="PC" class="" image="" compose="" compose_name="">
+      <position x="61.29679489135742" y="173.144775390625" lat="47.577592561619554" lon="-122.13149826103421" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+      </services>
+    </device>
+    <device id="1" name="R9" icon="" canvas="2" type="router" class="" image="" compose="" compose_name="">
+      <position x="270.53961181640625" y="265.2337646484375" lat="47.57675547219596" lon="-122.12867877072615" alt="2.0"/>
+      <services>
+        <service name="IPForward"/>
+        <service name="FRRzebra"/>
+        <service name="FRROSPFv2"/>
+      </services>
+    </device>
+    <device id="2" name="R8" icon="" canvas="2" type="router" class="" image="" compose="" compose_name="">
+      <position x="283.0099792480469" y="543.7389526367188" lat="47.57422377705229" lon="-122.12851073590122" alt="2.0"/>
+      <services>
+        <service name="IPForward"/>
+        <service name="FRRzebra"/>
+        <service name="FRROSPFv2"/>
+      </services>
+    </device>
+  </devices>
+  <links>
+    <link node1="5" node2="8">
+      <iface1 id="0" name="eth0" mac="00:00:00:aa:00:06" ip4="10.0.3.20" ip4_mask="24" ip6="2001:0:0:3::14" ip6_mask="64"/>
+      <iface2 id="0" name="veth8.0.1"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="8" node2="23">
+      <iface1 id="1" name="veth8.1.1"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:07" ip4="10.0.3.1" ip4_mask="24" ip6="2001:0:0:3::1" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="23" node2="22">
+      <iface1 id="1" name="eth1" mac="00:00:00:aa:00:08" ip4="10.0.4.1" ip4_mask="24" ip6="2001:0:0:4::1" ip6_mask="64"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:09" ip4="10.0.4.2" ip4_mask="24" ip6="2001:0:0:4::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="22" node2="14">
+      <iface1 id="1" name="eth1" mac="00:00:00:aa:00:0a" ip4="10.0.5.1" ip4_mask="24" ip6="2001:0:0:5::1" ip6_mask="64"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:0b" ip4="10.0.5.2" ip4_mask="24" ip6="2001:0:0:5::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="14" node2="12">
+      <iface1 id="1" name="eth1" mac="00:00:00:aa:00:0c" ip4="10.0.6.1" ip4_mask="24" ip6="2001:0:0:6::1" ip6_mask="64"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:0d" ip4="10.0.6.2" ip4_mask="24" ip6="2001:0:0:6::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="12" node2="23">
+      <iface1 id="1" name="eth1" mac="00:00:00:aa:00:0e" ip4="10.0.7.1" ip4_mask="24" ip6="2001:0:0:7::1" ip6_mask="64"/>
+      <iface2 id="2" name="eth2" mac="00:00:00:aa:00:0f" ip4="10.0.7.2" ip4_mask="24" ip6="2001:0:0:7::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="8" node2="24">
+      <iface1 id="2" name="veth8.2.1"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:10" ip4="10.0.3.21" ip4_mask="24" ip6="2001:0:0:3::15" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="11" node2="32">
+      <iface1 id="0" name="veth11.0.1"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:11" ip4="10.0.8.20" ip4_mask="24" ip6="2001:0:0:8::14" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="11" node2="28">
+      <iface1 id="1" name="veth11.1.1"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:12" ip4="10.0.8.21" ip4_mask="24" ip6="2001:0:0:8::15" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="10" node2="29">
+      <iface1 id="0" name="veth10.0.1"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:13" ip4="10.0.9.20" ip4_mask="24" ip6="2001:0:0:9::14" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="10" node2="6">
+      <iface1 id="1" name="veth10.1.1"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:14" ip4="10.0.9.21" ip4_mask="24" ip6="2001:0:0:9::15" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="9" node2="31">
+      <iface1 id="0" name="veth9.0.1"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:15" ip4="10.0.10.20" ip4_mask="24" ip6="2001:0:0:a::14" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="9" node2="27">
+      <iface1 id="1" name="veth9.1.1"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:16" ip4="10.0.10.21" ip4_mask="24" ip6="2001:0:0:a::15" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="7" node2="26">
+      <iface1 id="0" name="veth7.0.1"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:17" ip4="10.0.11.20" ip4_mask="24" ip6="2001:0:0:b::14" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="7" node2="25">
+      <iface1 id="1" name="veth7.1.1"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:18" ip4="10.0.11.21" ip4_mask="24" ip6="2001:0:0:b::15" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="13" node2="7">
+      <iface1 id="0" name="eth0" mac="00:00:00:aa:00:19" ip4="10.0.11.1" ip4_mask="24" ip6="2001:0:0:b::1" ip6_mask="64"/>
+      <iface2 id="2" name="veth7.2.1"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="12" node2="13">
+      <iface1 id="2" name="eth2" mac="00:00:00:aa:00:1a" ip4="10.0.12.1" ip4_mask="24" ip6="2001:0:0:c::1" ip6_mask="64"/>
+      <iface2 id="1" name="eth1" mac="00:00:00:aa:00:1b" ip4="10.0.12.2" ip4_mask="24" ip6="2001:0:0:c::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="18" node2="14">
+      <iface1 id="0" name="eth0" mac="00:00:00:aa:00:1c" ip4="10.0.13.1" ip4_mask="24" ip6="2001:0:0:d::1" ip6_mask="64"/>
+      <iface2 id="2" name="eth2" mac="00:00:00:aa:00:1d" ip4="10.0.13.2" ip4_mask="24" ip6="2001:0:0:d::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="18" node2="22">
+      <iface1 id="1" name="eth1" mac="00:00:00:aa:00:1e" ip4="10.0.14.1" ip4_mask="24" ip6="2001:0:0:e::1" ip6_mask="64"/>
+      <iface2 id="2" name="eth2" mac="00:00:00:aa:00:1f" ip4="10.0.14.2" ip4_mask="24" ip6="2001:0:0:e::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="18" node2="11">
+      <iface1 id="2" name="eth2" mac="00:00:00:aa:00:20" ip4="10.0.8.1" ip4_mask="24" ip6="2001:0:0:8::1" ip6_mask="64"/>
+      <iface2 id="2" name="veth11.2.1"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="15" node2="13">
+      <iface1 id="2" name="eth2" mac="00:00:00:aa:00:2b" ip4="10.0.21.1" ip4_mask="24" ip6="2001:0:0:15::1" ip6_mask="64"/>
+      <iface2 id="3" name="eth3" mac="00:00:00:aa:00:2c" ip4="10.0.21.2" ip4_mask="24" ip6="2001:0:0:15::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="15" node2="18">
+      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:2d" ip4="10.0.22.1" ip4_mask="24" ip6="2001:0:0:16::1" ip6_mask="64"/>
+      <iface2 id="4" name="eth4" mac="00:00:00:aa:00:2e" ip4="10.0.22.2" ip4_mask="24" ip6="2001:0:0:16::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="14" node2="13">
+      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:2f" ip4="10.0.23.1" ip4_mask="24" ip6="2001:0:0:17::1" ip6_mask="64"/>
+      <iface2 id="4" name="eth4" mac="00:00:00:aa:00:30" ip4="10.0.23.2" ip4_mask="24" ip6="2001:0:0:17::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="16" node2="9">
+      <iface1 id="2" name="eth2" mac="00:00:00:aa:00:31" ip4="10.0.10.1" ip4_mask="24" ip6="2001:0:0:a::1" ip6_mask="64"/>
+      <iface2 id="2" name="veth9.2.1"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="15" node2="16">
+      <iface1 id="0" name="eth0" mac="00:00:00:aa:00:33" ip4="10.0.19.1" ip4_mask="24" ip6="2001:0:0:13::1" ip6_mask="64"/>
+      <iface2 id="3" name="eth3" mac="00:00:00:aa:00:34" ip4="10.0.19.2" ip4_mask="24" ip6="2001:0:0:13::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="16" node2="1">
+      <iface1 id="0" name="eth0" ip4="10.0.1.1" ip4_mask="24" ip6="2001:0:0:1::1" ip6_mask="64"/>
+      <iface2 id="0" name="eth0" ip4="10.0.1.2" ip4_mask="24" ip6="2001:0:0:1::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="1" node2="10">
+      <iface1 id="1" name="eth1" ip4="10.0.9.1" ip4_mask="24" ip6="2001:0:0:9::1" ip6_mask="64"/>
+      <iface2 id="2" name="veth10.2.1"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="1" node2="18">
+      <iface1 id="2" name="eth2" ip4="10.0.15.1" ip4_mask="24" ip6="2001:0:0:f::1" ip6_mask="64"/>
+      <iface2 id="3" name="eth3" ip4="10.0.15.2" ip4_mask="24" ip6="2001:0:0:f::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="16" node2="2">
+      <iface1 id="1" name="eth1" ip4="10.0.16.1" ip4_mask="24" ip6="2001:0:0:10::1" ip6_mask="64"/>
+      <iface2 id="0" name="eth0" ip4="10.0.16.2" ip4_mask="24" ip6="2001:0:0:10::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="2" node2="13">
+      <iface1 id="1" name="eth1" ip4="10.0.17.1" ip4_mask="24" ip6="2001:0:0:11::1" ip6_mask="64"/>
+      <iface2 id="2" name="eth2" ip4="10.0.17.2" ip4_mask="24" ip6="2001:0:0:11::2" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+  </links>
+  <session_origin lat="47.579166412353516" lon="-122.13232421875" alt="2.0" scale="150.0"/>
+  <session_options>
+    <configuration name="controlnet" value=""/>
+    <configuration name="controlnet0" value=""/>
+    <configuration name="controlnet1" value=""/>
+    <configuration name="controlnet2" value=""/>
+    <configuration name="controlnet3" value=""/>
+    <configuration name="controlnet_updown_script" value=""/>
+    <configuration name="enablerj45" value="1"/>
+    <configuration name="preservedir" value="0"/>
+    <configuration name="enablesdt" value="0"/>
+    <configuration name="sdturl" value="tcp://127.0.0.1:50000/"/>
+    <configuration name="ovs" value="0"/>
+    <configuration name="platform_id_start" value="1"/>
+    <configuration name="nem_id_start" value="1"/>
+    <configuration name="link_enabled" value="1"/>
+    <configuration name="loss_threshold" value="30"/>
+    <configuration name="link_interval" value="1"/>
+    <configuration name="link_timeout" value="4"/>
+    <configuration name="mtu" value="0"/>
+    <configuration name="checksums" value="0"/>
+  </session_options>
+  <session_metadata>
+    <configuration name="shapes" value="[]"/>
+    <configuration name="edges" value="[]"/>
+    <configuration name="hidden" value="[]"/>
+    <configuration name="canvas" value="{&quot;gridlines&quot;: true, &quot;canvases&quot;: [{&quot;id&quot;: 1, &quot;wallpaper&quot;: null, &quot;wallpaper_style&quot;: 1, &quot;fit_image&quot;: false, &quot;dimensions&quot;: [1000, 750]}, {&quot;id&quot;: 2, &quot;wallpaper&quot;: null, &quot;wallpaper_style&quot;: 1, &quot;fit_image&quot;: false, &quot;dimensions&quot;: [1000, 750]}]}"/>
+  </session_metadata>
+  <service_configurations>
+    <service name="FRRzebra" node="1">
+      <templates>
+        <template name="/usr/local/etc/frr/frr.conf"><![CDATA[interface eth0
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth1
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth2
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+router ospf
+  ospf router-id 10.0.1.2
+  network 10.0.1.0/24 area 0
+  network 10.0.9.0/24 area 0
+  network 10.0.15.0/24 area 0
+!
+]]></template>
+        <template name="frrboot.sh"><![CDATA[#!/bin/sh
+# auto-generated by zebra service (frr.py)
+FRR_CONF="${frr_conf}"
+FRR_SBIN_SEARCH="/usr/libexec/frr"
+FRR_BIN_SEARCH="${frr_bin_search}"
+FRR_STATE_DIR="${frr_state_dir}"
+
+searchforprog()
+{
+    prog=$1
+    searchpath=$@
+    ret=
+    for p in $searchpath; do
+        if [ -x $p/$prog ]; then
+            ret=$p
+            break
+        fi
+    done
+    echo $ret
+}
+
+confcheck()
+{
+    CONF_DIR=`dirname $FRR_CONF`
+    # if /etc/frr exists, point /etc/frr/frr.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/frr.conf ]; then
+        ln -s $CONF_DIR/frr.conf /etc/frr/frr.conf
+    fi
+    # if /etc/frr exists, point /etc/frr/vtysh.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/vtysh.conf ]; then
+        ln -s $CONF_DIR/vtysh.conf /etc/frr/vtysh.conf
+    fi
+}
+
+bootdaemon()
+{
+    FRR_SBIN_DIR=$(searchforprog $1 $FRR_SBIN_SEARCH)
+    if [ "z$FRR_SBIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's '$1' daemon not found in search path:"
+        echo "  $FRR_SBIN_SEARCH"
+        return 1
+    fi
+
+    flags=""
+
+    if [ "$1" = "pimd" ] && \\
+        grep -E -q '^[[:space:]]*router[[:space:]]+pim6[[:space:]]*$' $FRR_CONF; then
+        flags="$flags -6"
+    fi
+
+    if [ "$1" = "ospfd" ]; then
+        flags="$flags --apiserver"
+    fi
+
+    #force FRR to use CORE generated conf file
+    flags="$flags -d"
+    $FRR_SBIN_DIR/$1 $flags
+
+    if [ "$?" != "0" ]; then
+        echo "ERROR: FRR's '$1' daemon failed to start!:"
+        return 1
+    fi
+}
+
+bootfrr()
+{
+    FRR_BIN_DIR=$(searchforprog 'vtysh' $FRR_BIN_SEARCH)
+    if [ "z$FRR_BIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's 'vtysh' program not found in search path:"
+        echo "  $FRR_BIN_SEARCH"
+        return 1
+    fi
+
+    # fix /var/run/frr permissions
+    id -u frr 2>/dev/null >/dev/null
+    if [ "$?" = "0" ]; then
+        chown frr $FRR_STATE_DIR
+    fi
+
+    bootdaemon "zebra"
+    if grep -q "^ip route " $FRR_CONF; then
+        bootdaemon "staticd"
+    fi
+    for r in rip ripng ospf6 ospf bgp babel; do
+        if grep -q "^router \\<$${}{r}\\>" $FRR_CONF; then
+            bootdaemon "$${}{r}d"
+        fi
+    done
+
+    if grep -E -q '^[[:space:]]*router[[:space:]]+pim6?[[:space:]]*$' $FRR_CONF; then
+        bootdaemon "pimd"
+    fi
+
+    $FRR_BIN_DIR/vtysh -f $FRR_CONF
+}
+
+if [ "$1" != "zebra" ]; then
+    echo "WARNING: '$1': all FRR daemons are launched by the 'zebra' service!"
+    exit 1
+fi
+confcheck
+bootfrr
+
+# reset interfaces
+% for iface, _, _ , _ in ifaces:
+ip link set dev ${iface.name} down
+sleep 1
+ip link set dev ${iface.name} up
+% endfor
+]]></template>
+      </templates>
+    </service>
+    <service name="FRRzebra" node="2">
+      <templates>
+        <template name="/usr/local/etc/frr/frr.conf"><![CDATA[interface eth0
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth1
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+router ospf
+  ospf router-id 10.0.16.2
+  network 10.0.16.0/24 area 0
+  network 10.0.17.0/24 area 0
+!
+]]></template>
+        <template name="frrboot.sh"><![CDATA[#!/bin/sh
+# auto-generated by zebra service (frr.py)
+FRR_CONF="${frr_conf}"
+FRR_SBIN_SEARCH="/usr/libexec/frr"
+FRR_BIN_SEARCH="${frr_bin_search}"
+FRR_STATE_DIR="${frr_state_dir}"
+
+searchforprog()
+{
+    prog=$1
+    searchpath=$@
+    ret=
+    for p in $searchpath; do
+        if [ -x $p/$prog ]; then
+            ret=$p
+            break
+        fi
+    done
+    echo $ret
+}
+
+confcheck()
+{
+    CONF_DIR=`dirname $FRR_CONF`
+    # if /etc/frr exists, point /etc/frr/frr.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/frr.conf ]; then
+        ln -s $CONF_DIR/frr.conf /etc/frr/frr.conf
+    fi
+    # if /etc/frr exists, point /etc/frr/vtysh.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/vtysh.conf ]; then
+        ln -s $CONF_DIR/vtysh.conf /etc/frr/vtysh.conf
+    fi
+}
+
+bootdaemon()
+{
+    FRR_SBIN_DIR=$(searchforprog $1 $FRR_SBIN_SEARCH)
+    if [ "z$FRR_SBIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's '$1' daemon not found in search path:"
+        echo "  $FRR_SBIN_SEARCH"
+        return 1
+    fi
+
+    flags=""
+
+    if [ "$1" = "pimd" ] && \\
+        grep -E -q '^[[:space:]]*router[[:space:]]+pim6[[:space:]]*$' $FRR_CONF; then
+        flags="$flags -6"
+    fi
+
+    if [ "$1" = "ospfd" ]; then
+        flags="$flags --apiserver"
+    fi
+
+    #force FRR to use CORE generated conf file
+    flags="$flags -d"
+    $FRR_SBIN_DIR/$1 $flags
+
+    if [ "$?" != "0" ]; then
+        echo "ERROR: FRR's '$1' daemon failed to start!:"
+        return 1
+    fi
+}
+
+bootfrr()
+{
+    FRR_BIN_DIR=$(searchforprog 'vtysh' $FRR_BIN_SEARCH)
+    if [ "z$FRR_BIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's 'vtysh' program not found in search path:"
+        echo "  $FRR_BIN_SEARCH"
+        return 1
+    fi
+
+    # fix /var/run/frr permissions
+    id -u frr 2>/dev/null >/dev/null
+    if [ "$?" = "0" ]; then
+        chown frr $FRR_STATE_DIR
+    fi
+
+    bootdaemon "zebra"
+    if grep -q "^ip route " $FRR_CONF; then
+        bootdaemon "staticd"
+    fi
+    for r in rip ripng ospf6 ospf bgp babel; do
+        if grep -q "^router \\<$${}{r}\\>" $FRR_CONF; then
+            bootdaemon "$${}{r}d"
+        fi
+    done
+
+    if grep -E -q '^[[:space:]]*router[[:space:]]+pim6?[[:space:]]*$' $FRR_CONF; then
+        bootdaemon "pimd"
+    fi
+
+    $FRR_BIN_DIR/vtysh -f $FRR_CONF
+}
+
+if [ "$1" != "zebra" ]; then
+    echo "WARNING: '$1': all FRR daemons are launched by the 'zebra' service!"
+    exit 1
+fi
+confcheck
+bootfrr
+
+# reset interfaces
+% for iface, _, _ , _ in ifaces:
+ip link set dev ${iface.name} down
+sleep 1
+ip link set dev ${iface.name} up
+% endfor
+]]></template>
+      </templates>
+    </service>
+    <service name="FRRzebra" node="12">
+      <templates>
+        <template name="/usr/local/etc/frr/frr.conf"><![CDATA[interface eth0
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth1
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth2
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+router ospf
+  ospf router-id 10.0.6.2
+  network 10.0.6.0/24 area 0
+  network 10.0.7.0/24 area 0
+  network 10.0.12.0/24 area 0
+!
+]]></template>
+        <template name="frrboot.sh"><![CDATA[#!/bin/sh
+# auto-generated by zebra service (frr.py)
+FRR_CONF="${frr_conf}"
+FRR_SBIN_SEARCH="/usr/libexec/frr"
+FRR_BIN_SEARCH="${frr_bin_search}"
+FRR_STATE_DIR="${frr_state_dir}"
+
+searchforprog()
+{
+    prog=$1
+    searchpath=$@
+    ret=
+    for p in $searchpath; do
+        if [ -x $p/$prog ]; then
+            ret=$p
+            break
+        fi
+    done
+    echo $ret
+}
+
+confcheck()
+{
+    CONF_DIR=`dirname $FRR_CONF`
+    # if /etc/frr exists, point /etc/frr/frr.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/frr.conf ]; then
+        ln -s $CONF_DIR/frr.conf /etc/frr/frr.conf
+    fi
+    # if /etc/frr exists, point /etc/frr/vtysh.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/vtysh.conf ]; then
+        ln -s $CONF_DIR/vtysh.conf /etc/frr/vtysh.conf
+    fi
+}
+
+bootdaemon()
+{
+    FRR_SBIN_DIR=$(searchforprog $1 $FRR_SBIN_SEARCH)
+    if [ "z$FRR_SBIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's '$1' daemon not found in search path:"
+        echo "  $FRR_SBIN_SEARCH"
+        return 1
+    fi
+
+    flags=""
+
+    if [ "$1" = "pimd" ] && \\
+        grep -E -q '^[[:space:]]*router[[:space:]]+pim6[[:space:]]*$' $FRR_CONF; then
+        flags="$flags -6"
+    fi
+
+    if [ "$1" = "ospfd" ]; then
+        flags="$flags --apiserver"
+    fi
+
+    #force FRR to use CORE generated conf file
+    flags="$flags -d"
+    $FRR_SBIN_DIR/$1 $flags
+
+    if [ "$?" != "0" ]; then
+        echo "ERROR: FRR's '$1' daemon failed to start!:"
+        return 1
+    fi
+}
+
+bootfrr()
+{
+    FRR_BIN_DIR=$(searchforprog 'vtysh' $FRR_BIN_SEARCH)
+    if [ "z$FRR_BIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's 'vtysh' program not found in search path:"
+        echo "  $FRR_BIN_SEARCH"
+        return 1
+    fi
+
+    # fix /var/run/frr permissions
+    id -u frr 2>/dev/null >/dev/null
+    if [ "$?" = "0" ]; then
+        chown frr $FRR_STATE_DIR
+    fi
+
+    bootdaemon "zebra"
+    if grep -q "^ip route " $FRR_CONF; then
+        bootdaemon "staticd"
+    fi
+    for r in rip ripng ospf6 ospf bgp babel; do
+        if grep -q "^router \\<$${}{r}\\>" $FRR_CONF; then
+            bootdaemon "$${}{r}d"
+        fi
+    done
+
+    if grep -E -q '^[[:space:]]*router[[:space:]]+pim6?[[:space:]]*$' $FRR_CONF; then
+        bootdaemon "pimd"
+    fi
+
+    $FRR_BIN_DIR/vtysh -f $FRR_CONF
+}
+
+if [ "$1" != "zebra" ]; then
+    echo "WARNING: '$1': all FRR daemons are launched by the 'zebra' service!"
+    exit 1
+fi
+confcheck
+bootfrr
+
+# reset interfaces
+% for iface, _, _ , _ in ifaces:
+ip link set dev ${iface.name} down
+sleep 1
+ip link set dev ${iface.name} up
+% endfor
+]]></template>
+      </templates>
+    </service>
+    <service name="FRRzebra" node="13">
+      <templates>
+        <template name="/usr/local/etc/frr/frr.conf"><![CDATA[interface eth0
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth1
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth2
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth3
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth4
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+router ospf
+  ospf router-id 10.0.11.1
+  network 10.0.11.0/24 area 0
+  network 10.0.12.0/24 area 0
+  network 10.0.17.0/24 area 0
+  network 10.0.21.0/24 area 0
+  network 10.0.23.0/24 area 0
+!
+]]></template>
+        <template name="frrboot.sh"><![CDATA[#!/bin/sh
+# auto-generated by zebra service (frr.py)
+FRR_CONF="${frr_conf}"
+FRR_SBIN_SEARCH="/usr/libexec/frr"
+FRR_BIN_SEARCH="${frr_bin_search}"
+FRR_STATE_DIR="${frr_state_dir}"
+
+searchforprog()
+{
+    prog=$1
+    searchpath=$@
+    ret=
+    for p in $searchpath; do
+        if [ -x $p/$prog ]; then
+            ret=$p
+            break
+        fi
+    done
+    echo $ret
+}
+
+confcheck()
+{
+    CONF_DIR=`dirname $FRR_CONF`
+    # if /etc/frr exists, point /etc/frr/frr.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/frr.conf ]; then
+        ln -s $CONF_DIR/frr.conf /etc/frr/frr.conf
+    fi
+    # if /etc/frr exists, point /etc/frr/vtysh.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/vtysh.conf ]; then
+        ln -s $CONF_DIR/vtysh.conf /etc/frr/vtysh.conf
+    fi
+}
+
+bootdaemon()
+{
+    FRR_SBIN_DIR=$(searchforprog $1 $FRR_SBIN_SEARCH)
+    if [ "z$FRR_SBIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's '$1' daemon not found in search path:"
+        echo "  $FRR_SBIN_SEARCH"
+        return 1
+    fi
+
+    flags=""
+
+    if [ "$1" = "pimd" ] && \\
+        grep -E -q '^[[:space:]]*router[[:space:]]+pim6[[:space:]]*$' $FRR_CONF; then
+        flags="$flags -6"
+    fi
+
+    if [ "$1" = "ospfd" ]; then
+        flags="$flags --apiserver"
+    fi
+
+    #force FRR to use CORE generated conf file
+    flags="$flags -d"
+    $FRR_SBIN_DIR/$1 $flags
+
+    if [ "$?" != "0" ]; then
+        echo "ERROR: FRR's '$1' daemon failed to start!:"
+        return 1
+    fi
+}
+
+bootfrr()
+{
+    FRR_BIN_DIR=$(searchforprog 'vtysh' $FRR_BIN_SEARCH)
+    if [ "z$FRR_BIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's 'vtysh' program not found in search path:"
+        echo "  $FRR_BIN_SEARCH"
+        return 1
+    fi
+
+    # fix /var/run/frr permissions
+    id -u frr 2>/dev/null >/dev/null
+    if [ "$?" = "0" ]; then
+        chown frr $FRR_STATE_DIR
+    fi
+
+    bootdaemon "zebra"
+    if grep -q "^ip route " $FRR_CONF; then
+        bootdaemon "staticd"
+    fi
+    for r in rip ripng ospf6 ospf bgp babel; do
+        if grep -q "^router \\<$${}{r}\\>" $FRR_CONF; then
+            bootdaemon "$${}{r}d"
+        fi
+    done
+
+    if grep -E -q '^[[:space:]]*router[[:space:]]+pim6?[[:space:]]*$' $FRR_CONF; then
+        bootdaemon "pimd"
+    fi
+
+    $FRR_BIN_DIR/vtysh -f $FRR_CONF
+}
+
+if [ "$1" != "zebra" ]; then
+    echo "WARNING: '$1': all FRR daemons are launched by the 'zebra' service!"
+    exit 1
+fi
+confcheck
+bootfrr
+
+# reset interfaces
+% for iface, _, _ , _ in ifaces:
+ip link set dev ${iface.name} down
+sleep 1
+ip link set dev ${iface.name} up
+% endfor
+]]></template>
+      </templates>
+    </service>
+    <service name="FRRzebra" node="14">
+      <templates>
+        <template name="/usr/local/etc/frr/frr.conf"><![CDATA[interface eth0
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth1
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth2
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth3
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+router ospf
+  ospf router-id 10.0.5.2
+  network 10.0.5.0/24 area 0
+  network 10.0.6.0/24 area 0
+  network 10.0.13.0/24 area 0
+  network 10.0.23.0/24 area 0
+!
+]]></template>
+        <template name="frrboot.sh"><![CDATA[#!/bin/sh
+# auto-generated by zebra service (frr.py)
+FRR_CONF="${frr_conf}"
+FRR_SBIN_SEARCH="/usr/libexec/frr"
+FRR_BIN_SEARCH="${frr_bin_search}"
+FRR_STATE_DIR="${frr_state_dir}"
+
+searchforprog()
+{
+    prog=$1
+    searchpath=$@
+    ret=
+    for p in $searchpath; do
+        if [ -x $p/$prog ]; then
+            ret=$p
+            break
+        fi
+    done
+    echo $ret
+}
+
+confcheck()
+{
+    CONF_DIR=`dirname $FRR_CONF`
+    # if /etc/frr exists, point /etc/frr/frr.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/frr.conf ]; then
+        ln -s $CONF_DIR/frr.conf /etc/frr/frr.conf
+    fi
+    # if /etc/frr exists, point /etc/frr/vtysh.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/vtysh.conf ]; then
+        ln -s $CONF_DIR/vtysh.conf /etc/frr/vtysh.conf
+    fi
+}
+
+bootdaemon()
+{
+    FRR_SBIN_DIR=$(searchforprog $1 $FRR_SBIN_SEARCH)
+    if [ "z$FRR_SBIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's '$1' daemon not found in search path:"
+        echo "  $FRR_SBIN_SEARCH"
+        return 1
+    fi
+
+    flags=""
+
+    if [ "$1" = "pimd" ] && \\
+        grep -E -q '^[[:space:]]*router[[:space:]]+pim6[[:space:]]*$' $FRR_CONF; then
+        flags="$flags -6"
+    fi
+
+    if [ "$1" = "ospfd" ]; then
+        flags="$flags --apiserver"
+    fi
+
+    #force FRR to use CORE generated conf file
+    flags="$flags -d"
+    $FRR_SBIN_DIR/$1 $flags
+
+    if [ "$?" != "0" ]; then
+        echo "ERROR: FRR's '$1' daemon failed to start!:"
+        return 1
+    fi
+}
+
+bootfrr()
+{
+    FRR_BIN_DIR=$(searchforprog 'vtysh' $FRR_BIN_SEARCH)
+    if [ "z$FRR_BIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's 'vtysh' program not found in search path:"
+        echo "  $FRR_BIN_SEARCH"
+        return 1
+    fi
+
+    # fix /var/run/frr permissions
+    id -u frr 2>/dev/null >/dev/null
+    if [ "$?" = "0" ]; then
+        chown frr $FRR_STATE_DIR
+    fi
+
+    bootdaemon "zebra"
+    if grep -q "^ip route " $FRR_CONF; then
+        bootdaemon "staticd"
+    fi
+    for r in rip ripng ospf6 ospf bgp babel; do
+        if grep -q "^router \\<$${}{r}\\>" $FRR_CONF; then
+            bootdaemon "$${}{r}d"
+        fi
+    done
+
+    if grep -E -q '^[[:space:]]*router[[:space:]]+pim6?[[:space:]]*$' $FRR_CONF; then
+        bootdaemon "pimd"
+    fi
+
+    $FRR_BIN_DIR/vtysh -f $FRR_CONF
+}
+
+if [ "$1" != "zebra" ]; then
+    echo "WARNING: '$1': all FRR daemons are launched by the 'zebra' service!"
+    exit 1
+fi
+confcheck
+bootfrr
+
+# reset interfaces
+% for iface, _, _ , _ in ifaces:
+ip link set dev ${iface.name} down
+sleep 1
+ip link set dev ${iface.name} up
+% endfor
+]]></template>
+      </templates>
+    </service>
+    <service name="FRRzebra" node="15">
+      <templates>
+        <template name="/usr/local/etc/frr/frr.conf"><![CDATA[interface eth0
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth2
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth3
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+router ospf
+  ospf router-id 10.0.19.1
+  network 10.0.19.0/24 area 0
+  network 10.0.21.0/24 area 0
+  network 10.0.22.0/24 area 0
+!
+]]></template>
+        <template name="frrboot.sh"><![CDATA[#!/bin/sh
+# auto-generated by zebra service (frr.py)
+FRR_CONF="${frr_conf}"
+FRR_SBIN_SEARCH="/usr/libexec/frr"
+FRR_BIN_SEARCH="${frr_bin_search}"
+FRR_STATE_DIR="${frr_state_dir}"
+
+searchforprog()
+{
+    prog=$1
+    searchpath=$@
+    ret=
+    for p in $searchpath; do
+        if [ -x $p/$prog ]; then
+            ret=$p
+            break
+        fi
+    done
+    echo $ret
+}
+
+confcheck()
+{
+    CONF_DIR=`dirname $FRR_CONF`
+    # if /etc/frr exists, point /etc/frr/frr.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/frr.conf ]; then
+        ln -s $CONF_DIR/frr.conf /etc/frr/frr.conf
+    fi
+    # if /etc/frr exists, point /etc/frr/vtysh.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/vtysh.conf ]; then
+        ln -s $CONF_DIR/vtysh.conf /etc/frr/vtysh.conf
+    fi
+}
+
+bootdaemon()
+{
+    FRR_SBIN_DIR=$(searchforprog $1 $FRR_SBIN_SEARCH)
+    if [ "z$FRR_SBIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's '$1' daemon not found in search path:"
+        echo "  $FRR_SBIN_SEARCH"
+        return 1
+    fi
+
+    flags=""
+
+    if [ "$1" = "pimd" ] && \\
+        grep -E -q '^[[:space:]]*router[[:space:]]+pim6[[:space:]]*$' $FRR_CONF; then
+        flags="$flags -6"
+    fi
+
+    if [ "$1" = "ospfd" ]; then
+        flags="$flags --apiserver"
+    fi
+
+    #force FRR to use CORE generated conf file
+    flags="$flags -d"
+    $FRR_SBIN_DIR/$1 $flags
+
+    if [ "$?" != "0" ]; then
+        echo "ERROR: FRR's '$1' daemon failed to start!:"
+        return 1
+    fi
+}
+
+bootfrr()
+{
+    FRR_BIN_DIR=$(searchforprog 'vtysh' $FRR_BIN_SEARCH)
+    if [ "z$FRR_BIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's 'vtysh' program not found in search path:"
+        echo "  $FRR_BIN_SEARCH"
+        return 1
+    fi
+
+    # fix /var/run/frr permissions
+    id -u frr 2>/dev/null >/dev/null
+    if [ "$?" = "0" ]; then
+        chown frr $FRR_STATE_DIR
+    fi
+
+    bootdaemon "zebra"
+    if grep -q "^ip route " $FRR_CONF; then
+        bootdaemon "staticd"
+    fi
+    for r in rip ripng ospf6 ospf bgp babel; do
+        if grep -q "^router \\<$${}{r}\\>" $FRR_CONF; then
+            bootdaemon "$${}{r}d"
+        fi
+    done
+
+    if grep -E -q '^[[:space:]]*router[[:space:]]+pim6?[[:space:]]*$' $FRR_CONF; then
+        bootdaemon "pimd"
+    fi
+
+    $FRR_BIN_DIR/vtysh -f $FRR_CONF
+}
+
+if [ "$1" != "zebra" ]; then
+    echo "WARNING: '$1': all FRR daemons are launched by the 'zebra' service!"
+    exit 1
+fi
+confcheck
+bootfrr
+
+# reset interfaces
+% for iface, _, _ , _ in ifaces:
+ip link set dev ${iface.name} down
+sleep 1
+ip link set dev ${iface.name} up
+% endfor
+]]></template>
+      </templates>
+    </service>
+    <service name="FRRzebra" node="16">
+      <templates>
+        <template name="/usr/local/etc/frr/frr.conf"><![CDATA[interface eth0
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth1
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth2
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth3
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+router ospf
+  ospf router-id 10.0.1.1
+  network 10.0.1.0/24 area 0
+  network 10.0.16.0/24 area 0
+  network 10.0.10.0/24 area 0
+  network 10.0.19.0/24 area 0
+!
+]]></template>
+        <template name="frrboot.sh"><![CDATA[#!/bin/sh
+# auto-generated by zebra service (frr.py)
+FRR_CONF="${frr_conf}"
+FRR_SBIN_SEARCH="/usr/libexec/frr"
+FRR_BIN_SEARCH="${frr_bin_search}"
+FRR_STATE_DIR="${frr_state_dir}"
+
+searchforprog()
+{
+    prog=$1
+    searchpath=$@
+    ret=
+    for p in $searchpath; do
+        if [ -x $p/$prog ]; then
+            ret=$p
+            break
+        fi
+    done
+    echo $ret
+}
+
+confcheck()
+{
+    CONF_DIR=`dirname $FRR_CONF`
+    # if /etc/frr exists, point /etc/frr/frr.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/frr.conf ]; then
+        ln -s $CONF_DIR/frr.conf /etc/frr/frr.conf
+    fi
+    # if /etc/frr exists, point /etc/frr/vtysh.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/vtysh.conf ]; then
+        ln -s $CONF_DIR/vtysh.conf /etc/frr/vtysh.conf
+    fi
+}
+
+bootdaemon()
+{
+    FRR_SBIN_DIR=$(searchforprog $1 $FRR_SBIN_SEARCH)
+    if [ "z$FRR_SBIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's '$1' daemon not found in search path:"
+        echo "  $FRR_SBIN_SEARCH"
+        return 1
+    fi
+
+    flags=""
+
+    if [ "$1" = "pimd" ] && \\
+        grep -E -q '^[[:space:]]*router[[:space:]]+pim6[[:space:]]*$' $FRR_CONF; then
+        flags="$flags -6"
+    fi
+
+    if [ "$1" = "ospfd" ]; then
+        flags="$flags --apiserver"
+    fi
+
+    #force FRR to use CORE generated conf file
+    flags="$flags -d"
+    $FRR_SBIN_DIR/$1 $flags
+
+    if [ "$?" != "0" ]; then
+        echo "ERROR: FRR's '$1' daemon failed to start!:"
+        return 1
+    fi
+}
+
+bootfrr()
+{
+    FRR_BIN_DIR=$(searchforprog 'vtysh' $FRR_BIN_SEARCH)
+    if [ "z$FRR_BIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's 'vtysh' program not found in search path:"
+        echo "  $FRR_BIN_SEARCH"
+        return 1
+    fi
+
+    # fix /var/run/frr permissions
+    id -u frr 2>/dev/null >/dev/null
+    if [ "$?" = "0" ]; then
+        chown frr $FRR_STATE_DIR
+    fi
+
+    bootdaemon "zebra"
+    if grep -q "^ip route " $FRR_CONF; then
+        bootdaemon "staticd"
+    fi
+    for r in rip ripng ospf6 ospf bgp babel; do
+        if grep -q "^router \\<$${}{r}\\>" $FRR_CONF; then
+            bootdaemon "$${}{r}d"
+        fi
+    done
+
+    if grep -E -q '^[[:space:]]*router[[:space:]]+pim6?[[:space:]]*$' $FRR_CONF; then
+        bootdaemon "pimd"
+    fi
+
+    $FRR_BIN_DIR/vtysh -f $FRR_CONF
+}
+
+if [ "$1" != "zebra" ]; then
+    echo "WARNING: '$1': all FRR daemons are launched by the 'zebra' service!"
+    exit 1
+fi
+confcheck
+bootfrr
+
+# reset interfaces
+% for iface, _, _ , _ in ifaces:
+ip link set dev ${iface.name} down
+sleep 1
+ip link set dev ${iface.name} up
+% endfor
+]]></template>
+      </templates>
+    </service>
+    <service name="FRRzebra" node="18">
+      <templates>
+        <template name="/usr/local/etc/frr/frr.conf"><![CDATA[interface eth0
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth1
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth2
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth3
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth4
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+router ospf
+  ospf router-id 10.0.13.1
+  network 10.0.13.0/24 area 0
+  network 10.0.14.0/24 area 0
+  network 10.0.8.0/24 area 0
+  network 10.0.15.0/24 area 0
+  network 10.0.22.0/24 area 0
+!
+]]></template>
+        <template name="frrboot.sh"><![CDATA[#!/bin/sh
+# auto-generated by zebra service (frr.py)
+FRR_CONF="${frr_conf}"
+FRR_SBIN_SEARCH="/usr/libexec/frr"
+FRR_BIN_SEARCH="${frr_bin_search}"
+FRR_STATE_DIR="${frr_state_dir}"
+
+searchforprog()
+{
+    prog=$1
+    searchpath=$@
+    ret=
+    for p in $searchpath; do
+        if [ -x $p/$prog ]; then
+            ret=$p
+            break
+        fi
+    done
+    echo $ret
+}
+
+confcheck()
+{
+    CONF_DIR=`dirname $FRR_CONF`
+    # if /etc/frr exists, point /etc/frr/frr.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/frr.conf ]; then
+        ln -s $CONF_DIR/frr.conf /etc/frr/frr.conf
+    fi
+    # if /etc/frr exists, point /etc/frr/vtysh.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/vtysh.conf ]; then
+        ln -s $CONF_DIR/vtysh.conf /etc/frr/vtysh.conf
+    fi
+}
+
+bootdaemon()
+{
+    FRR_SBIN_DIR=$(searchforprog $1 $FRR_SBIN_SEARCH)
+    if [ "z$FRR_SBIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's '$1' daemon not found in search path:"
+        echo "  $FRR_SBIN_SEARCH"
+        return 1
+    fi
+
+    flags=""
+
+    if [ "$1" = "pimd" ] && \\
+        grep -E -q '^[[:space:]]*router[[:space:]]+pim6[[:space:]]*$' $FRR_CONF; then
+        flags="$flags -6"
+    fi
+
+    if [ "$1" = "ospfd" ]; then
+        flags="$flags --apiserver"
+    fi
+
+    #force FRR to use CORE generated conf file
+    flags="$flags -d"
+    $FRR_SBIN_DIR/$1 $flags
+
+    if [ "$?" != "0" ]; then
+        echo "ERROR: FRR's '$1' daemon failed to start!:"
+        return 1
+    fi
+}
+
+bootfrr()
+{
+    FRR_BIN_DIR=$(searchforprog 'vtysh' $FRR_BIN_SEARCH)
+    if [ "z$FRR_BIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's 'vtysh' program not found in search path:"
+        echo "  $FRR_BIN_SEARCH"
+        return 1
+    fi
+
+    # fix /var/run/frr permissions
+    id -u frr 2>/dev/null >/dev/null
+    if [ "$?" = "0" ]; then
+        chown frr $FRR_STATE_DIR
+    fi
+
+    bootdaemon "zebra"
+    if grep -q "^ip route " $FRR_CONF; then
+        bootdaemon "staticd"
+    fi
+    for r in rip ripng ospf6 ospf bgp babel; do
+        if grep -q "^router \\<$${}{r}\\>" $FRR_CONF; then
+            bootdaemon "$${}{r}d"
+        fi
+    done
+
+    if grep -E -q '^[[:space:]]*router[[:space:]]+pim6?[[:space:]]*$' $FRR_CONF; then
+        bootdaemon "pimd"
+    fi
+
+    $FRR_BIN_DIR/vtysh -f $FRR_CONF
+}
+
+if [ "$1" != "zebra" ]; then
+    echo "WARNING: '$1': all FRR daemons are launched by the 'zebra' service!"
+    exit 1
+fi
+confcheck
+bootfrr
+
+# reset interfaces
+% for iface, _, _ , _ in ifaces:
+ip link set dev ${iface.name} down
+sleep 1
+ip link set dev ${iface.name} up
+% endfor
+]]></template>
+      </templates>
+    </service>
+    <service name="FRRzebra" node="22">
+      <templates>
+        <template name="/usr/local/etc/frr/frr.conf"><![CDATA[interface eth0
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth1
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth2
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+router ospf
+  ospf router-id 10.0.4.2
+  network 10.0.4.0/24 area 0
+  network 10.0.5.0/24 area 0
+  network 10.0.14.0/24 area 0
+!
+]]></template>
+        <template name="frrboot.sh"><![CDATA[#!/bin/sh
+# auto-generated by zebra service (frr.py)
+FRR_CONF="${frr_conf}"
+FRR_SBIN_SEARCH="/usr/libexec/frr"
+FRR_BIN_SEARCH="${frr_bin_search}"
+FRR_STATE_DIR="${frr_state_dir}"
+
+searchforprog()
+{
+    prog=$1
+    searchpath=$@
+    ret=
+    for p in $searchpath; do
+        if [ -x $p/$prog ]; then
+            ret=$p
+            break
+        fi
+    done
+    echo $ret
+}
+
+confcheck()
+{
+    CONF_DIR=`dirname $FRR_CONF`
+    # if /etc/frr exists, point /etc/frr/frr.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/frr.conf ]; then
+        ln -s $CONF_DIR/frr.conf /etc/frr/frr.conf
+    fi
+    # if /etc/frr exists, point /etc/frr/vtysh.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/vtysh.conf ]; then
+        ln -s $CONF_DIR/vtysh.conf /etc/frr/vtysh.conf
+    fi
+}
+
+bootdaemon()
+{
+    FRR_SBIN_DIR=$(searchforprog $1 $FRR_SBIN_SEARCH)
+    if [ "z$FRR_SBIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's '$1' daemon not found in search path:"
+        echo "  $FRR_SBIN_SEARCH"
+        return 1
+    fi
+
+    flags=""
+
+    if [ "$1" = "pimd" ] && \\
+        grep -E -q '^[[:space:]]*router[[:space:]]+pim6[[:space:]]*$' $FRR_CONF; then
+        flags="$flags -6"
+    fi
+
+    if [ "$1" = "ospfd" ]; then
+        flags="$flags --apiserver"
+    fi
+
+    #force FRR to use CORE generated conf file
+    flags="$flags -d"
+    $FRR_SBIN_DIR/$1 $flags
+
+    if [ "$?" != "0" ]; then
+        echo "ERROR: FRR's '$1' daemon failed to start!:"
+        return 1
+    fi
+}
+
+bootfrr()
+{
+    FRR_BIN_DIR=$(searchforprog 'vtysh' $FRR_BIN_SEARCH)
+    if [ "z$FRR_BIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's 'vtysh' program not found in search path:"
+        echo "  $FRR_BIN_SEARCH"
+        return 1
+    fi
+
+    # fix /var/run/frr permissions
+    id -u frr 2>/dev/null >/dev/null
+    if [ "$?" = "0" ]; then
+        chown frr $FRR_STATE_DIR
+    fi
+
+    bootdaemon "zebra"
+    if grep -q "^ip route " $FRR_CONF; then
+        bootdaemon "staticd"
+    fi
+    for r in rip ripng ospf6 ospf bgp babel; do
+        if grep -q "^router \\<$${}{r}\\>" $FRR_CONF; then
+            bootdaemon "$${}{r}d"
+        fi
+    done
+
+    if grep -E -q '^[[:space:]]*router[[:space:]]+pim6?[[:space:]]*$' $FRR_CONF; then
+        bootdaemon "pimd"
+    fi
+
+    $FRR_BIN_DIR/vtysh -f $FRR_CONF
+}
+
+if [ "$1" != "zebra" ]; then
+    echo "WARNING: '$1': all FRR daemons are launched by the 'zebra' service!"
+    exit 1
+fi
+confcheck
+bootfrr
+
+# reset interfaces
+% for iface, _, _ , _ in ifaces:
+ip link set dev ${iface.name} down
+sleep 1
+ip link set dev ${iface.name} up
+% endfor
+]]></template>
+      </templates>
+    </service>
+    <service name="FRRzebra" node="23">
+      <templates>
+        <template name="/usr/local/etc/frr/frr.conf"><![CDATA[interface eth0
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth1
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+interface eth2
+    ip ospf network point-to-point
+    ip ospf hello-interval 2
+    ip ospf dead-interval 6
+    ip ospf retransmit-interval 5
+!
+router ospf
+  ospf router-id 10.0.3.1
+  network 10.0.3.0/24 area 0
+  network 10.0.4.0/24 area 0
+  network 10.0.7.0/24 area 0
+!
+]]></template>
+        <template name="frrboot.sh"><![CDATA[#!/bin/sh
+# auto-generated by zebra service (frr.py)
+FRR_CONF="${frr_conf}"
+FRR_SBIN_SEARCH="/usr/libexec/frr"
+FRR_BIN_SEARCH="${frr_bin_search}"
+FRR_STATE_DIR="${frr_state_dir}"
+
+searchforprog()
+{
+    prog=$1
+    searchpath=$@
+    ret=
+    for p in $searchpath; do
+        if [ -x $p/$prog ]; then
+            ret=$p
+            break
+        fi
+    done
+    echo $ret
+}
+
+confcheck()
+{
+    CONF_DIR=`dirname $FRR_CONF`
+    # if /etc/frr exists, point /etc/frr/frr.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/frr.conf ]; then
+        ln -s $CONF_DIR/frr.conf /etc/frr/frr.conf
+    fi
+    # if /etc/frr exists, point /etc/frr/vtysh.conf -> CONF_DIR
+    if [ "$CONF_DIR" != "/etc/frr" ] && [ -d /etc/frr ] && [ ! -e /etc/frr/vtysh.conf ]; then
+        ln -s $CONF_DIR/vtysh.conf /etc/frr/vtysh.conf
+    fi
+}
+
+bootdaemon()
+{
+    FRR_SBIN_DIR=$(searchforprog $1 $FRR_SBIN_SEARCH)
+    if [ "z$FRR_SBIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's '$1' daemon not found in search path:"
+        echo "  $FRR_SBIN_SEARCH"
+        return 1
+    fi
+
+    flags=""
+
+    if [ "$1" = "pimd" ] && \\
+        grep -E -q '^[[:space:]]*router[[:space:]]+pim6[[:space:]]*$' $FRR_CONF; then
+        flags="$flags -6"
+    fi
+
+    if [ "$1" = "ospfd" ]; then
+        flags="$flags --apiserver"
+    fi
+
+    #force FRR to use CORE generated conf file
+    flags="$flags -d"
+    $FRR_SBIN_DIR/$1 $flags
+
+    if [ "$?" != "0" ]; then
+        echo "ERROR: FRR's '$1' daemon failed to start!:"
+        return 1
+    fi
+}
+
+bootfrr()
+{
+    FRR_BIN_DIR=$(searchforprog 'vtysh' $FRR_BIN_SEARCH)
+    if [ "z$FRR_BIN_DIR" = "z" ]; then
+        echo "ERROR: FRR's 'vtysh' program not found in search path:"
+        echo "  $FRR_BIN_SEARCH"
+        return 1
+    fi
+
+    # fix /var/run/frr permissions
+    id -u frr 2>/dev/null >/dev/null
+    if [ "$?" = "0" ]; then
+        chown frr $FRR_STATE_DIR
+    fi
+
+    bootdaemon "zebra"
+    if grep -q "^ip route " $FRR_CONF; then
+        bootdaemon "staticd"
+    fi
+    for r in rip ripng ospf6 ospf bgp babel; do
+        if grep -q "^router \\<$${}{r}\\>" $FRR_CONF; then
+            bootdaemon "$${}{r}d"
+        fi
+    done
+
+    if grep -E -q '^[[:space:]]*router[[:space:]]+pim6?[[:space:]]*$' $FRR_CONF; then
+        bootdaemon "pimd"
+    fi
+
+    $FRR_BIN_DIR/vtysh -f $FRR_CONF
+}
+
+if [ "$1" != "zebra" ]; then
+    echo "WARNING: '$1': all FRR daemons are launched by the 'zebra' service!"
+    exit 1
+fi
+confcheck
+bootfrr
+
+# reset interfaces
+% for iface, _, _ , _ in ifaces:
+ip link set dev ${iface.name} down
+sleep 1
+ip link set dev ${iface.name} up
+% endfor
+]]></template>
+      </templates>
+    </service>
+  </service_configurations>
+</scenario>
