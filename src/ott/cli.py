@@ -4,6 +4,10 @@
   ott [-i ID] [-p PORTA] -b <bootstrapper>             (estratégia 2: bootstrapper)
   ott [-i ID] [-p PORTA] --serve topologia.json        (nó bootstrapper/servidor)
 
+Opções úteis nos testes:
+  --min-neighbors X   pede substitutos ao bootstrapper se ficar com menos de X vizinhos
+  --stats SEGUNDOS    escreve periodicamente os vizinhos e o RTT de cada um
+
 Os endereços têm o formato HOST ou HOST:PORTA.
 """
 import argparse
@@ -33,6 +37,12 @@ def build_parser():
     p.add_argument("-b", "--bootstrapper", metavar="HOST[:PORTA]")
     p.add_argument("--serve", metavar="TOPOLOGIA",
                    help="atuar como bootstrapper com este ficheiro de topologia")
+    p.add_argument("--min-neighbors", type=int, default=0, metavar="X",
+                   help="mínimo de vizinhos a manter (0 = não pedir substitutos)")
+    p.add_argument("--replace-after", type=float, default=5.0, metavar="S",
+                   help="segundos com vizinhos a menos antes de pedir substitutos")
+    p.add_argument("--stats", type=float, default=0, metavar="S",
+                   help="escrever vizinhos e RTT a cada S segundos (0 = nunca)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -43,8 +53,10 @@ def main(argv=None):
         level=logging.DEBUG if args.verbose else logging.INFO,
         format=f"%(asctime)s [{args.id}] %(levelname)s %(message)s")
 
-    service = BootstrapService.from_file(args.serve) if args.serve else None
-    node = OverlayNode(args.id, args.bind, args.port, bootstrap_service=service)
+    service = BootstrapService.from_file(args.serve, args.id) if args.serve else None
+    node = OverlayNode(args.id, args.bind, args.port, bootstrap_service=service,
+                       min_neighbors=args.min_neighbors,
+                       replace_interval=args.replace_after)
     node.start()
 
     if service and args.id in service.nodes:
@@ -58,8 +70,11 @@ def main(argv=None):
             node.stop()
             raise SystemExit("não foi possível obter vizinhos do bootstrapper")
 
+    log = logging.getLogger("ott.cli")
     try:
         while True:
-            time.sleep(1)
+            time.sleep(args.stats or 1)
+            if args.stats:
+                log.info("vizinhos: %s", node.describe_neighbors())
     except KeyboardInterrupt:
         node.stop()

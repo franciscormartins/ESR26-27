@@ -1,16 +1,16 @@
 {
-  "_comment": "Cenário 3: overlay da Figura 1 (arestas lidas da figura; confirmar). Ajustar 'host' aos IPs do CORE.",
+  "_comment": "Cenário 3: overlay da Figura 1 sobre o underlay de cenario3.xml. 'core' = nó do CORE onde corre cada nó overlay (PROPOSTA a confirmar). Os routers encaminham por OSPF, por isso qualquer interface serve de 'host'; todos os nós usam -b <IP de O1>.",
   "nodes": {
-    "O1":  {"host": "10.0.0.1",  "neighbors": ["O2"]},
-    "O2":  {"host": "10.0.0.2",  "neighbors": ["O3", "O7"]},
-    "O3":  {"host": "10.0.0.3",  "neighbors": ["O4", "O5"]},
-    "O4":  {"host": "10.0.0.4",  "neighbors": []},
-    "O5":  {"host": "10.0.0.5",  "neighbors": ["O6", "O7", "O10", "O11"]},
-    "O6":  {"host": "10.0.0.6",  "neighbors": ["O7", "O9"]},
-    "O7":  {"host": "10.0.0.7",  "neighbors": ["O8"]},
-    "O8":  {"host": "10.0.0.8",  "neighbors": []},
-    "O9":  {"host": "10.0.0.9",  "neighbors": []},
-    "O10": {"host": "10.0.0.10", "neighbors": []},
-    "O11": {"host": "10.0.0.11", "neighbors": []}
+    "O1":  {"host": "10.0.3.20",  "core": "Server", "neighbors": ["O2"]},
+    "O2":  {"host": "10.0.4.1",   "core": "R1",     "neighbors": ["O3", "O7"]},
+    "O3":  {"host": "10.0.4.2",   "core": "R2",     "neighbors": ["O4", "O5"]},
+    "O4":  {"host": "10.0.8.20",  "core": "C4",     "neighbors": []},
+    "O5":  {"host": "10.0.9.1",   "core": "R9",     "neighbors": ["O6", "O7", "O10", "O11"]},
+    "O6":  {"host": "10.0.10.1",  "core": "R10",    "neighbors": ["O7", "O9"]},
+    "O7":  {"host": "10.0.11.1",  "core": "R5",     "neighbors": ["O8"]},
+    "O8":  {"host": "10.0.11.21", "core": "C2",     "neighbors": []},
+    "O9":  {"host": "10.0.10.21", "core": "C6",     "neighbors": []},
+    "O10": {"host": "10.0.9.20",  "core": "C8",     "neighbors": []},
+    "O11": {"host": "10.0.9.21",  "core": "C9",     "neighbors": []}
   }
 }

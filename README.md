@@ -8,13 +8,16 @@ relatório em `docs/relatorio/`.
 | Caminho | Conteúdo | Etapa |
 |---|---|---|
 | `src/ott/protocol.py` | formato das mensagens (JSON com prefixo de tamanho, TCP) e tipos | todas |
-| `src/ott/node.py` | `OverlayNode`: ligações aos vizinhos, HELLO, keepalive, reconexão, handlers | 1 |
-| `src/ott/bootstrapper.py` | serviço que devolve os vizinhos de cada nó a partir de um ficheiro | 1 |
+| `src/ott/node.py` | `OverlayNode`: ligações aos vizinhos, HELLO, keepalive, RTT, eventos up/down, substitutos, handlers | 1 |
+| `src/ott/bootstrapper.py` | serviço que devolve os vizinhos (e substitutos) de cada nó a partir de um ficheiro | 1 |
 | `src/ott/cli.py` | comando `ott` | 1 |
 | `src/ott/routing.py` | tabela de rotas por fluxo, anúncios, ativação | 2 (por fazer) |
 | `src/ott/streaming/` | servidor, cliente e pacotes de vídeo (UDP) | 4 (por fazer) |
 | `topologies/` | cenários 1–3 (ajustar `host` aos IPs do CORE) | – |
 | `tests/` | testes automáticos | – |
+| `docs/ESTADO.md` | **ponto da situação**: o que está feito, decisões, como testar, pendentes, perguntas ao docente | – |
+| `docs/protocolo.md` | especificação das mensagens e interações | 1 |
+| `docs/testes-core.md` | comandos por nó e testes a fazer nos cenários 1–3 no CORE | – |
 
 Etapa 3 (PING de teste de caminhos): mensagem `ROUTE_TEST`, a tratar com um handler.
 
@@ -25,6 +28,9 @@ node.register_handler("ANNOUNCE", fn)      # fn(node, neighbor, msg)
 node.send(neighbor_id, make_msg(...))      # unicast a um vizinho
 node.broadcast(msg, exclude={origem})      # inundação controlada
 node.neighbor_ids()                        # vizinhos ativos
+node.on_neighbor_up(fn)                    # fn(node, id)
+node.on_neighbor_down(fn)                  # fn(node, id)
+node.rtt(id)                               # RTT em segundos (média móvel) ou None
 ```
 
 ## Utilização
@@ -34,6 +40,9 @@ node.neighbor_ids()                        # vizinhos ativos
 ./bin/ott -i O2 -b 10.0.0.10                          # nó que se regista no bootstrapper
 ./bin/ott -i C1 10.0.0.11 10.0.0.12                   # estratégia 1: vizinhos manuais
 ```
+
+Opções úteis: `--min-neighbors X` (pede substitutos se ficar com menos de X vizinhos),
+`--stats S` (escreve vizinhos e RTT a cada S segundos).
 
 Os ids dos nós têm de existir no ficheiro de topologia (estratégia 2).
 
