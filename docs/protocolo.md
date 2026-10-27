@@ -135,3 +135,28 @@ propor-se outro na tentativa seguinte. Se não houver candidatos, `lost` é limp
 - O bootstrapper só sabe que um nó está vivo porque se registou ou pediu substitutos; não o expira.
 - O ficheiro de topologia é estático: um nó novo tem de existir no ficheiro.
 - Não há autenticação nem cifra no controlo.
+
+## 7. Modelo de estado das rotas (Etapa 2)
+
+A estratégia escolhida para a Etapa 2 é a **Estratégia 1 do enunciado**: anúncios periódicos
+do servidor, propagados por inundação controlada; os clientes ativam a rota quando pedem o
+fluxo. Esta secção fixa o estado local necessário antes de implementar as interações.
+
+Cada entrada é identificada por `(servidor, fluxo)` e contém:
+
+| Campo | Significado |
+|---|---|
+| `origin` | identificador do servidor que origina o fluxo |
+| `flow` | identificador do conteúdo/stream multimédia transmitido (por exemplo, `filme_a` ou `camera_sala`) |
+| `metric` | custo acumulado desde o servidor; a primeira métrica será número de saltos |
+| `upstream` | vizinho do melhor caminho conhecido em direção ao servidor; `None` no servidor |
+| `destinations` | conjunto de vizinhos a jusante que pediram o fluxo |
+| `state` | `inativa` ou `ativa`; só se encaminha o fluxo quando há destinos ativos |
+| `seen_announcements` | identificadores de anúncios já processados, para evitar repetições e ciclos |
+
+O par `(origin, flow)` identifica uma transmissão: o mesmo servidor pode oferecer vários
+conteúdos, e servidores diferentes podem usar o mesmo identificador de fluxo sem colisão.
+O modelo está em `src/ott/routing.py` como `RouteEntry` e `RoutingTable`, indexada por
+`(origin, flow)`. A tabela oferece operações locais `get`, `put` e `remove`. O método `attach`
+e os handlers de mensagens ainda não estão implementados; a próxima parte da Etapa 2 será
+definir os campos protocolares e atualizar estas entradas ao receber anúncios/ativações.

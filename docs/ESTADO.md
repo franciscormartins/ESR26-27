@@ -2,7 +2,7 @@
 
 > Ficheiro vivo: é atualizado sempre que algo é feito. Serve para saber o ponto da situação,
 > relembrar as decisões e preparar as conversas com os docentes.
-> **Última atualização: 2026-10-26.**
+> **Última atualização: 2026-10-27.**
 
 ## 1. Resumo em 30 segundos
 
@@ -11,8 +11,9 @@
   opcionalmente, pede vizinhos substitutos ao bootstrapper.
 - O overlay constrói-se de duas formas: **estratégia 2** (`ott -b <bootstrapper>`: o servidor lê um
   ficheiro de topologia e devolve os vizinhos) e **estratégia 1** (`ott viz1 viz2`: vizinhos à mão).
-- **Estado:** o código do elemento 1 está completo em relação ao guião e tem 21 testes automáticos a
-  passar. Os ensaios no CORE dos cenários 1 e 2 estão feitos para a parte base (ligar, saída limpa,
+- **Estado:** o elemento 1 tem 21 testes automáticos; foram acrescentados 8 testes para o modelo
+  local da tabela de rotas (Etapa 2), executados isoladamente com sucesso. A suite completa ainda
+  não foi repetida após esse acréscimo. Os ensaios no CORE dos cenários 1 e 2 estão feitos para a parte base (ligar, saída limpa,
   reentrada). **Falta ensaiar no CORE** as funcionalidades novas (RTT, timeout, substitutos) e o overlay no cenário 3.
 - Falta ainda: o módulo de rotas (E2) e o streaming (E3), que dependem da interface descrita em 5.
 
@@ -52,6 +53,7 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF); comandos de arranque por
 | D12 | Um só endereço (`host`) por nó no ficheiro de topologia | Simples; basta um dos lados alcançar o outro. **Limitação** para nós com várias interfaces (ver 8). |
 | D13 | Cenário 3: underlay com routers FRR/OSPF e nós overlay também nos routers | A Figura 1 põe nós overlay em routers; só há 10 hosts para 11 nós overlay. Atribuição overlay→CORE **por confirmar**. |
 | D14 | Routers com FRR (não Quagga) e `frr.conf`/`frrboot.sh` próprios no XML | O Quagga instalado não tem `vtysh`, e o CORE 9.2.1 gera config que o FRR 10 rejeita (ver `docs/testes-core.md`). |
+| D15 | E2 usa a Estratégia 1 do enunciado; estado de rota indexado por `(servidor, fluxo)`, com destinos a montante, destinos a jusante, custo em saltos e anúncios vistos. `fluxo` identifica o conteúdo/stream multimédia (ex.: `filme_a`). | Distingue transmissões de vários servidores e o caminho para ativar a rota dos ramos para distribuir o fluxo. Modelo inicial documentado em `docs/protocolo.md`. |
 
 ## 4. Arquitetura (resumo)
 
@@ -60,7 +62,7 @@ src/ott/protocol.py     formato, tipos e validação das mensagens
 src/ott/node.py         OverlayNode: ligações, HELLO, PING/PONG, RTT, eventos, substitutos
 src/ott/bootstrapper.py BootstrapService: vizinhos e substitutos a partir do ficheiro JSON
 src/ott/cli.py          comando `ott` (-b, --serve, --min-neighbors, --stats ...)
-src/ott/routing.py      (esqueleto) E2
+src/ott/routing.py      modelo de estado da tabela local (handlers E2 ainda pendentes)
 src/ott/streaming/      (vazio) E3
 topologies/             cenarios 1-3: .json (overlay) e .xml (CORE)
 docs/protocolo.md       especificação das mensagens e interações
@@ -85,14 +87,23 @@ Pendente do grupo: definir os campos de `ANNOUNCE`, `ACTIVATE`, `DEACTIVATE` e `
 
 ## 6. Como testar
 
-**Automático (21 testes, ~7 s):**
+**Etapa 1 (21 testes, ~7 s):**
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -t .
 ```
 
+**Modelo da tabela de rotas (8 testes):**
+
+```sh
+PYTHONPATH=src python3 -m unittest tests.test_routing -v
+```
+
 Cobrem: validação do protocolo, overlay por bootstrapper e recuperação, eventos up/down, RTT, ligação
 duplicada, vizinho calado (timeout), mensagem inválida, substituto, alvos expirados e tentativas em paralelo.
+Os testes de `tests/test_routing.py` cobrem valores por omissão, chave `(servidor, fluxo)`, conjuntos
+independentes, consulta/inserção/remoção, substituição de entradas e validação. Não testam anúncios,
+escolha de caminhos, ativação ou encaminhamento, que ainda não estão implementados.
 
 **No CORE:** `docs/testes-core.md` tem os comandos de cada nó para os cenários 1, 2 e 3 e a lista de testes
 (arranque, saída limpa, queda abrupta, nó congelado `kill -STOP`, link em baixo, RTT com atraso, substituto).
@@ -155,6 +166,7 @@ de ~10 repetições), robustez (sem threads penduradas nem exceções nos logs).
 
 | Data | O que mudou |
 |---|---|
+| 2026-10-27 | Definido em `routing.py` o modelo local de rotas por `(servidor, fluxo)` e documentados os campos e a escolha da Estratégia 1 em `docs/protocolo.md` §7. Adicionados 8 testes unitários para o modelo (`tests/test_routing.py`), todos passaram isoladamente. Anúncios, ativação e encaminhamento continuam pendentes. |
 | 2026-10-26 | Validação de campos no protocolo (`ProtocolError`); eventos `up/down`; RTT por vizinho; pedido de substitutos (`REPLACE`, `--min-neighbors`); uma tentativa de ligação por alvo; opções `--stats`/`--replace-after`; 21 testes; `docs/protocolo.md`; `cenario3.json` com a atribuição proposta; este ficheiro. |
 | 2026-10-22 | Cenários 1 e 2 ensaiados no CORE (ligar, Ctrl-C, reentrada); `cenario3.xml` validado e routers FRR a funcionar (config própria no XML); `docs/testes-core.md`. |
 | 2026-10-20 | Etapas 0 e 1: protocolo, nó, bootstrapper, CLI, topologias e primeiros testes. |
