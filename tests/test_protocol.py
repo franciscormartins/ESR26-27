@@ -32,7 +32,9 @@ class ProtocolTest(unittest.TestCase):
             make_msg(MsgType.NEIGHBORS, "A", neighbors=[]),
             make_msg(MsgType.ERROR, "A", reason="x"),
             make_msg(MsgType.REPLACE, "A", have=["B"], lost=[], need=1),
-            make_msg(MsgType.ANNOUNCE, "A", qualquer="coisa"),  # campos do E2: livres
+            make_msg(MsgType.ANNOUNCE, "A", server_id="S1", flow="filme_a", epoch=1, metric=0),
+            make_msg(MsgType.ACTIVATE, "C1", server_id="S1", flow="filme_a", subscriber_id="C1"),
+            make_msg(MsgType.DEACTIVATE, "C1", server_id="S1", flow="filme_a", subscriber_id="C1"),
         ]
         for m in good:
             self.assertIs(proto.validate(m), m)
@@ -57,6 +59,12 @@ class ProtocolTest(unittest.TestCase):
             make_msg(MsgType.REPLACE, "A", have=["B"], lost=[]),        # falta need
             make_msg(MsgType.REPLACE, "A", have=["B"], lost=[], need=0),
             make_msg(MsgType.REPLACE, "A", have="B", lost=[], need=1),
+            make_msg(MsgType.ANNOUNCE, "A", server_id="S1", flow="filme_a", epoch=1),
+            make_msg(MsgType.ANNOUNCE, "A", server_id="S1", flow="filme_a", epoch=0, metric=0),
+            make_msg(MsgType.ANNOUNCE, "A", server_id="S1", flow="filme_a", epoch=1, metric=-1),
+            make_msg(MsgType.ANNOUNCE, "A", server_id="S1", flow="filme_a", epoch=1, metric=float("nan")),
+            make_msg(MsgType.ACTIVATE, "C1", server_id="S1", flow="filme_a"),
+            make_msg(MsgType.DEACTIVATE, "C1", server_id="S1", flow="filme_a", subscriber_id=""),
         ]
         for m in bad:
             with self.assertRaises(ProtocolError, msg=repr(m)):

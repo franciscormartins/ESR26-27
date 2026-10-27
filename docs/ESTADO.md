@@ -11,11 +11,12 @@
   opcionalmente, pede vizinhos substitutos ao bootstrapper.
 - O overlay constrói-se de duas formas: **estratégia 2** (`ott -b <bootstrapper>`: o servidor lê um
   ficheiro de topologia e devolve os vizinhos) e **estratégia 1** (`ott viz1 viz2`: vizinhos à mão).
-- **Estado:** o elemento 1 tem 21 testes automáticos; foram acrescentados 8 testes para o modelo
-  local da tabela de rotas (Etapa 2), executados isoladamente com sucesso. A suite completa ainda
-  não foi repetida após esse acréscimo. Os ensaios no CORE dos cenários 1 e 2 estão feitos para a parte base (ligar, saída limpa,
+- **Estado:** a Etapa 2 já origina anúncios periódicos, aprende e propaga rotas por fluxo,
+  e encaminha ativações/desativações idempotentes pelo caminho de montante. Os testes cobrem
+  estes comportamentos; ainda falta validar a reação a falhas no CORE e implementar o plano de dados.
+  Os ensaios no CORE dos cenários 1 e 2 estão feitos para a parte base (ligar, saída limpa,
   reentrada). **Falta ensaiar no CORE** as funcionalidades novas (RTT, timeout, substitutos) e o overlay no cenário 3.
-- Falta ainda: o módulo de rotas (E2) e o streaming (E3), que dependem da interface descrita em 5.
+- Falta ainda: validação da adaptação a falhas no CORE, encaminhamento dos dados (E2) e streaming (E3).
 
 ## 2. O que está feito (elemento 1)
 
@@ -53,7 +54,8 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF); comandos de arranque por
 | D12 | Um só endereço (`host`) por nó no ficheiro de topologia | Simples; basta um dos lados alcançar o outro. **Limitação** para nós com várias interfaces (ver 8). |
 | D13 | Cenário 3: underlay com routers FRR/OSPF e nós overlay também nos routers | A Figura 1 põe nós overlay em routers; só há 10 hosts para 11 nós overlay. Atribuição overlay→CORE **por confirmar**. |
 | D14 | Routers com FRR (não Quagga) e `frr.conf`/`frrboot.sh` próprios no XML | O Quagga instalado não tem `vtysh`, e o CORE 9.2.1 gera config que o FRR 10 rejeita (ver `docs/testes-core.md`). |
-| D15 | E2 usa a Estratégia 1 do enunciado; estado de rota indexado por `(servidor, fluxo)`, com destinos a montante, destinos a jusante, custo em saltos e anúncios vistos. `fluxo` identifica o conteúdo/stream multimédia (ex.: `filme_a`). | Distingue transmissões de vários servidores e o caminho para ativar a rota dos ramos para distribuir o fluxo. Modelo inicial documentado em `docs/protocolo.md`. |
+| D15 | Decidido implementar a Estratégia 1 do enunciado. Estado de rota indexado por `(servidor, fluxo)`, com vizinho de montante, destinos a jusante, subscritores, custo em saltos, época e anúncios vistos. `fluxo` identifica o conteúdo/stream multimédia (ex.: `filme_a`). | Anúncios do servidor constroem as rotas; pedidos dos clientes abrem e fecham ramos partilhados. Roadmap em `docs/ETAPA2.md`; modelo em `docs/protocolo.md`. |
+| D16 | Protocolo E2 definido: `ANNOUNCE(server_id, flow, epoch, metric)`; `ACTIVATE`/`DEACTIVATE(server_id, flow, subscriber_id)`. Custo em saltos, época crescente por fluxo, IDs overlay para servidor/cliente e nome estável para fluxo. | Suporta vários fluxos e servidores; handlers dos três tipos implementados. |
 
 ## 4. Arquitetura (resumo)
 
@@ -62,10 +64,11 @@ src/ott/protocol.py     formato, tipos e validação das mensagens
 src/ott/node.py         OverlayNode: ligações, HELLO, PING/PONG, RTT, eventos, substitutos
 src/ott/bootstrapper.py BootstrapService: vizinhos e substitutos a partir do ficheiro JSON
 src/ott/cli.py          comando `ott` (-b, --serve, --min-neighbors, --stats ...)
-src/ott/routing.py      modelo de estado da tabela local (handlers E2 ainda pendentes)
+src/ott/routing.py      modelo de rotas, publicador e aprendizagem/propagação de ANNOUNCE
 src/ott/streaming/      (vazio) E3
 topologies/             cenarios 1-3: .json (overlay) e .xml (CORE)
 docs/protocolo.md       especificação das mensagens e interações
+docs/ETAPA2.md          roadmap e checklist da implementação das rotas
 docs/testes-core.md     comandos por nó e testes a fazer no CORE
 ```
 
@@ -75,15 +78,17 @@ Cada nó tem threads para: aceitar ligações, uma por vizinho (leitura) e uma d
 ## 5. Interface para o Elemento 2 e 3
 
 ```python
-node.register_handler("ANNOUNCE", fn)   # fn(node, vizinho, msg)
+node.register_handler("ANNOUNCE", fn)   # routing_table.attach regista os três handlers E2
 node.send(id, make_msg(...)) ; node.broadcast(msg, exclude={origem})
 node.neighbor_ids()
 node.on_neighbor_up(fn) ; node.on_neighbor_down(fn)   # fn(node, id)
 node.rtt(id) ; node.rtts()                            # segundos (média móvel) ou None
 ```
 
-Pendente do grupo: definir os campos de `ANNOUNCE`, `ACTIVATE`, `DEACTIVATE` e `ROUTE_TEST`
-(hoje só exigem `data` ser um objeto).
+Definidos e validados os campos de `ANNOUNCE`, `ACTIVATE` e `DEACTIVATE` (ver
+`docs/protocolo.md` §7.1). `RoutingTable.attach(node)` regista os três handlers.
+Continuam pendentes o formato de `ROUTE_TEST`, a validação no CORE da adaptação a falhas e o
+encaminhamento dos dados.
 
 ## 6. Como testar
 
@@ -93,17 +98,30 @@ Pendente do grupo: definir os campos de `ANNOUNCE`, `ACTIVATE`, `DEACTIVATE` e `
 PYTHONPATH=src python3 -m unittest discover -s tests -t .
 ```
 
-**Modelo da tabela de rotas (8 testes):**
+**Tabela de rotas e anúncios:**
 
 ```sh
 PYTHONPATH=src python3 -m unittest tests.test_routing -v
 ```
 
+**Protocolo e tabela de rotas:**
+
+```sh
+PYTHONPATH=src python3 -m unittest tests.test_protocol tests.test_routing -v
+```
+
+**Suite completa (46 testes, cerca de 7 s):**
+
+```sh
+PYTHONPATH=src python3 -m unittest discover -s tests -t .
+```
+
 Cobrem: validação do protocolo, overlay por bootstrapper e recuperação, eventos up/down, RTT, ligação
 duplicada, vizinho calado (timeout), mensagem inválida, substituto, alvos expirados e tentativas em paralelo.
-Os testes de `tests/test_routing.py` cobrem valores por omissão, chave `(servidor, fluxo)`, conjuntos
-independentes, consulta/inserção/remoção, substituição de entradas e validação. Não testam anúncios,
-escolha de caminhos, ativação ou encaminhamento, que ainda não estão implementados.
+`tests/test_routing.py` cobre o modelo, publicação, aprendizagem por saltos, supressão de
+duplicados/anúncios antigos, melhoria de caminho, subscrições partilhadas e reação local a
+falhas e vizinhos novos. A integração ponta a ponta no overlay e o encaminhamento dos dados
+continuam por testar.
 
 **No CORE:** `docs/testes-core.md` tem os comandos de cada nó para os cenários 1, 2 e 3 e a lista de testes
 (arranque, saída limpa, queda abrupta, nó congelado `kill -STOP`, link em baixo, RTT com atraso, substituto).
@@ -149,7 +167,8 @@ de ~10 repetições), robustez (sem threads penduradas nem exceções nos logs).
 - [ ] Decidir se refazemos o cenário 2 com 3 intermédios, como no enunciado.
 
 **Outros elementos (para saber o que depende de nós)**
-- [ ] E2: tabela de rotas, anúncios, ativação, adaptação a quedas (usa `on_neighbor_down` e `rtt`).
+- [x] E2 (controlo): tabela de rotas, anúncios, ativação/desativação e reação local a alterações de vizinhos.
+- [ ] E2: ensaios de falhas/recuperação no CORE e encaminhamento dos dados.
 - [ ] E3: servidor/cliente de vídeo, plano de dados, cenários e medições.
 
 ## 10. Perguntas para os docentes
@@ -166,7 +185,8 @@ de ~10 repetições), robustez (sem threads penduradas nem exceções nos logs).
 
 | Data | O que mudou |
 |---|---|
-| 2026-10-27 | Definido em `routing.py` o modelo local de rotas por `(servidor, fluxo)` e documentados os campos e a escolha da Estratégia 1 em `docs/protocolo.md` §7. Adicionados 8 testes unitários para o modelo (`tests/test_routing.py`), todos passaram isoladamente. Anúncios, ativação e encaminhamento continuam pendentes. |
+| 2026-10-27 | Implementada a reação base das rotas a `neighbor_up/down`: anúncios para vizinhos novos, invalidação do montante perdido, limpeza de ramos caídos e reativação de subscrições após reaprendizagem; 46 testes passam. Ensaios de falhas no CORE ainda pendentes. |
+| 2026-10-27 | Implementados handlers de `ACTIVATE`/`DEACTIVATE`, partilha de ramos por subscritores e operações locais para iniciar/terminar uma subscrição; atualizados testes e documentação. |
 | 2026-10-26 | Validação de campos no protocolo (`ProtocolError`); eventos `up/down`; RTT por vizinho; pedido de substitutos (`REPLACE`, `--min-neighbors`); uma tentativa de ligação por alvo; opções `--stats`/`--replace-after`; 21 testes; `docs/protocolo.md`; `cenario3.json` com a atribuição proposta; este ficheiro. |
 | 2026-10-22 | Cenários 1 e 2 ensaiados no CORE (ligar, Ctrl-C, reentrada); `cenario3.xml` validado e routers FRR a funcionar (config própria no XML); `docs/testes-core.md`. |
 | 2026-10-20 | Etapas 0 e 1: protocolo, nó, bootstrapper, CLI, topologias e primeiros testes. |

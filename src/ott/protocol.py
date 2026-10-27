@@ -9,6 +9,7 @@ Os campos obrigatórios de cada tipo estão em REQUIRED e são validados tanto
 ao enviar como ao receber (ver docs/protocolo.md).
 """
 import json
+import math
 import struct
 
 DEFAULT_PORT = 5000
@@ -31,7 +32,7 @@ class MsgType:
     PING = "PING"            # keepalive (leva ts; serve para medir o RTT)
     PONG = "PONG"            # resposta ao PING (devolve o mesmo ts)
     BYE = "BYE"
-    # Etapa 2 - rotas (a definir pelo respetivo elemento)
+    # Etapa 2 - anúncios e ativação de rotas
     ANNOUNCE = "ANNOUNCE"
     ACTIVATE = "ACTIVATE"
     DEACTIVATE = "DEACTIVATE"
@@ -48,6 +49,10 @@ def _is_str(v):
 
 def _is_num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _is_nonnegative_num(v):
+    return _is_num(v) and math.isfinite(v) and v >= 0
 
 
 def _is_pos_int(v):
@@ -72,6 +77,16 @@ REQUIRED = {
     MsgType.NEIGHBORS: {"neighbors": _is_neighbor_list},
     MsgType.ERROR: {"reason": _is_str},
     MsgType.REPLACE: {"have": _is_id_list, "lost": _is_id_list, "need": _is_pos_int},
+    MsgType.ANNOUNCE: {
+        "server_id": _is_str, "flow": _is_str,
+        "epoch": _is_pos_int, "metric": _is_nonnegative_num,
+    },
+    MsgType.ACTIVATE: {
+        "server_id": _is_str, "flow": _is_str, "subscriber_id": _is_str,
+    },
+    MsgType.DEACTIVATE: {
+        "server_id": _is_str, "flow": _is_str, "subscriber_id": _is_str,
+    },
 }
 
 

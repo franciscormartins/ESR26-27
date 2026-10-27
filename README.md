@@ -11,7 +11,7 @@ relatório em `docs/relatorio/`.
 | `src/ott/node.py` | `OverlayNode`: ligações aos vizinhos, HELLO, keepalive, RTT, eventos up/down, substitutos, handlers | 1 |
 | `src/ott/bootstrapper.py` | serviço que devolve os vizinhos (e substitutos) de cada nó a partir de um ficheiro | 1 |
 | `src/ott/cli.py` | comando `ott` | 1 |
-| `src/ott/routing.py` | tabela de rotas por fluxo, anúncios, ativação | 2 (por fazer) |
+| `src/ott/routing.py` | modelo de rotas, anúncios e ativação/desativação de subscrições | 2 (parcial) |
 | `src/ott/streaming/` | formato dos pacotes de vídeo (cabeçalho origem/fluxo + RTP), servidor e cliente UDP; ainda sem ligação ao overlay | 4 |
 | `progex/` | código de apoio do livro (Kurose) e `movie.Mjpeg`, só como referência | 4 |
 | `topologies/` | cenários 1–3 (ajustar `host` aos IPs do CORE) | – |
@@ -40,6 +40,7 @@ node.rtt(id)                               # RTT em segundos (média móvel) ou 
 ./bin/ott --serve topologies/cenario1.json -i S1      # servidor + bootstrapper
 ./bin/ott -i O2 -b 10.0.0.10                          # nó que se regista no bootstrapper
 ./bin/ott -i C1 10.0.0.11 10.0.0.12                   # estratégia 1: vizinhos manuais
+./bin/ott --serve topologies/cenario1.json -i S1 --publish-flow filme_a  # anunciar um fluxo
 ```
 
 Opções úteis: `--min-neighbors X` (pede substitutos se ficar com menos de X vizinhos),

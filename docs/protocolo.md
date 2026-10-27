@@ -1,8 +1,9 @@
 # Protocolo de controlo do overlay – especificação
 
 Implementação de referência: `src/ott/protocol.py` (formato e validação) e `src/ott/node.py` (comportamento).
-Esta especificação cobre as mensagens do elemento 1 (overlay). As mensagens de rotas (Etapa 2/3)
-têm o tipo reservado mas os campos ainda têm de ser definidos pelo elemento 2.
+Esta especificação cobre as mensagens do elemento 1 (overlay) e o esquema das mensagens de
+controlo de rotas da Etapa 2. `ANNOUNCE`, `ACTIVATE` e `DEACTIVATE` têm handlers em
+`src/ott/routing.py`; o encaminhamento dos pacotes de vídeo ainda não está implementado.
 
 ## 1. Transporte e formato
 
@@ -36,7 +37,8 @@ não depende de o JSON conter ou não quebras de linha e permite rejeitar mensag
 | `REPLACE` | nó → bootstrapper | `have` (lista de ids), `lost` (lista de ids), `need` (inteiro > 0) | nó com menos de X vizinhos há mais de `replace_interval` s |
 | `NEIGHBORS` | bootstrapper → nó | `neighbors`: lista de `{id, host, port}` | resposta a `REGISTER` ou `REPLACE` (pode ser lista vazia) |
 | `ERROR` | bootstrapper → nó | `reason` (string) | nó desconhecido do ficheiro de topologia |
-| `ANNOUNCE`, `ACTIVATE`, `DEACTIVATE` | – | a definir (E2) | rotas (Etapa 2) |
+| `ANNOUNCE` | servidor → overlay | `server_id`, `flow`, `epoch`, `metric` | anúncio periódico de um fluxo; reencaminhado pelos nós |
+| `ACTIVATE`, `DEACTIVATE` | cliente ↔ servidor via overlay | `server_id`, `flow`, `subscriber_id` | subscrever/remover um cliente de um fluxo |
 | `ROUTE_TEST` | – | a definir (E2) | teste de caminhos (Etapa 3) |
 
 `PING`/`PONG` cumprem o papel do "HELLO/KEEPALIVE (nó, timestamp)" do guião. O `ts` é o relógio
@@ -53,7 +55,15 @@ Exemplos:
 {"type":"NEIGHBORS","src":"S1","data":{"neighbors":[{"id":"C1","host":"10.0.1.21","port":5000}]}}
 {"type":"REPLACE","src":"C1","data":{"have":[],"lost":["O2"],"need":1}}
 {"type":"ERROR","src":"S1","data":{"reason":"nó desconhecido"}}
+{"type":"ANNOUNCE","src":"S1","data":{"server_id":"S1","flow":"filme_a","epoch":1,"metric":0}}
+{"type":"ANNOUNCE","src":"O2","data":{"server_id":"S1","flow":"filme_a","epoch":1,"metric":1}}
+{"type":"ACTIVATE","src":"C1","data":{"server_id":"S1","flow":"filme_a","subscriber_id":"C1"}}
+{"type":"ACTIVATE","src":"O2","data":{"server_id":"S1","flow":"filme_a","subscriber_id":"C1"}}
+{"type":"DEACTIVATE","src":"C1","data":{"server_id":"S1","flow":"filme_a","subscriber_id":"C1"}}
 ```
+
+Nos exemplos de rota, `src` muda quando a mensagem é reenviada por um nó intermédio;
+`server_id`, `flow` e `subscriber_id` mantêm a identidade original.
 
 ## 3. Interações
 
@@ -106,6 +116,24 @@ o pedinte, os vizinhos atuais (`have`) e os perdidos (`lost`); prefere os que j�
 dos vizinhos atuais. Um candidato que não ligue a tempo é esquecido e passa a `lost`, de modo a
 propor-se outro na tentativa seguinte. Se não houver candidatos, `lost` é limpo e o ciclo recomeça.
 
+### 3.5 Ativação e desativação de um fluxo (Etapa 2)
+
+O servidor é o único que origina rondas `ANNOUNCE`. Os nós intermédios retransmitem essas
+mensagens e podem retransmitir uma nova cópia quando encontram um caminho melhor; não criam
+épocas de anúncio próprias.
+
+Quando o cliente quer receber um fluxo, chama `RoutingTable.activate(node, server_id, flow)`.
+O pedido sobe pelo `upstream` até ao servidor. Em cada nó, `src` passa a identificar o nó
+que reencaminha, `subscriber_id` mantém o ID original do cliente e o vizinho de entrada fica
+registado como destino a jusante. O servidor não reencaminha o pedido.
+
+Ao terminar, o cliente chama `RoutingTable.deactivate(...)`. A remoção percorre o mesmo
+caminho inverso. Cada identidade de subscritor é propagada uma vez e removida da mesma
+forma; se um ramo ainda tiver outros subscritores, mantém-se ativo. Mensagens repetidas são
+idempotentes. Se cair o montante, as subscrições ficam pendentes e a rota passa a inativa;
+quando é aprendida uma alternativa, os pedidos são ativados pelo novo montante. Ainda não
+existe confirmação de subscrição nem tráfego de vídeo.
+
 ## 4. Interface para os outros módulos (`OverlayNode`)
 
 | Chamada | Efeito |
@@ -138,7 +166,7 @@ propor-se outro na tentativa seguinte. Se não houver candidatos, `lost` é limp
 
 ## 7. Modelo de estado das rotas (Etapa 2)
 
-A estratégia escolhida para a Etapa 2 é a **Estratégia 1 do enunciado**: anúncios periódicos
+A estratégia decidida para a Etapa 2 é a **Estratégia 1 do enunciado**: anúncios periódicos
 do servidor, propagados por inundação controlada; os clientes ativam a rota quando pedem o
 fluxo. Esta secção fixa o estado local necessário antes de implementar as interações.
 
@@ -150,13 +178,54 @@ Cada entrada é identificada por `(servidor, fluxo)` e contém:
 | `flow` | identificador do conteúdo/stream multimédia transmitido (por exemplo, `filme_a` ou `camera_sala`) |
 | `metric` | custo acumulado desde o servidor; a primeira métrica será número de saltos |
 | `upstream` | vizinho do melhor caminho conhecido em direção ao servidor; `None` no servidor |
+| `epoch` | ronda de anúncio mais recente guardada para esta rota |
 | `destinations` | conjunto de vizinhos a jusante que pediram o fluxo |
-| `state` | `inativa` ou `ativa`; só se encaminha o fluxo quando há destinos ativos |
+| `state` | `inativa` ou `ativa`; ativa quando há subscritores locais/a jusante e caminho válido |
 | `seen_announcements` | identificadores de anúncios já processados, para evitar repetições e ciclos |
 
 O par `(origin, flow)` identifica uma transmissão: o mesmo servidor pode oferecer vários
 conteúdos, e servidores diferentes podem usar o mesmo identificador de fluxo sem colisão.
 O modelo está em `src/ott/routing.py` como `RouteEntry` e `RoutingTable`, indexada por
-`(origin, flow)`. A tabela oferece operações locais `get`, `put` e `remove`. O método `attach`
-e os handlers de mensagens ainda não estão implementados; a próxima parte da Etapa 2 será
-definir os campos protocolares e atualizar estas entradas ao receber anúncios/ativações.
+`(origin, flow)`. A tabela oferece operações `get`, `put` e `remove`; `attach(node)` instala
+o handler de `ANNOUNCE`. O publicador guarda a rota local com métrica zero. Nos recetores,
+a métrica aumenta em um salto; apenas uma época nova ou um custo melhor na época atual é
+propagado, excluindo o vizinho emissor. `ACTIVATE`/`DEACTIVATE` atualizam as subscrições e
+são encaminhadas unicast pelo `upstream`. O nó que reencaminha passa a ser o `src`, mas
+mantém o `subscriber_id` original. Cada nó regista os subscritores por vizinho a jusante;
+propaga `ACTIVATE` apenas quando passa de zero para uma subscrição e `DEACTIVATE` quando
+remove a última. O cliente usa `RoutingTable.activate(node, server_id, flow)` e
+`deactivate(...)`; por omissão, o ID overlay local é o `subscriber_id`. Estas mensagens
+não têm confirmação de entrega.
+
+### 7.1 Campos das mensagens de rota
+
+Os campos seguintes são obrigatórios em `data`; o envelope mantém o formato comum
+`{type, src, data}`. `src` identifica o vizinho que enviou esta cópia da mensagem e pode
+mudar a cada salto. Os identificadores estáveis do servidor, conteúdo e cliente seguem nos
+campos de `data`.
+
+| Tipo | Campo | Tipo/semântica |
+|---|---|---|
+| `ANNOUNCE` | `server_id` | ID do nó servidor que origina o fluxo |
+|  | `flow` | identificador estável do conteúdo/stream anunciado |
+|  | `epoch` | inteiro positivo, crescente por servidor e fluxo a cada ronda de anúncio |
+|  | `metric` | número finito ≥ 0; o servidor anuncia 0 e cada salto acrescenta 1 |
+| `ACTIVATE` | `server_id`, `flow` | identificam a rota pedida |
+|  | `subscriber_id` | ID estável do nó cliente que pediu o fluxo; usado para tornar ativações e desativações repetidas idempotentes |
+| `DEACTIVATE` | `server_id`, `flow`, `subscriber_id` | identificam a subscrição que o cliente está a terminar; devem corresponder ao `ACTIVATE` |
+
+Um anúncio é identificado por `(server_id, flow, epoch)`. Vários anúncios com a mesma
+identidade podem chegar por caminhos diferentes; o nó pode substituir o custo e o vizinho
+de montante quando recebe um custo menor na mesma época, e deve propagar essa melhoria.
+Uma época inferior à já guardada para a mesma rota é antiga e não deve substituir o estado
+mais recente. `epoch` é iniciado em 1 e incrementado pelo servidor por fluxo; os nós não
+comparam relógios entre si.
+
+Cada cliente usa o seu ID overlay como `subscriber_id` e mantém no máximo uma subscrição
+ativa por `(server_id, flow)`. Repetir `ACTIVATE` não cria uma subscrição adicional; repetir
+`DEACTIVATE` é inofensivo. Esta primeira versão não modela várias sessões do mesmo cliente
+para o mesmo fluxo.
+
+Os validadores de `src/ott/protocol.py` aplicam estes campos tanto no envio como na receção.
+Os testes de esquema estão em `tests/test_protocol.py`. O tratamento e encaminhamento das
+mensagens ainda pertencem às tarefas seguintes do roadmap `docs/ETAPA2.md`.
