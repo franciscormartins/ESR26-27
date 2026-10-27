@@ -51,6 +51,15 @@ class StatsTest(unittest.TestCase):
         self.assertEqual((s.received, s.lost, s.late), (4, 2, 1))
         self.assertAlmostEqual(s.jitter, 0.0, places=6)  # ritmo certinho: sem jitter
 
+    def test_new_ssrc_restarts_sequence(self):
+        s = StreamStats()
+        for seq in range(1, 101):                      # 1.ª emissão até ao 100
+            s.update(RtpPacket(seq, seq * 4500, b"", ssrc=111), seq * 0.05)
+        shown = [s.update(RtpPacket(seq, seq * 4500, b"", ssrc=222), 10 + seq * 0.05)
+                 for seq in range(1, 6)]               # servidor reiniciou
+        self.assertEqual(shown, [True] * 5)            # não são "atrasados"
+        self.assertEqual((s.received, s.lost, s.late, s.restarts), (105, 0, 0, 1))
+
 
 class MjpegTest(unittest.TestCase):
     def test_reads_and_loops(self):
@@ -93,6 +102,14 @@ class LoopbackTest(unittest.TestCase):
                 time.sleep(0.01)
             self.assertEqual(frames, [b"frame%d" % i for i in range(10)])  # só filme_a
             self.assertEqual(rx.stats.lost, 0)
+            # o mesmo fluxo emitido outra vez (servidor reiniciado) também é mostrado
+            again = StreamSource("S1", "filme_a", path, send, fps=200, loop=False).start()
+            again.join(5)
+            deadline = time.time() + 2
+            while len(frames) < 20 and time.time() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(len(frames), 20)
+            self.assertEqual((rx.stats.late, rx.stats.restarts), (0, 1))
         finally:
             rx.stop()
             send.sock.close()

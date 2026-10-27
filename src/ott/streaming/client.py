@@ -7,6 +7,8 @@ Baseado em ``progex/ClienteGUI.py`` (exemplo do livro), com estas diferenças:
   * só aceita o fluxo pedido (origem, fluxo) e ignora outros pacotes;
   * mede o que acontece na rede: recebidos, perdidos (buracos na sequência),
     atrasados/duplicados descartados e jitter (RFC 3550);
+  * se a emissão mudar (outro SSRC, p.ex. o servidor reiniciou), recomeça a
+    contagem da sequência em vez de descartar os pacotes como "atrasados";
   * mostra a imagem diretamente da memória (o exemplo gravava cada imagem em
     ``cache-*.jpg`` no disco).
 
@@ -35,11 +37,19 @@ class StreamStats:
         self.lost = 0             # nº de sequência que nunca chegaram (estimativa)
         self.late = 0             # chegaram depois de um mais recente: descartados
         self.jitter = 0.0         # segundos, média exponencial do RFC 3550
+        self.restarts = 0         # vezes que a emissão mudou (SSRC novo)
+        self.ssrc = None
         self.last_seq = None
         self._last_transit = None
 
     def update(self, rtp, arrival):
         """Regista um pacote; devolve True se deve ser mostrado."""
+        if rtp.ssrc != self.ssrc:
+            if self.ssrc is not None:
+                self.restarts += 1        # emissão nova: a sequência recomeça
+            self.ssrc = rtp.ssrc
+            self.last_seq = None
+            self._last_transit = None
         if self.last_seq is not None and not seq_newer(rtp.seq, self.last_seq):
             self.late += 1
             return False
@@ -62,7 +72,8 @@ class StreamStats:
     def __str__(self):
         return (f"recebidos={self.received} perdidos={self.lost} "
                 f"({self.loss_ratio():.1%}) descartados={self.late} "
-                f"jitter={self.jitter * 1000:.2f} ms")
+                f"jitter={self.jitter * 1000:.2f} ms"
+                + (f" reinicios={self.restarts}" if self.restarts else ""))
 
 
 class StreamReceiver:

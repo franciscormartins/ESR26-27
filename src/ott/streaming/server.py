@@ -15,6 +15,7 @@ Uso isolado (sem overlay), por exemplo para testar o cliente:
 """
 import argparse
 import logging
+import random
 import socket
 import threading
 import time
@@ -63,6 +64,9 @@ class StreamSource:
         self.video = MjpegFile(video, loop=loop)
         self.send = send
         self.interval = 1.0 / fps
+        # SSRC aleatório (RFC 3550): identifica esta emissão. Se o servidor
+        # reiniciar, o SSRC muda e o cliente sabe que a numeração recomeçou.
+        self.ssrc = random.getrandbits(32)
         self.seq = 0
         self.sent = 0
         self._stop = threading.Event()
@@ -90,7 +94,7 @@ class StreamSource:
                 log.info("%s:%s fim do vídeo (%d pacotes)", self.origin, self.flow, self.sent)
                 break
             self.seq = (self.seq + 1) & 0xFFFF
-            rtp = RtpPacket(self.seq, rtp_timestamp(), frame).encode()
+            rtp = RtpPacket(self.seq, rtp_timestamp(), frame, ssrc=self.ssrc).encode()
             try:
                 self.send(pack_data(self.origin, self.flow, rtp))
                 self.sent += 1
