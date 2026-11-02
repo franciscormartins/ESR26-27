@@ -28,6 +28,7 @@ CONNECT_TIMEOUT = 3.0
 HANDSHAKE_TIMEOUT = 3.0
 RTT_ALPHA = 0.3        # peso da última amostra na média móvel do RTT
 RTT_MAX_SAMPLE = 60.0  # amostras acima disto (s) são descartadas
+DUPLICATE_GRACE = 3.0  # tempo para a ligação vencedora chegar após o fecho de uma duplicada
 
 
 class Neighbor:
@@ -78,6 +79,7 @@ class OverlayNode:
         self._dynamic = {}    # (host, port) -> prazo: alvos propostos como substitutos
         self._connecting = set()  # alvos com uma tentativa de ligação em curso
         self._lost = set()    # vizinhos perdidos e ainda não recuperados
+        self._pending_dup = {}  # id -> prazo: ligação duplicada fechada, à espera da vencedora
         self._deficit_since = None
         self._last_replace = 0.0
         self._replacing = False
@@ -250,6 +252,7 @@ class OverlayNode:
                         self._targets[addr] = n["id"]
                         self._dynamic[addr] = deadline
             log.info("substitutos propostos: %s", [n["id"] for n in nbs])
+            self._connect_missing()  # não esperar pelo próximo ciclo de manutenção
         except (OSError, ValueError, KeyError) as e:
             log.warning("pedido de substitutos falhou (%s)", e)
         finally:
@@ -371,29 +374,55 @@ class OverlayNode:
         if peer_id == self.id:
             sock.close()
             return
+        try:
+            # mensagens pequenas e em sentidos cruzados: sem isto o Nagle retém-nas à espera
+            # do ACK e o RTT medido sai inflacionado e instável
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
         nb = Neighbor(peer_id, sock, initiator)
         with self._lock:
             old = self.neighbors.get(peer_id)
             if old is not None:
                 same_side = old.initiator == nb.initiator
                 if not same_side and old.initiator < nb.initiator:
-                    sock.close()
+                    self._close_duplicate(sock)
                     return
-                old.close()  # ligação antiga obsoleta ou menos prioritária
+                self._close_duplicate(old.sock)  # antiga obsoleta ou menos prioritária
             self.neighbors[peer_id] = nb
             self._lost.discard(peer_id)
+            if len(self.neighbors) >= self.min_neighbors:
+                self._deficit_since = None  # o défice acabou, mesmo que entre dois ciclos
+            resumed = self._pending_dup.pop(peer_id, None) is not None
         sock.settimeout(None)
         log.info("HELLO: vizinho %s ligado (%s)", peer_id,
                  "iniciada por nós" if initiator == self.id else "recebida")
-        if old is None:  # se substituiu uma ligação duplicada o vizinho já estava up
+        if old is None and not resumed:  # senão o vizinho já estava up (duplicada trocada)
             self._fire(self._up_cbs, peer_id)
         self._read_loop(nb)
 
+    def _close_duplicate(self, sock):
+        """Fecha a ligação duplicada avisando o outro lado de que não é uma queda."""
+        try:
+            sock.settimeout(1.0)
+            proto.send_msg(sock, make_msg(MsgType.BYE, self.id, reason="duplicate"))
+        except OSError:
+            pass
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        sock.close()
+
     def _read_loop(self, nb):
+        duplicate = False
         try:
             while not self._stop.is_set():
                 msg = proto.recv_msg(nb.sock)
-                if msg is None or msg["type"] == MsgType.BYE:
+                if msg is None:
+                    break
+                if msg["type"] == MsgType.BYE:
+                    duplicate = msg["data"].get("reason") == "duplicate"
                     break
                 nb.last_seen = time.time()
                 self._dispatch(nb, msg)
@@ -401,7 +430,7 @@ class OverlayNode:
             log.warning("mensagem inválida de %s (%s): ligação fechada", nb.id, e)
         except (OSError, ValueError, KeyError):
             pass
-        self._drop(nb)
+        self._drop(nb, duplicate)
 
     def _dispatch(self, nb, msg):
         mtype = msg["type"]
@@ -418,15 +447,21 @@ class OverlayNode:
         else:
             log.debug("mensagem %s ignorada (de %s)", mtype, nb.id)
 
-    def _drop(self, nb):
+    def _drop(self, nb, duplicate=False):
+        """Remove a ligação. Se o outro lado a fechou por ser duplicada, não há `down`:
+        espera-se pela ligação vencedora (`DUPLICATE_GRACE`), ver `_expire_duplicates`."""
         removed = False
         with self._lock:
             if self.neighbors.get(nb.id) is nb:
                 del self.neighbors[nb.id]
                 removed = True
-                if not self._stop.is_set():
+                if duplicate and not self._stop.is_set():
+                    self._pending_dup[nb.id] = time.time() + DUPLICATE_GRACE
+                elif not self._stop.is_set():
                     self._lost.add(nb.id)
-        if removed and not self._stop.is_set():
+        if removed and duplicate:
+            log.debug("ligação duplicada a %s fechada pelo vizinho", nb.id)
+        elif removed and not self._stop.is_set():
             log.warning("vizinho %s desligado", nb.id)
             self._fire(self._down_cbs, nb.id)
         nb.close()
@@ -447,9 +482,23 @@ class OverlayNode:
             for nb in dead:
                 log.warning("vizinho %s sem resposta", nb.id)
                 self._drop(nb)
+            self._expire_duplicates(now)
             self._expire_dynamic(now)
             self._maybe_replace(now)
             self._stop.wait(min(self.retry_interval, self.keepalive))
+
+    def _expire_duplicates(self, now):
+        """A ligação vencedora não chegou a tempo: afinal foi uma queda."""
+        with self._lock:
+            gone = [i for i, deadline in self._pending_dup.items() if now >= deadline]
+            for i in gone:
+                del self._pending_dup[i]
+                if i not in self.neighbors:
+                    self._lost.add(i)
+        for i in gone:
+            if i not in self.neighbors:
+                log.warning("vizinho %s desligado", i)
+                self._fire(self._down_cbs, i)
 
     def _connect_missing(self):
         with self._lock:

@@ -1,0 +1,162 @@
+% Secção do Elemento 1 (Etapas 0 e 1). Incluída em main.tex com \input{e1_overlay}.
+
+\subsection{Overlay e protocolo de controlo (Etapas 0 e 1)}
+
+\subsubsection{Arquitetura}
+
+Cada nó do overlay é uma instância do programa \texttt{ott} (Python~3, apenas biblioteca
+standard). O controlo usa \textbf{TCP}, porque a queda da ligação permite detetar de imediato a
+saída de um vizinho, e o vídeo usa UDP (Etapa~4). Um nó tem uma thread a aceitar ligações, uma
+thread de leitura por vizinho e uma thread de manutenção (ligar a vizinhos em falta, \emph{keepalive},
+\emph{timeouts} e substitutos). Existe uma só ligação TCP, \emph{full-duplex}, por par de nós.
+
+\subsubsection{Formato das mensagens}
+
+Cada mensagem é um objeto JSON em UTF-8 precedido por 4~bytes (\emph{big-endian}) com o seu tamanho
+(máximo 1~MiB), com o envelope \texttt{\{type, src, data\}}. Optámos pelo prefixo de tamanho, em vez de
+uma linha por mensagem, porque delimita as mensagens sem depender do conteúdo e permite recusar
+mensagens gigantes antes de as ler. Cada tipo tem campos obrigatórios que são \textbf{validados ao
+enviar e ao receber}; uma mensagem inválida entre vizinhos fecha a ligação.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{l l p{6.2cm}}
+\hline
+Tipo & Campos obrigatórios & Função \\
+\hline
+\texttt{HELLO} & -- & 1.ª mensagem de cada ligação (quem liga envia, quem aceita responde) \\
+\texttt{PING}/\texttt{PONG} & \texttt{ts} & \emph{keepalive} e medição do RTT \\
+\texttt{BYE} & (\texttt{reason}, opcional) & saída limpa ou fecho de ligação duplicada \\
+\texttt{REGISTER} & -- & registo no bootstrapper \\
+\texttt{NEIGHBORS} & \texttt{neighbors} & lista \texttt{\{id, host, port\}} devolvida pelo bootstrapper \\
+\texttt{REPLACE} & \texttt{have}, \texttt{lost}, \texttt{need} & pedido de vizinhos substitutos \\
+\texttt{ERROR} & \texttt{reason} & nó desconhecido do ficheiro de topologia \\
+\hline
+\end{tabular}
+\caption{Mensagens de controlo do overlay (as de rotas estão descritas na Etapa~2).}
+\end{table}
+
+\subsubsection{Construção do overlay}
+
+Implementámos as duas estratégias do enunciado. Na \textbf{estratégia~1} os vizinhos são indicados na
+linha de comandos (\texttt{ott viz1 viz2}). Na \textbf{estratégia~2} o nó contacta o bootstrapper
+(\texttt{ott -b <servidor>}), que é o próprio servidor de streaming (\texttt{--serve}), regista-se e
+recebe os vizinhos que o ficheiro de topologia, escrito à mão, lhe atribui. As arestas do ficheiro
+valem nos dois sentidos e ambos os lados tentam ligar-se, o que funciona com ligações diretas no CORE
+(onde só um dos lados alcança o outro) e torna o arranque independente da ordem. Se um vizinho está em
+baixo, o nó volta a tentar de 2 em 2~s; se o bootstrapper está em baixo, o nó insiste até 10 vezes.
+
+\textbf{Ligações duplicadas.} Se dois nós se ligam um ao outro ao mesmo tempo, mantém-se a ligação
+iniciada pelo nó de menor identificador. Como cada lado só vê as ligações à medida que chegam, um nó
+pode já ter dado como ativa a ligação que o outro vai fechar. Por isso quem fecha uma duplicada envia
+antes \texttt{BYE} com \texttt{reason="duplicate"}; quem o recebe retira a ligação sem declarar o
+vizinho caído e espera 3~s pela vencedora. Este caso só apareceu nas medições com arranque simultâneo
+(a versão inicial gerava um \texttt{down} falso seguido de um \texttt{up}) e passou a ser coberto por
+testes.
+
+\subsubsection{Vivacidade, RTT e substitutos}
+
+Cada nó envia \texttt{PING} a todos os vizinhos de 2 em 2~s e dá um vizinho como morto se passarem
+6~s sem receber nada. O fecho da ligação (processo morto, \texttt{BYE}) é detetado de imediato;
+o \emph{timeout} serve para o caso de um nó congelado ou de uma ligação cortada. O \texttt{PONG}
+devolve o \texttt{ts} do \texttt{PING}, pelo que o RTT se mede com o relógio do emissor, sem
+sincronizar relógios. Guardamos uma média móvel (peso 0,3 na última amostra), que o módulo de rotas
+pode usar como métrica.
+
+Com \texttt{--min-neighbors X}, um nó com menos de $X$ vizinhos durante 5~s pede ao bootstrapper
+(\texttt{REPLACE}) substitutos. O bootstrapper propõe nós já registados (e o seu próprio), exclui os
+vizinhos atuais e os perdidos, e prefere vizinhos dos vizinhos atuais. A opção vem desligada por
+omissão: os clientes são folhas e não devem ser obrigados a ter $X$ vizinhos.
+
+\subsubsection{Interface para as etapas seguintes}
+
+O módulo de rotas usa \texttt{register\_handler}, \texttt{send} e \texttt{broadcast}, 
+\texttt{neighbor\_ids()}, os eventos \texttt{on\_neighbor\_up} e \texttt{on\_neighbor\_down}
+e \texttt{rtt(id)} e \texttt{rtts()} (segundos). Os eventos de vizinho correm nas threads do nó e têm
+de ser curtos.
+
+\subsubsection{Testes e resultados}
+
+A suite automática (\texttt{python3 -m unittest discover}) cobre o formato e a validação das
+mensagens, o arranque pelo bootstrapper, a recuperação de um vizinho, o \emph{timeout} de um vizinho
+calado, mensagens inválidas, substitutos, ligações em paralelo e ligações duplicadas. Os tempos foram
+medidos com \texttt{tests/medicoes.py}, que usa processos reais com os parâmetros por omissão, a
+topologia do cenário~2 e sinais (\texttt{SIGKILL}, \texttt{SIGSTOP}, \texttt{SIGCONT}) para simular
+falhas, com 10 repetições por medida (Tabela~\ref{tab:e1-tempos}).
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrr}
+\hline
+Medida (localhost) & $n$ & mín / média / máx (s) \\
+\hline
+Processo morto (\texttt{SIGKILL}): deteção nos vizinhos & 30 & 0,00 / 0,01 / 0,01 \\
+Reentrada do nó morto (todos os vizinhos ligados) & 10 & 0,97 / 0,99 / 0,99 \\
+Nó congelado (\texttt{SIGSTOP}): deteção por \emph{timeout} & 30 & 5,00 / 6,34 / 7,00 \\
+Nó descongelado (\texttt{SIGCONT}): religação & 10 & 2,00 / 2,00 / 2,01 \\
+Substituto (\texttt{--min-neighbors 1}), desde a perda do vizinho & 10 & 7,01 / 7,01 / 7,02 \\
+Arranque simultâneo dos 5 nós: overlay completo & 10 & 2,05 / 2,06 / 2,06 \\
+Bootstrapper tardio (sobe 3~s depois): tempo até ligar & 5 & 2,01 / 2,01 / 2,02 \\
+\hline
+\end{tabular}
+\caption{Tempos medidos em localhost com os parâmetros por omissão. No arranque simultâneo
+não houve ligações duplicadas nem quedas espúrias em 10 execuções.}
+\label{tab:e1-tempos}
+\end{table}
+
+Os mesmos mecanismos foram ensaiados no emulador CORE (Tabela~\ref{tab:e1-core}), com o cenário~2
+(5 nós, ligações diretas) e o cenário~3 (11 nós sobre 10 routers FRR/OSPF; a atribuição dos nós
+overlay aos nós do CORE é uma proposta ainda por confirmar). O RTT sem atraso é de 1 a 2~ms, acima do
+\emph{ping} (0,1~ms) por incluir o processamento em Python. Com 20~ms de atraso em cada lado do link
+O1--C2 (\texttt{tc netem}) mediu-se 41,1 a 41,6~ms, isto é, $2\times 20$~ms mais o tempo base, e os
+restantes links mantiveram-se em 1,5~ms.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrr}
+\hline
+Medida (CORE) & $n$ & mín / média / máx (s) \\
+\hline
+Link O1--C2 em baixo: deteção em O1 & 10 & 5,55 / 5,96 / 6,03 \\
+Link O1--C2 em baixo: deteção em C2 & 10 & 5,99 / 7,54 / 8,00 \\
+Link reposto: religação & 10 & 0,02 / 1,59 / 2,00 \\
+Arranque simultâneo (cenário~2): overlay completo & 10 & 2,24 / 2,45 / 4,20 \\
+Bootstrapper tardio (cenário~2): ligar após o S1 subir & 10 & 3,15 / 3,18 / 3,20 \\
+Nó O5 morto (cenário~3, 5 vizinhos): deteção (último vizinho) & 10 & 0,01 / 0,02 / 0,03 \\
+Nó O5 reposto (cenário~3): 5 vizinhos ligados & 10 & 1,86 / 1,89 / 1,92 \\
+Substituto no cenário~3 (O9 perde O6; liga a O1) & 10 & 7,18 / 7,23 / 7,29 \\
+\hline
+\end{tabular}
+\caption{Tempos medidos no CORE. Em todos os arranques as listas de vizinhos coincidiram com os
+ficheiros de topologia e não houve \texttt{desligado} espúrios.}
+\label{tab:e1-core}
+\end{table}
+
+O substituto demora cerca de 7~s: 5~s de espera por um possível regresso do vizinho, mais a
+granularidade de 2~s do ciclo de manutenção, que só avalia o défice de vizinhos de 2 em 2~s.
+
+\subsubsection{Problemas encontrados nos ensaios}
+
+Os ensaios revelaram três defeitos, todos corrigidos e cobertos por testes. (1) No arranque
+simultâneo, a ligação duplicada provocava um \texttt{down} falso seguido de um \texttt{up}
+(descrito acima). (2) O RTT saía inflacionado e instável (37~ms de início nos clientes, 60 a 80~ms com
+atraso de 20~ms por lado, em vez de 41~ms): as mensagens são pequenas e cruzam-se nos dois sentidos,
+pelo que o algoritmo de Nagle retinha cada uma à espera do ACK da anterior. A solução foi ativar
+\texttt{TCP\_NODELAY} nas ligações. (3) O substituto só tentava ligar no ciclo de manutenção seguinte;
+passou a ligar logo que é proposto, e o contador de défice passou a ser reposto ao atingir $X$
+vizinhos.
+
+\subsubsection{Apreciação crítica}
+
+O tempo de deteção por \emph{timeout} depende de dois parâmetros e do momento em que o vizinho
+falha: o último sinal de vida pode ter chegado até 2~s antes, e a verificação corre de 2 em 2~s,
+pelo que a deteção demora entre cerca de 4 e 8~s com os valores por omissão. Reduzir
+\texttt{dead\_after} acelera a deteção, mas aumenta o risco de falsos positivos em ligações lentas. Em
+contrapartida, um processo que termina (ou um \texttt{BYE}) é detetado em milissegundos.
+
+Limitações conhecidas: cada nó tem um só endereço no ficheiro de topologia (um router com várias
+interfaces só é alcançável por um IP); o ficheiro de topologia é estático; o bootstrapper não expira
+nós que deixem de dar sinal; o controlo não tem autenticação nem cifra.

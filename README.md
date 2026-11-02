@@ -15,7 +15,7 @@ relatório em `docs/relatorio/`.
 | `src/ott/streaming/` | formato dos pacotes de vídeo (cabeçalho origem/fluxo + RTP), servidor e cliente UDP; ainda sem ligação ao overlay | 4 |
 | `progex/` | código de apoio do livro (Kurose) e `movie.Mjpeg`, só como referência | 4 |
 | `topologies/` | cenários 1–3 (ajustar `host` aos IPs do CORE) | – |
-| `tests/` | testes automáticos | – |
+| `tests/` | testes automáticos (`python3 -m unittest discover -s tests -t .`) e `medicoes.py` (tempos em localhost, 10 repetições) | – |
 | `docs/ESTADO.md` | **ponto da situação**: o que está feito, decisões, como testar, pendentes, perguntas ao docente | – |
 | `docs/protocolo.md` | especificação das mensagens e interações | 1 |
 | `docs/testes-core.md` | comandos por nó e testes a fazer nos cenários 1–3 no CORE | – |

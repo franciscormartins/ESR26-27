@@ -2,7 +2,7 @@
 
 > Ficheiro vivo: é atualizado sempre que algo é feito. Serve para saber o ponto da situação,
 > relembrar as decisões e preparar as conversas com os docentes.
-> **Última atualização: 2026-10-27.**
+> **Última atualização: 2026-11-02.**
 
 ## 1. Resumo em 30 segundos
 
@@ -14,9 +14,11 @@
 - **Estado:** a Etapa 2 já origina anúncios periódicos, aprende e propaga rotas por fluxo,
   e encaminha ativações/desativações idempotentes pelo caminho de montante. Os testes cobrem
   estes comportamentos; ainda falta validar a reação a falhas no CORE e implementar o plano de dados.
-  Os ensaios no CORE dos cenários 1 e 2 estão feitos para a parte base (ligar, saída limpa,
-  reentrada). **Falta ensaiar no CORE** as funcionalidades novas (RTT, timeout, substitutos) e o overlay no cenário 3.
-- Falta ainda: validação da adaptação a falhas no CORE, encaminhamento dos dados (E2) e streaming (E3).
+  **Elemento 1 concluído:** todas as funcionalidades estão implementadas e foram ensaiadas no CORE (cenário 2 e
+  cenário 3 com 11 nós) e medidas com 10 repetições (secção 7). Os ensaios acharam e corrigiram 4 defeitos
+  (D17–D19 e o contador de défice); ver secção 7 e o registo de alterações.
+- Falta ainda, fora do E1: validação da adaptação a falhas das rotas no CORE, encaminhamento dos dados (E2) e streaming (E3).
+  Do E1 só dependem de ti a confirmação da atribuição overlay→CORE do cenário 3 e a revisão do texto do relatório.
 
 ## 2. O que está feito (elemento 1)
 
@@ -27,11 +29,13 @@
 | Aplicação `ott`: servidor TCP + ligações de saída, full-duplex, thread por ligação, HELLO | ✅ feito, ensaiado no CORE | `src/ott/node.py` |
 | Overlay com `ott -b <bootstrapper>` e ficheiro de topologia escrito à mão | ✅ feito, ensaiado no CORE (cen. 1 e 2) | `bootstrapper.py`, `topologies/*.json` |
 | Estratégia 1 (`ott viz1 viz2`) | ✅ feito, ensaiado no CORE | `cli.py` |
-| KEEPALIVE periódico e deteção de vizinho caído (fecho da ligação ou timeout) | ✅ feito; fecho/BYE ensaiado no CORE, timeout só em teste automático | `node.py` |
-| Pedido de substituto ao bootstrapper | ✅ feito (opção `--min-neighbors`); só testado automaticamente | `node.py`, `bootstrapper.py` |
-| RTT por vizinho entregue ao E2 | ✅ feito (`node.rtt(id)`, `node.rtts()`); só testado em localhost | `node.py` |
+| KEEPALIVE periódico e deteção de vizinho caído (fecho da ligação ou timeout) | ✅ feito; ensaiado no CORE (fecho do TCP, link em baixo) e em localhost (`SIGSTOP`) | `node.py` |
+| Pedido de substituto ao bootstrapper | ✅ feito (opção `--min-neighbors`); ensaiado no CORE (cenário 3) | `node.py`, `bootstrapper.py` |
+| RTT por vizinho entregue ao E2 | ✅ feito (`node.rtt(id)`, `node.rtts()`); ensaiado no CORE, também com atraso (`tc netem`) | `node.py` |
 | Eventos `vizinho_up/down` para o E2 | ✅ feito (`on_neighbor_up/down`) | `node.py` |
-| Testes de saída/entrada de nós com anotação de resultados | 🟡 parcial: cenário 2 medido; falta o resto (ver secção 7) | `docs/testes-core.md` |
+| Testes de saída/entrada de nós com anotação de resultados | ✅ feito: cenários 2 e 3 no CORE e localhost, 10 repetições (secção 7) | `tests/medicoes.py`, `docs/testes-core.md` |
+| Overlay completo no cenário 3 (11 nós) | ✅ ensaiado no CORE (atribuição overlay→CORE ainda por confirmar pelo grupo) | `topologies/cenario3.*` |
+| Relatório: secção do E1 | ✅ escrita (`e1_overlay.tex`, incluída em `main.tex`); rever com o grupo | `docs/relatorio/` |
 
 Também feito (apoio ao grupo): topologias CORE dos cenários 1, 2 e 3 (`topologies/*.xml`), com o
 underlay do cenário 3 a funcionar (routers FRR, OSPF); comandos de arranque por nó (`docs/testes-core.md`).
@@ -56,6 +60,9 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF); comandos de arranque por
 | D14 | Routers com FRR (não Quagga) e `frr.conf`/`frrboot.sh` próprios no XML | O Quagga instalado não tem `vtysh`, e o CORE 9.2.1 gera config que o FRR 10 rejeita (ver `docs/testes-core.md`). |
 | D15 | Decidido implementar a Estratégia 1 do enunciado. Estado de rota indexado por `(servidor, fluxo)`, com vizinho de montante, destinos a jusante, subscritores, custo em saltos, época e anúncios vistos. `fluxo` identifica o conteúdo/stream multimédia (ex.: `filme_a`). | Anúncios do servidor constroem as rotas; pedidos dos clientes abrem e fecham ramos partilhados. Roadmap em `docs/ETAPA2.md`; modelo em `docs/protocolo.md`. |
 | D16 | Protocolo E2 definido: `ANNOUNCE(server_id, flow, epoch, metric)`; `ACTIVATE`/`DEACTIVATE(server_id, flow, subscriber_id)`. Custo em saltos, época crescente por fluxo, IDs overlay para servidor/cliente e nome estável para fluxo. | Suporta vários fluxos e servidores; handlers dos três tipos implementados. |
+| D17 | Quem fecha uma ligação duplicada envia `BYE` com `reason: "duplicate"`; quem o recebe retira a ligação **sem `down`** e espera até 3 s pela vencedora (`DUPLICATE_GRACE`), que é adotada sem novo `up` | Num arranque simultâneo o outro lado fechava, depois de nós a darmos como `up`, a ligação perdedora: o E2 via `down`+`up` falsos (apagaria rotas à toa). Alternativas rejeitadas: só o nó de menor id liga (quebra o D6) ou adiar sempre todos os `down` (esconde quedas reais). |
+| D18 | `TCP_NODELAY` em todas as ligações entre vizinhos | O algoritmo de Nagle retinha as mensagens pequenas (PING/PONG cruzados) à espera do ACK: RTT de 37 ms inicial nos clientes e 60–80 ms com atraso de 20 ms/lado (esperado 41 ms). Com NODELAY: 41,1–41,6 ms. O RTT é a métrica do E2, por isso tem de ser fiável. |
+| D19 | Ligar a um substituto logo que é proposto, e repor o contador de défice ao atingir X vizinhos | Poupava-se o ciclo de 2 s; e o contador antigo podia contar défice já resolvido (artefacto visto nas medições). |
 
 ## 4. Arquitetura (resumo)
 
@@ -92,10 +99,17 @@ encaminhamento dos dados.
 
 ## 6. Como testar
 
-**Etapa 1 (21 testes, ~7 s):**
+**Suite completa (60 testes, ~16 s):**
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -t .
+```
+
+**Medições de tempos em localhost** (processos reais, parâmetros por omissão, ~6 min; não é apanhado pelo `discover`):
+
+```sh
+PYTHONPATH=src python3 tests/medicoes.py 10            # todas, 10 repetições
+PYTHONPATH=src python3 tests/medicoes.py 10 substituto # só uma (morte|substituto|simultaneo|bootstrapper)
 ```
 
 **Tabela de rotas e anúncios:**
@@ -133,60 +147,87 @@ Usar `--stats 5` para ver os vizinhos e o RTT; guardar logs com `tee`.
 |---|---|---|
 | Arranque | todos os vizinhos do JSON ligados em ≤ ~4 s, uma ligação por par | logs `HELLO: vizinho X ligado`; `--stats` |
 | Saída limpa (Ctrl-C) / processo morto | vizinhos detetam em milissegundos (BYE / fecho TCP) | diferença entre a hora da ação (`date`) e o log `desligado` |
-| Nó congelado (`kill -STOP`) ou link em baixo (`ip link set ... down`) | deteção por timeout em ≈ 6–8 s | idem |
+| Nó congelado (`kill -STOP`) | deteção por timeout em ≈ 5–8 s (o último sinal pode ter chegado até 2 s antes do STOP) | idem |
 | Reentrada | volta a ligar em ≤ ~2 s | logs |
+| Link em baixo (`ip link set ... down`) | ≈ 6–8 s (dead_after 6 s + ciclo de 2 s) | `date` antes da ação e hora do log |
 | RTT | em localhost/CORE sem atraso ≈ 0,3–1 ms; com atraso D no link ≈ 2·D | `--stats` |
-| Substituto | ≈ 5 s depois de ficar com vizinhos a menos, `substitutos propostos` e novo HELLO | logs |
+| Substituto | ≈ 7 s (5 s de espera + ciclo de 2 s), `substitutos propostos` e novo HELLO | logs |
 
 Critérios: correção (vizinhos certos, sem duplicados), **tempo de deteção e de recuperação** (média e máximo
 de ~10 repetições), robustez (sem threads penduradas nem exceções nos logs).
 
-**Resultados já medidos**
+**Resultados anteriores (históricos, antes das correções D17–D19; os valores finais estão abaixo)**
 
 - Cenário 2 no CORE (2026-10-22): Ctrl-C num nó → vizinhos detetam em ≤ 2 ms; reentrada do nó → overlay
   completo em ≈ 2,0 s (primeiros vizinhos em 0,9 s). Sem vizinhos "fantasma" após ligações duplicadas.
 - Cenário 3, underlay (2026-10-22): `ping` do `C6` ao `Server` 3/3, 0 % de perda; OSPF convergiu em < 30 s.
-- Cenário 2 no CORE (2026-10-27): RTT medido com `--stats 5` (sem atraso configurado), `S1`: O1 1,3–1,6 ms, O2 1,2–1,8 ms; O1: C2 1,5–1,9 ms, O2 1,8–2,2 ms, S1 1,6–2,1 ms; O2 e C1/C2 com valores semelhantes (1,2–2,3 ms). Os valores são estáveis (média móvel). Reinícios manuais de nós produziram `WARNING vizinho X desligado` e religação automática nos vizinhos, sem erros nem duplicados. Ainda **sem tempos medidos** de timeout/link down/substitutos.
+- Cenário 2 no CORE (2026-10-27, medido antes do `TCP_NODELAY`, com RTT inflacionado nalguns pares): RTT com `--stats 5` (sem atraso configurado), `S1`: O1 1,3–1,6 ms, O2 1,2–1,8 ms; O1: C2 1,5–1,9 ms, O2 1,8–2,2 ms, S1 1,6–2,1 ms; O2 e C1/C2 com valores semelhantes (1,2–2,3 ms). Os valores são estáveis (média móvel). Reinícios manuais de nós produziram `WARNING vizinho X desligado` e religação automática nos vizinhos, sem erros nem duplicados.
 - Localhost (2026-10-26): RTT 0,4–0,7 ms; 21/21 testes automáticos, estáveis em 4 execuções seguidas.
 
-**Ensaios do cenário 2 no CORE (checklist, 2026-10-27)**
+**Resultados finais (2026-11-02; mín / média / máx em segundos; scripts em `tests/medicoes.py`)**
 
-Amostra de cada medida: 1 execução, salvo indicação. O objetivo é ~10 repetições antes de pôr no relatório.
+*Localhost, processos reais, parâmetros por omissão:*
 
-| # | Teste | Estado | Resultado obtido |
+| Medida | n | mín / média / máx |
+|---|---|---|
+| Processo morto (`SIGKILL`): deteção nos vizinhos | 30 | 0,00 / 0,01 / 0,01 |
+| Reentrada do nó morto (todos os vizinhos ligados) | 10 | 0,97 / 0,99 / 0,99 |
+| Nó congelado (`SIGSTOP`): deteção por timeout | 30 | 5,00 / 6,34 / 7,00 |
+| Nó descongelado (`SIGCONT`): religação | 10 | 2,00 / 2,00 / 2,01 |
+| Substituto (`--min-neighbors 1`) desde a perda do vizinho | 10 | 7,01 / 7,01 / 7,02 |
+| Arranque simultâneo dos 5 nós: overlay completo | 10 | 2,05 / 2,06 / 2,06 (0 duplicados/quedas espúrias) |
+| Bootstrapper tardio (sobe 3 s depois) | 5 | 2,01 / 2,01 / 2,02 |
+
+*CORE (cenários 2 e 3; ações com `ip link`, `tc netem` e `pkill` dentro dos nós com `vcmd`):*
+
+| # | Teste | n | Resultado |
 |---|---|---|---|
-| 1 | Arranque (S1 `--serve`, restantes `-b`) | ✅ feito | Todos os vizinhos do JSON ligados, uma ligação por par, sem duplicados. |
-| 2 | RTT sem atraso (`--stats 5`) | ✅ feito | 1,2–2,3 ms em todos os pares; estável (média móvel). |
-| 3 | Processo morto / Ctrl-C (O1) | ✅ feito (1×) | Vizinhos detetam em ≤ 2 ms (C2 17:10:30,845; S1 ,846; O2 ,844). |
-| 4 | Reentrada do nó (O1) | ✅ feito (1×) | Registo no S1 17:12:53,354; C2 liga em 0,7 s, O2 em 1,8 s, S1 em 2,0 s → overlay completo em ≈ 2 s. |
-| 5 | Nó congelado (`kill -STOP $P`) | 🟡 feito (1×, aproximado) | O1 congelado entre 17:32:31 e 17:32:36 (parou de escrever `--stats`). O S1 registou `sem resposta` + `desligado` às 17:32:40,050 → deteção ≈ 6 s após o último sinal de vida (`dead_after`), como previsto. Hora exata do STOP não anotada: repetir com `date`. Com o O1 parado, C2 e O2 tentaram religar de 4 em 4 s e falharam em `timed out` (o TCP é aceite pelo kernel, mas o HELLO não é respondido). |
-| 6 | Link em baixo (`ip link set <iface> down`) | ⬜ por fazer | esperado ≈ 6–8 s |
-| 7 | RTT com atraso (`tc netem delay 20ms`) | ⬜ por fazer | esperado ≈ 40 ms (2·D) |
-| 8 | Substituto (`--min-neighbors`, matar um vizinho) | ⬜ por fazer | esperado: `REPLACE` ≈ 5 s depois e novo `HELLO` |
-| 9 | Arranque simultâneo de todos os nós (ligações duplicadas) | ⬜ por fazer | esperado: uma só ligação por par |
-| 10 | Bootstrapper em baixo ao arrancar um nó | ⬜ por fazer | esperado: o nó insiste e entra quando o S1 subir |
-| 11 | Repetir 3, 4, 5 e 6 cerca de 10× e tirar média/máximo | ⬜ por fazer | para o relatório |
+| 1 | Arranque (cenário 2) | – | vizinhos iguais ao JSON, uma ligação por par, sem `desligado` |
+| 2 | RTT sem atraso | – | 1,0–2,0 ms em todos os pares (o `ping` dá 0,1 ms: o resto é Python) |
+| 3 | Processo morto, O5 do cenário 3 (5 vizinhos) | 10 | deteção 0,01 / 0,02 / 0,03 s |
+| 4 | Reentrada do O5 (todos os 5 ligados) | 10 | 1,86 / 1,89 / 1,92 s |
+| 5 | Nó congelado (`kill -STOP`, cenário 2) | 1 + localhost 10× | ≈ 6 s após o último sinal (`sem resposta`); em CORE o caminho do timeout foi medido 10× com o teste 6 |
+| 6 | Link O1–C2 em baixo (`ip link set eth0 down`) | 10 | deteção em O1 5,55 / 5,96 / 6,03 s; em C2 5,99 / 7,54 / 8,00 s; religação ao repor 0,02 / 1,59 / 2,00 s |
+| 7 | RTT com atraso 20 ms em cada lado (`tc netem`) | – | 41,1–41,6 ms no link com atraso (esperado 2·20 + ~1,3); outros links 1,5 ms; ao remover volta a 2 ms |
+| 8 | Substituto no cenário 3 (O9 com `--min-neighbors 1` perde o O6) | 10 | liga ao O1 em 7,18 / 7,23 / 7,29 s |
+| 9 | Arranque simultâneo (cenário 2) | 10 | overlay completo em 2,24 / 2,45 / 4,20 s, 0 quedas espúrias |
+| 10 | Bootstrapper em baixo ao arrancar (S1 sobe 3 s depois, cenário 2) | 10 | liga 3,15 / 3,18 / 3,20 s após o S1 subir, 0 quedas |
+| 11 | Overlay completo no cenário 3 (11 nós, ping underlay 0 % perda) | 1 | os 11 nós com exatamente os vizinhos do JSON, RTT 1,1–2,4 ms, 0 `desligado` |
 
-Nota de método: um `ott` por terminal, em segundo plano com `P=$!`; parar sempre com `kill $P` (ver `jobs`). Num ensaio houve dois
-`ott` no mesmo nó (um em segundo plano que o Ctrl-C não apanhava); não é erro do código.
+Notas: o cenário 2 só tem ligações diretas; um nó não alcança um substituto que não seja vizinho, por isso o teste 8
+foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coincide com o do CORE (≈ 7 s).
+
+**Defeitos encontrados pelos ensaios (todos corrigidos, com teste automático):**
+1. Arranque simultâneo: `down`+`up` falsos por ligação duplicada (D17). Detetado por `tests/medicoes.py` (6 eventos extra numa execução), depois reproduzido por teste (2 de 25 execuções antes da correção).
+2. RTT inflacionado e instável por Nagle (D18). Detetado no CORE com `tc netem` (60–80 ms em vez de 41 ms).
+3. Substituto só ligava no ciclo seguinte (D19) → de 9,2 s para 7,2 s no CORE.
+4. Contador de défice não era reposto entre ciclos (D19).
+
+**Como foi feito (útil para a defesa):** `core-cli xml -f topologies/cenarioN.xml -s` abre a sessão; as ações correm com
+`vcmd -c /tmp/pycore.1/<nó> -- <comando>`; o `ott` arranca com `setsid` e escreve para ficheiro; os tempos saem das horas dos logs
+(ms) menos a hora da ação. Para parar o `ott` num nó: `vcmd -c /tmp/pycore.1/<nó> -- pkill -f '^python3 -m ott'`
+(o `pkill` do anfitrião não chega: os processos correm como root noutro espaço de PIDs).
 
 ## 8. Limitações e riscos conhecidos
 
 - Um só `host` por nó no ficheiro (nós com várias interfaces só são alcançáveis por um IP).
 - O bootstrapper não expira nós: só sabe que estão vivos por terem pedido registo/substitutos.
 - Ficheiro de topologia estático (um nó novo tem de constar do ficheiro).
-- Na entrada, quando os dois lados tentam ligar-se em simultâneo, abre-se e fecha-se uma ligação à toa (inofensivo).
+- Na entrada, quando os dois lados tentam ligar-se em simultâneo, abre-se e fecha-se uma ligação à toa; desde o D17 isto já não produz eventos `down`/`up` falsos (só há uma ligação duplicada transitória).
+- O substituto demora ≈ 7 s (espera de 5 s + ciclo de manutenção de 2 s): é o preço de não reagir a quedas curtas.
+- Em ligações diretas (cenários 1 e 2) os substitutos só podem ser vizinhos já alcançáveis; faz sentido testá-los com routers (cenário 3).
+- RTT ≈ 1–2 ms em CORE sem atraso: inclui processamento em Python (o `ping` dá 0,1 ms); não afeta a comparação entre caminhos.
 - Sem autenticação nem cifra no controlo.
 - O cenário 2 desenhado tem 2 nós intermédios; o enunciado mostra 3 (S1 liga a um só, que se liga aos outros dois).
 
 ## 9. Por fazer
 
 **Elemento 1**
-- [x] RTT sem atraso no cenário 2 (1,2–2,3 ms, 2026-10-27).
-- [ ] Ensaiar no CORE: timeout (`kill -STOP`), link em baixo, RTT com atraso, substituto (`--min-neighbors`); registar tempos (10 repetições).
-- [ ] Ensaiar o overlay no cenário 3 (11 nós) e **confirmar a atribuição overlay→CORE** (cenário 3 de `docs/testes-core.md`).
-- [ ] Rever a especificação (`docs/protocolo.md`) com o grupo e fixar os campos das mensagens do E2.
-- [ ] Passar a especificação e os resultados para o relatório (`docs/relatorio/main.tex` ainda vazio).
+- [x] Ensaiar no CORE: timeout/link em baixo, RTT com atraso, substituto, arranque simultâneo, bootstrapper tardio (2026-11-02, 10 repetições).
+- [x] Ensaiar o overlay no cenário 3 (11 nós) com a atribuição proposta (2026-11-02).
+- [x] Passar a especificação e os resultados para o relatório (`docs/relatorio/e1_overlay.tex`, incluída em `main.tex`).
+- [ ] **Tu:** confirmar a atribuição overlay→CORE do cenário 3 (se mudar, só se altera o `cenario3.json` e o `testes-core.md`; os resultados mantêm-se válidos para a estrutura).
+- [ ] **Grupo:** rever `docs/protocolo.md` (inclui o `BYE reason=duplicate`) e o texto `e1_overlay.tex`; o `babel` em português do `main.tex` não está instalado nesta máquina (compila noutra com `texlive-babel-portuguese`).
 - [ ] Decidir se refazemos o cenário 2 com 3 intermédios, como no enunciado.
 
 **Outros elementos (para saber o que depende de nós)**
@@ -208,6 +249,7 @@ Nota de método: um `ott` por terminal, em segundo plano com `P=$!`; parar sempr
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-02 | **Elemento 1 concluído.** Ensaios no CORE (cenários 2 e 3, abertos por `core-cli`, ações por `vcmd`) e medições em localhost com 10 repetições (`tests/medicoes.py`, novo). Corrigidos 4 defeitos achados nos ensaios: `down`/`up` falsos com ligação duplicada (`BYE reason=duplicate`, D17), RTT inflacionado por Nagle (`TCP_NODELAY`, D18), ligação imediata a substitutos e reposição do contador de défice (D19). 60 testes automáticos (+9). Relatório: nova secção `docs/relatorio/e1_overlay.tex`. `docs/protocolo.md` atualizado. |
 | 2026-10-27 | Teste 5 (nó congelado) feito 1× no cenário 2: deteção por timeout (`sem resposta`) ≈ 6 s; falta repetir com hora exata. |
 | 2026-10-27 | Checklist de ensaios do cenário 2 (§7) com resultados: arranque, RTT, processo morto (≤ 2 ms) e reentrada (≈ 2 s) feitos; timeout, link down, atraso, substitutos, arranque simultâneo e bootstrapper em baixo por fazer. |
 | 2026-10-27 | Primeiro ensaio das funcionalidades novas no CORE (cenário 2, `--stats 5`): RTT por vizinho funciona (1,2–2,3 ms); deteção de queda e religação observadas nos logs. Falta medir timeout, link down, RTT com atraso e substitutos. |

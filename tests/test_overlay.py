@@ -1,4 +1,5 @@
 import socket
+import threading
 import time
 import unittest
 from unittest import mock
@@ -226,6 +227,128 @@ class OverlayTest(unittest.TestCase):
             c.close()
         srv.close()
         self.assertEqual(len(accepted), 1)
+
+
+class SimultaneousConnectTest(unittest.TestCase):
+    """Dois nós que se ligam um ao outro ao mesmo tempo: sem `down` falso nem `up` repetido."""
+
+    def test_no_spurious_down_or_repeated_up(self):
+        bad = []
+        for rep in range(10):
+            base = 47600 + 2 * rep
+            events = []
+            nodes = [OverlayNode(n, "127.0.0.1", base + i, keepalive=0.2,
+                                 dead_after=1.0, retry_interval=0.2)
+                     for i, n in enumerate(("A", "B"))]
+            for node in nodes:
+                node.on_neighbor_up(lambda nd, i: events.append((nd.id, "up", i)))
+                node.on_neighbor_down(lambda nd, i: events.append((nd.id, "down", i)))
+                node.start()
+            barrier = threading.Barrier(2)
+
+            def link(node, other):
+                barrier.wait()
+                node.add_targets({("127.0.0.1", base + other): None})
+
+            threads = [threading.Thread(target=link, args=(nodes[0], 1)),
+                       threading.Thread(target=link, args=(nodes[1], 0))]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertTrue(wait_for(lambda: all(len(n.neighbor_ids()) == 1 for n in nodes)))
+            time.sleep(0.4)  # tempo para um eventual up/down tardio aparecer
+            if sorted(events) != [("A", "up", "B"), ("B", "up", "A")]:
+                bad.append(events)
+            for node in nodes:
+                node.stop()
+            time.sleep(0.05)
+        self.assertEqual(bad, [], f"{len(bad)} execuções com eventos indevidos")
+
+
+class DuplicateCloseTest(unittest.TestCase):
+    """O outro lado fecha uma ligação por ser duplicada (BYE reason=duplicate)."""
+
+    def setUp(self):
+        self.events = []
+        self.node = OverlayNode("B", "127.0.0.1", 47650, keepalive=0.2,
+                                dead_after=5.0, retry_interval=0.2)
+        self.node.on_neighbor_up(lambda nd, i: self.events.append(("up", i)))
+        self.node.on_neighbor_down(lambda nd, i: self.events.append(("down", i)))
+        self.node.start()
+        self.socks = []
+
+    def tearDown(self):
+        self.node.stop()
+        for s in self.socks:
+            s.close()
+
+    def adopt(self, initiator):
+        """Liga ao nó um 'A' simulado por um par de sockets; devolve o lado de A."""
+        a, b = socket.socketpair()
+        self.socks += [a, b]
+        threading.Thread(target=self.node._adopt, args=("A", b, initiator),
+                         daemon=True).start()
+        return a
+
+    def test_winner_arrives_after_duplicate_closed_no_down(self):
+        loser = self.adopt("B")
+        self.assertTrue(wait_for(lambda: self.node.neighbor_ids() == ["A"]))
+        proto.send_msg(loser, make_msg(MsgType.BYE, "A", reason="duplicate"))
+        self.assertTrue(wait_for(lambda: self.node.neighbor_ids() == []))
+        self.adopt("A")
+        self.assertTrue(wait_for(lambda: self.node.neighbor_ids() == ["A"]))
+        time.sleep(0.3)
+        self.assertEqual(self.events, [("up", "A")])
+
+    def test_no_winner_becomes_down_after_grace(self):
+        with mock.patch.object(node_mod, "DUPLICATE_GRACE", 0.4):
+            loser = self.adopt("B")
+            self.assertTrue(wait_for(lambda: self.node.neighbor_ids() == ["A"]))
+            proto.send_msg(loser, make_msg(MsgType.BYE, "A", reason="duplicate"))
+            self.assertTrue(wait_for(lambda: ("down", "A") in self.events, 5))
+        self.assertEqual(self.events, [("up", "A"), ("down", "A")])
+
+    def test_plain_bye_is_down_immediately(self):
+        conn = self.adopt("B")
+        self.assertTrue(wait_for(lambda: self.node.neighbor_ids() == ["A"]))
+        proto.send_msg(conn, make_msg(MsgType.BYE, "A"))
+        self.assertTrue(wait_for(lambda: ("down", "A") in self.events, 1))
+
+
+class SocketOptionsTest(unittest.TestCase):
+    def test_tcp_nodelay_on_both_ends(self):
+        """Sem TCP_NODELAY o Nagle atrasa PING/PONG e inflaciona o RTT medido."""
+        nodes = [OverlayNode(n, "127.0.0.1", 47670 + i, keepalive=0.2,
+                             dead_after=1.0, retry_interval=0.2)
+                 for i, n in enumerate(("A", "B"))]
+        try:
+            for node in nodes:
+                node.start()
+            nodes[0].add_targets({("127.0.0.1", 47671): None})
+            self.assertTrue(wait_for(lambda: all(n.neighbor_ids() for n in nodes)))
+            for node in nodes:
+                for nb in list(node.neighbors.values()):
+                    self.assertTrue(
+                        nb.sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY),
+                        f"{node.id}: TCP_NODELAY desligado")
+        finally:
+            for node in nodes:
+                node.stop()
+
+
+class DeficitTimerTest(unittest.TestCase):
+    def test_deficit_timer_reset_when_enough_neighbors(self):
+        node = OverlayNode("B", "127.0.0.1", 47680, min_neighbors=1)
+        node._deficit_since = 123.0
+        a, b = socket.socketpair()
+        threading.Thread(target=node._adopt, args=("A", b, "A"), daemon=True).start()
+        try:
+            self.assertTrue(wait_for(lambda: node.neighbor_ids() == ["A"]))
+            self.assertIsNone(node._deficit_since)
+        finally:
+            a.close()
+            b.close()
 
 
 class BootstrapServiceTest(unittest.TestCase):

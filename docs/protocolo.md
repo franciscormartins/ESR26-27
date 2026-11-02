@@ -32,7 +32,7 @@ não depende de o JSON conter ou não quebras de linha e permite rejeitar mensag
 | `HELLO` | nó ↔ nó | – | 1.ª mensagem de cada ligação (o que liga envia, o que aceita responde) |
 | `PING` | nó → vizinho | `ts` (número) | de `keepalive` em `keepalive` segundos, a todos os vizinhos |
 | `PONG` | vizinho → nó | `ts` (número, **o mesmo do PING**) | em resposta imediata a cada PING |
-| `BYE` | nó → vizinho | – | saída limpa; o vizinho fecha a ligação sem esperar timeout |
+| `BYE` | nó → vizinho | `reason` (opcional; `"duplicate"` ao fechar uma ligação duplicada) | saída limpa; o vizinho fecha a ligação sem esperar timeout |
 | `REGISTER` | nó → bootstrapper | – | ao entrar no overlay (`ott -b`) |
 | `REPLACE` | nó → bootstrapper | `have` (lista de ids), `lost` (lista de ids), `need` (inteiro > 0) | nó com menos de X vizinhos há mais de `replace_interval` s |
 | `NEIGHBORS` | bootstrapper → nó | `neighbors`: lista de `{id, host, port}` | resposta a `REGISTER` ou `REPLACE` (pode ser lista vazia) |
@@ -90,6 +90,12 @@ Estratégia 1 (`ott viz1 viz2`): igual, sem REGISTER; os vizinhos são os endere
 Se dois nós se ligarem um ao outro ao mesmo tempo existem duas ligações TCP. Ambos aplicam a mesma
 regra: **mantém-se a ligação iniciada pelo nó de menor id** e a outra é fechada. O módulo de rotas
 só vê um evento `up` por vizinho.
+
+Como cada lado só vê as ligações à medida que chegam, um nó pode já ter adotado (e dado como `up`) a
+ligação que o outro lado vai fechar. Por isso quem fecha uma duplicada envia antes `BYE` com
+`reason: "duplicate"`. Quem o recebe numa ligação que tinha como ativa retira-a **sem disparar `down`** e
+espera até `DUPLICATE_GRACE` (3 s) pela ligação vencedora, que então é adotada **sem novo `up`**. Se a
+vencedora não chegar a tempo, dispara-se o `down`. Um `BYE` sem `reason` é uma saída normal (`down` imediato).
 
 ### 3.3 Vivacidade e RTT
 
@@ -155,6 +161,7 @@ existe confirmação de subscrição nem tráfego de vídeo.
 | `min_neighbors` (X) | 0 | mínimo de vizinhos; 0 desativa os substitutos |
 | `replace_interval` | 5 s | défice de vizinhos tolerado antes (e entre) pedidos REPLACE |
 | `substitute_wait` | 10 s | tempo que um substituto tem para ligar |
+| `DUPLICATE_GRACE` | 3 s | tempo para a ligação vencedora chegar depois de o vizinho fechar uma duplicada |
 
 ## 6. Limitações conhecidas
 
