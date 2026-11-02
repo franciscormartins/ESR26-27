@@ -6,6 +6,8 @@
 
 Opções úteis nos testes:
   --min-neighbors X   pede substitutos ao bootstrapper se ficar com menos de X vizinhos
+  --publish-flow ID   anuncia periodicamente um fluxo originado neste nó (repetível)
+  --announce-interval S intervalo entre rondas de anúncios (default: 5 s)
   --stats SEGUNDOS    escreve periodicamente os vizinhos e o RTT de cada um
 
 Os endereços têm o formato HOST ou HOST:PORTA.
@@ -18,6 +20,7 @@ import time
 from .bootstrapper import BootstrapService
 from .node import OverlayNode
 from .protocol import DEFAULT_PORT
+from .routing import AnnouncementPublisher, RoutingTable
 
 
 def parse_addr(text):
@@ -43,12 +46,18 @@ def build_parser():
                    help="segundos com vizinhos a menos antes de pedir substitutos")
     p.add_argument("--stats", type=float, default=0, metavar="S",
                    help="escrever vizinhos e RTT a cada S segundos (0 = nunca)")
+    p.add_argument("--publish-flow", action="append", default=[], metavar="ID",
+                   help="anunciar este fluxo periodicamente (opção repetível)")
+    p.add_argument("--announce-interval", type=float, default=5.0, metavar="S",
+                   help="intervalo entre rondas de anúncios (default: 5 s)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if args.publish_flow and args.announce_interval <= 0:
+        raise SystemExit("--announce-interval tem de ser maior que zero")
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format=f"%(asctime)s [{args.id}] %(levelname)s %(message)s")
@@ -57,6 +66,11 @@ def main(argv=None):
     node = OverlayNode(args.id, args.bind, args.port, bootstrap_service=service,
                        min_neighbors=args.min_neighbors,
                        replace_interval=args.replace_after)
+    routing_table = RoutingTable()
+    routing_table.attach(node)
+    publisher = (AnnouncementPublisher(node, args.publish_flow, args.announce_interval,
+                                       routing_table=routing_table)
+                 if args.publish_flow else None)
     node.start()
 
     if service and args.id in service.nodes:
@@ -70,6 +84,9 @@ def main(argv=None):
             node.stop()
             raise SystemExit("não foi possível obter vizinhos do bootstrapper")
 
+    if publisher:
+        publisher.start()
+
     log = logging.getLogger("ott.cli")
     try:
         while True:
@@ -77,4 +94,6 @@ def main(argv=None):
             if args.stats:
                 log.info("vizinhos: %s", node.describe_neighbors())
     except KeyboardInterrupt:
+        if publisher:
+            publisher.stop()
         node.stop()

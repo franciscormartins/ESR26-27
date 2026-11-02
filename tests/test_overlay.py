@@ -85,8 +85,10 @@ class OverlayTest(unittest.TestCase):
         a.add_targets({("127.0.0.1", BASE + 2): None})
         self.assertTrue(wait_for(lambda: a.neighbor_ids() == ["B"]))
         self.assertTrue(wait_for(lambda: b.neighbor_ids() == ["A"]))
-        a.send("B", {"type": "ANNOUNCE", "src": "A", "data": {"metric": 1}})
-        self.assertTrue(wait_for(lambda: got == [{"metric": 1}]))
+        announce = {"type": "ANNOUNCE", "src": "A", "data": {
+            "server_id": "S1", "flow": "filme_a", "epoch": 1, "metric": 1}}
+        a.send("B", announce)
+        self.assertTrue(wait_for(lambda: got == [announce["data"]]))
 
 
     def test_neighbor_events_and_rtt(self):
