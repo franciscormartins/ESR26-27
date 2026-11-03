@@ -2,7 +2,7 @@
 
 > Ficheiro vivo: é atualizado sempre que algo é feito. Serve para saber o ponto da situação,
 > relembrar as decisões e preparar as conversas com os docentes.
-> **Última atualização: 2026-11-02 (checkpoint 1: ver `docs/CHECKPOINT1.md`).**
+> **Última atualização: 2026-11-03.**
 
 ## 1. Resumo em 30 segundos
 
@@ -38,7 +38,7 @@
 | Relatório: secção do E1 | ✅ escrita (`e1_overlay.tex`, incluída em `main.tex`); rever com o grupo | `docs/relatorio/` |
 
 Também feito (apoio ao grupo): topologias CORE dos cenários 1, 2 e 3 (`topologies/*.xml`), com o
-underlay do cenário 3 a funcionar (routers FRR, OSPF); comandos de arranque por nó (`docs/testes-core.md`).
+underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 2026-11-03, validada); comandos de arranque por nó (`docs/testes-core.md`); `topologies/aplicar_frr.py` repõe a config do FRR num XML redesenhado.
 
 ## 3. Decisões tomadas e porquê
 
@@ -56,8 +56,8 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF); comandos de arranque por
 | D10 | Substitutos só com `--min-neighbors X` (por omissão desligado) | Os clientes são folhas (1 vizinho) e não devem ser forçados a ter X. O bootstrapper propõe nós já registados, perto dos vizinhos atuais, e esquece os que não ligam em 10 s. |
 | D11 | Uma só tentativa de ligação em curso por alvo | Evitava acumular threads quando um vizinho está lento ou inalcançável. |
 | D12 | Um só endereço (`host`) por nó no ficheiro de topologia | Simples; basta um dos lados alcançar o outro. **Limitação** para nós com várias interfaces (ver 8). |
-| D13 | Cenário 3: underlay com routers FRR/OSPF e nós overlay também nos routers | A Figura 1 põe nós overlay em routers; só há 10 hosts para 11 nós overlay. Atribuição overlay→CORE **por confirmar**. |
-| D14 | Routers com FRR (não Quagga) e `frr.conf`/`frrboot.sh` próprios no XML | O Quagga instalado não tem `vtysh`, e o CORE 9.2.1 gera config que o FRR 10 rejeita (ver `docs/testes-core.md`). |
+| D13 | Cenário 3: underlay com 10 routers FRR/OSPF (`r1`–`r10`), 5 switches e `S1` + `C1`–`C9`; nós overlay também nos routers | A Figura 1 põe nós overlay em routers. Atribuição overlay→CORE **por confirmar**, escolhida pelas etiquetas da figura (O1=S1, O4=C1, O8=C2, O9=C3, O10=C4, O11=C5) e de modo a que as 6 arestas overlay entre routers (O2–O3, O2–O7, O3–O5, O5–O6, O5–O7, O6–O7) sejam links diretos do underlay: O2=r1, O3=r3, O5=r4, O6=r5, O7=r2. Ver `docs/testes-core.md`. |
+| D14 | Routers com FRR (não Quagga) e `frr.conf`/`frrboot.sh` próprios no XML, **reaplicáveis com `topologies/aplicar_frr.py`**; o `frrboot.sh` manda o stdio dos daemons para `/dev/null` | O Quagga instalado não tem `vtysh`, e o CORE 9.2.1 gera config que o FRR 10 rejeita (ver `docs/testes-core.md`). Redesenhar o cenário na GUI repõe os serviços do Quagga e apaga a config (aconteceu em 2026-11-03), daí o programa. Sem o redirecionamento, o `zebra`/`ospfd` herdavam os pipes do comando de arranque e o CORE ficava preso em `INSTANTIATION` (os hosts nunca recebiam rota por defeito). |
 | D15 | Decidido implementar a Estratégia 1 do enunciado. Estado de rota indexado por `(servidor, fluxo)`, com vizinho de montante, destinos a jusante, subscritores, custo em saltos, época e anúncios vistos. `fluxo` identifica o conteúdo/stream multimédia (ex.: `filme_a`). | Anúncios do servidor constroem as rotas; pedidos dos clientes abrem e fecham ramos partilhados. Roadmap em `docs/ETAPA2.md`; modelo em `docs/protocolo.md`. |
 | D16 | Protocolo E2 definido: `ANNOUNCE(server_id, flow, epoch, metric)`; `ACTIVATE`/`DEACTIVATE(server_id, flow, subscriber_id)`. Custo em saltos, época crescente por fluxo, IDs overlay para servidor/cliente e nome estável para fluxo. | Suporta vários fluxos e servidores; handlers dos três tipos implementados. |
 | D17 | Quem fecha uma ligação duplicada envia `BYE` com `reason: "duplicate"`; quem o recebe retira a ligação **sem `down`** e espera até 3 s pela vencedora (`DUPLICATE_GRACE`), que é adotada sem novo `up` | Num arranque simultâneo o outro lado fechava, depois de nós a darmos como `up`, a ligação perdedora: o E2 via `down`+`up` falsos (apagaria rotas à toa). Alternativas rejeitadas: só o nó de menor id liga (quebra o D6) ou adiar sempre todos os `down` (esconde quedas reais). |
@@ -161,6 +161,7 @@ de ~10 repetições), robustez (sem threads penduradas nem exceções nos logs).
 - Cenário 2 no CORE (2026-10-22): Ctrl-C num nó → vizinhos detetam em ≤ 2 ms; reentrada do nó → overlay
   completo em ≈ 2,0 s (primeiros vizinhos em 0,9 s). Sem vizinhos "fantasma" após ligações duplicadas.
 - Cenário 3, underlay (2026-10-22): `ping` do `C6` ao `Server` 3/3, 0 % de perda; OSPF convergiu em < 30 s.
+- Cenário 3 redesenhado (2026-11-03): OSPF completo (nº de vizinhos de cada router = nº dos seus links), os 9 clientes fazem `ping` ao `S1` com 0 % de perda (3/3) e os 11 nós overlay arrancam com exatamente os vizinhos do `cenario3.json` e 0 `desligado`, RTT 1,1–2,0 ms. As medições do cenário 3 da tabela abaixo (testes 3, 4, 8, 11) foram feitas na versão anterior do underlay; a estrutura overlay é a mesma.
 - Cenário 2 no CORE (2026-10-27, medido antes do `TCP_NODELAY`, com RTT inflacionado nalguns pares): RTT com `--stats 5` (sem atraso configurado), `S1`: O1 1,3–1,6 ms, O2 1,2–1,8 ms; O1: C2 1,5–1,9 ms, O2 1,8–2,2 ms, S1 1,6–2,1 ms; O2 e C1/C2 com valores semelhantes (1,2–2,3 ms). Os valores são estáveis (média móvel). Reinícios manuais de nós produziram `WARNING vizinho X desligado` e religação automática nos vizinhos, sem erros nem duplicados.
 - Localhost (2026-10-26): RTT 0,4–0,7 ms; 21/21 testes automáticos, estáveis em 4 execuções seguidas.
 
@@ -192,7 +193,7 @@ de ~10 repetições), robustez (sem threads penduradas nem exceções nos logs).
 | 8 | Substituto no cenário 3 (O9 com `--min-neighbors 1` perde o O6) | 10 | liga ao O1 em 7,18 / 7,23 / 7,29 s |
 | 9 | Arranque simultâneo (cenário 2) | 10 | overlay completo em 2,24 / 2,45 / 4,20 s, 0 quedas espúrias |
 | 10 | Bootstrapper em baixo ao arrancar (S1 sobe 3 s depois, cenário 2) | 10 | liga 3,15 / 3,18 / 3,20 s após o S1 subir, 0 quedas |
-| 11 | Overlay completo no cenário 3 (11 nós, ping underlay 0 % perda) | 1 | os 11 nós com exatamente os vizinhos do JSON, RTT 1,1–2,4 ms, 0 `desligado` |
+| 11 | Overlay completo no cenário 3 (11 nós, ping underlay 0 % perda; repetido em 2026-11-03 no XML redesenhado) | 2 | os 11 nós com exatamente os vizinhos do JSON, RTT 1,1–2,4 ms, 0 `desligado` |
 
 Notas: o cenário 2 só tem ligações diretas; um nó não alcança um substituto que não seja vizinho, por isso o teste 8
 foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coincide com o do CORE (≈ 7 s).
@@ -226,7 +227,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] Ensaiar no CORE: timeout/link em baixo, RTT com atraso, substituto, arranque simultâneo, bootstrapper tardio (2026-11-02, 10 repetições).
 - [x] Ensaiar o overlay no cenário 3 (11 nós) com a atribuição proposta (2026-11-02).
 - [x] Passar a especificação e os resultados para o relatório (`docs/relatorio/e1_overlay.tex`, incluída em `main.tex`).
-- [ ] **Tu:** confirmar a atribuição overlay→CORE do cenário 3 (se mudar, só se altera o `cenario3.json` e o `testes-core.md`; os resultados mantêm-se válidos para a estrutura).
+- [ ] **Tu:** confirmar a atribuição overlay→CORE do cenário 3 (proposta atualizada em 2026-11-03 para o XML redesenhado; se mudar, só se altera o `cenario3.json` e o `testes-core.md`).
 - [ ] **Grupo:** rever `docs/protocolo.md` (inclui o `BYE reason=duplicate`) e o texto `e1_overlay.tex`; o `babel` em português do `main.tex` não está instalado nesta máquina (compila noutra com `texlive-babel-portuguese`).
 - [ ] Decidir se refazemos o cenário 2 com 3 intermédios, como no enunciado.
 
@@ -249,6 +250,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-03 | **Cenário 3 redesenhado no CORE** (routers `r1`–`r10`, `S1`, switches com 2 hosts, como na Figura 1): o XML tinha perdido os serviços FRR e a config própria. Novo `topologies/aplicar_frr.py` (+ `frrboot.sh.tmpl`) repõe-os a partir das interfaces do XML. Corrigido o `frrboot.sh` (stdio dos daemons para `/dev/null`; sem isso o CORE ficava em `INSTANTIATION`). `cenario3.json` com nova atribuição overlay→CORE e IPs novos; `docs/testes-core.md` e `CHECKPOINT1.md` atualizados (`-b 10.0.18.20`). Validado no CORE: OSPF completo, 9/9 clientes fazem ping ao S1, 11 nós overlay com os vizinhos do JSON. |
 | 2026-11-02 | Novo `docs/CHECKPOINT1.md`: guia para o checkpoint 1 (o que se pede, demonstração, como funciona o código, decisões, resultados, defeitos achados, limitações, perguntas prováveis e checklist). |
 | 2026-11-02 | **Elemento 1 concluído.** Ensaios no CORE (cenários 2 e 3, abertos por `core-cli`, ações por `vcmd`) e medições em localhost com 10 repetições (`tests/medicoes.py`, novo). Corrigidos 4 defeitos achados nos ensaios: `down`/`up` falsos com ligação duplicada (`BYE reason=duplicate`, D17), RTT inflacionado por Nagle (`TCP_NODELAY`, D18), ligação imediata a substitutos e reposição do contador de défice (D19). 60 testes automáticos (+9). Relatório: nova secção `docs/relatorio/e1_overlay.tex`. `docs/protocolo.md` atualizado. |
 | 2026-10-27 | Teste 5 (nó congelado) feito 1× no cenário 2: deteção por timeout (`sem resposta`) ≈ 6 s; falta repetir com hora exata. |
