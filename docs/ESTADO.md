@@ -2,7 +2,7 @@
 
 > Ficheiro vivo: é atualizado sempre que algo é feito. Serve para saber o ponto da situação,
 > relembrar as decisões e preparar as conversas com os docentes.
-> **Última atualização: 2026-11-02.**
+> **Última atualização: 2026-11-02 (checkpoint 1: ver `docs/CHECKPOINT1.md`).**
 
 ## 1. Resumo em 30 segundos
 
@@ -249,6 +249,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-02 | Novo `docs/CHECKPOINT1.md`: guia para o checkpoint 1 (o que se pede, demonstração, como funciona o código, decisões, resultados, defeitos achados, limitações, perguntas prováveis e checklist). |
 | 2026-11-02 | **Elemento 1 concluído.** Ensaios no CORE (cenários 2 e 3, abertos por `core-cli`, ações por `vcmd`) e medições em localhost com 10 repetições (`tests/medicoes.py`, novo). Corrigidos 4 defeitos achados nos ensaios: `down`/`up` falsos com ligação duplicada (`BYE reason=duplicate`, D17), RTT inflacionado por Nagle (`TCP_NODELAY`, D18), ligação imediata a substitutos e reposição do contador de défice (D19). 60 testes automáticos (+9). Relatório: nova secção `docs/relatorio/e1_overlay.tex`. `docs/protocolo.md` atualizado. |
 | 2026-10-27 | Teste 5 (nó congelado) feito 1× no cenário 2: deteção por timeout (`sem resposta`) ≈ 6 s; falta repetir com hora exata. |
 | 2026-10-27 | Checklist de ensaios do cenário 2 (§7) com resultados: arranque, RTT, processo morto (≤ 2 ms) e reentrada (≈ 2 s) feitos; timeout, link down, atraso, substitutos, arranque simultâneo e bootstrapper em baixo por fazer. |

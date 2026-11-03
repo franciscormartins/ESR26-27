@@ -21,6 +21,7 @@
 .idea/
 *.swp
 .DS_Store
+CHECKPOINT1.md
 
 # Python / build
 __pycache__/
