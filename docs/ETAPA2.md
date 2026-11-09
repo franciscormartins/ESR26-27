@@ -118,7 +118,7 @@ emissor, nem anunciar ao montante recém-ligado) e rejeita um destino a jusante 
 Esta reação é coberta por testes unitários; falta ensaiar quedas, recuperações e caminhos
 alternativos no CORE.
 
-### 6. Integração do encaminhamento dos dados - implementado; validação pendente
+### 6. Integração do encaminhamento dos dados - implementado; validado em localhost, CORE pendente
 
 - [x] Expor `RoutingTable.active_destinations(origin, flow, exclude=())`, que devolve uma
   cópia dos vizinhos a jusante ativos, sem duplicar um vizinho que tenha vários subscritores.
@@ -128,7 +128,16 @@ alternativos no CORE.
 - [x] Manter os dados em UDP, separados das mensagens de controlo TCP.
 - [x] Integrar a interface RTP já existente: `--publish-flow` inicia o MJPEG/RTP e
   `--subscribe SERVIDOR:FLUXO` ativa a subscrição e recolhe estatísticas locais.
+- [x] Ensaiar a distribuição ponta a ponta em localhost com nós reais
+  (`tests/test_integration.py`, 2026-11-09).
 - [ ] Ensaiar a distribuição ponta a ponta no CORE, incluindo falhas e recuperação.
+
+**Defeito corrigido em 2026-11-09 (commit `e83e37b`).** `OverlayNode._dispatch` passava aos
+handlers o objeto `Neighbor` em vez do ID do vizinho. Com nós reais, `upstream` e os destinos
+ficavam com objetos, o `ACTIVATE` nunca era enviado, o anúncio voltava ao emissor e as quedas
+não invalidavam rotas. Os testes de `tests/test_routing.py` usam nós falsos que passam strings,
+por isso não o detetavam. Até esta correção, as secções 3 a 6 só funcionavam nos testes
+unitários. Os testes de integração com nós reais confirmam agora o comportamento.
 
 `OverlayForwarder` (`src/ott/forwarding.py`) escuta por omissão na porta UDP 6000. O nó de
 origem envia uma cópia para cada destino a jusante ativo; cada intermédio repete o processo,
@@ -144,6 +153,48 @@ Exemplo: no servidor, acrescentar `--publish-flow filme_a`; no cliente, usar
 `--subscribe S1:filme_a`. Todos os nós intermédios têm de correr `ott` para encaminhar UDP.
 `--stats 2` mostra os vizinhos, as estatísticas RTP do cliente e os contadores do plano de dados.
 
+## Revisão de 2026-11-09: decisões e próximos passos
+
+Uma revisão do código face ao enunciado (pág. 2-4) encontrou o defeito acima e as lacunas
+seguintes, ainda **por resolver** no código:
+
+| # | Lacuna | Impacto |
+|---|---|---|
+| L2 | O servidor reinicia com `epoch=1` e os nós rejeitam épocas inferiores à guardada | Um servidor reiniciado nunca volta a ser aprendido |
+| L3 | Não há retirada nem expiração de rotas | Um servidor morto deixa rotas `ativa` para sempre |
+| L4 | Numa época nova, a primeira cópia ganha; empates não têm critério determinista | O montante pode oscilar a cada ronda (ex.: O5 via O3/O7 no cenário 3) |
+| L5 | O forwarder aceita datagramas de qualquer vizinho | Duplicados ao trocar de montante; ciclos de dados transitórios |
+| L7 | A origem UDP é identificada pelo IP do *peer* TCP | Validar no CORE em nós com várias interfaces |
+| L8 | `protocolo.md` §7 diz que só a transição 0→1 propaga `ACTIVATE`; o código propaga cada subscritor. `seen_announcements` só é escrito e cresce sem limite | Documentação incoerente |
+
+**Decisões tomadas pelo grupo:**
+
+| Tema | Decisão |
+|---|---|
+| Métrica | Número de saltos; em empate, RTT acumulado (`delay` no `ANNOUNCE`), com histerese (> 20 % e > 1 ms); empate final pelo ID do vizinho. RTT desconhecido conta como infinito |
+| Escolha da rota | Tabela de candidatos por vizinho (última época, saltos, atraso), em vez de "a primeira cópia ganha" |
+| Identidade dos anúncios | `(server_id, flow, epoch)`; uma rota sem caminho aceita qualquer época (resolve o reinício do servidor) |
+| Falhas | `WITHDRAW(server_id, flow, epoch)` explícito, só processado se vier do montante; antes de retirar, reparação rápida com condição de viabilidade (só candidatos com saltos anunciados < saltos da rota perdida). Quem envia `WITHDRAW` limpa os destinos; a jusante volta a pedir quando reaprende caminho |
+| Rede de segurança | Tempo de vida de rotas e candidatos: 6 × o intervalo de anúncio (30 s), configurável (`--route-ttl`) |
+| Plano de dados | RPF estrito: só se aceitam (e entregam) datagramas vindos do montante atual; aceita-se a falha curta ao trocar de montante |
+| Subscrições | Agregadas por ramo: `ACTIVATE` só na transição 0→1, `DEACTIVATE` na 1→0; `subscriber_id` passa a opcional e informativo |
+| Servidores | Dois servidores com fluxos distintos; a chave `(server_id, flow)` mantém-se |
+
+**Plano (por ordem):**
+
+- [x] 0. Teste de integração com `OverlayNode` reais (S1–A–C).
+- [x] 1. Handlers recebem o ID do vizinho (`node.py`).
+- [x] 2. Teste do plano de dados S1–A–{C1, C2} em localhost.
+- [ ] 3. Subscrições agregadas por ramo (`routing.py`, `protocol.py`).
+- [ ] 4. RPF estrito no `OverlayForwarder` (`RoutingTable.upstream_of`).
+- [ ] 5. Tabela de candidatos e desempate por RTT (campo `delay`).
+- [ ] 6. `WITHDRAW`, reparação rápida e aceitação de qualquer época numa rota sem caminho.
+- [ ] 7. Tempo de vida de rotas e candidatos.
+- [ ] 8. Retirar `seen_announcements`.
+- [ ] 9. Atualizar `protocolo.md`, este ficheiro e `ESTADO.md` com o comportamento final.
+- [ ] 10. Segundo servidor (`S2`, 2 fluxos cada) em `cenario2.json` e `cenario3.json`.
+- [ ] 11. Ensaios no CORE (lista abaixo).
+
 ## Plano de testes
 
 - [x] Unidade: atualização da rota quando chega um caminho de menor custo.
@@ -155,20 +206,38 @@ Exemplo: no servidor, acrescentar `--publish-flow filme_a`; no cliente, usar
 - [x] Unidade: queda do vizinho de montante invalida a rota e anúncio alternativo reativa subscrições.
 - [x] Unidade: queda de um destino remove o ramo e desativa a subscrição a montante.
 - [x] Unidade: caminho melhor troca o montante e move subscrições ativas.
+- [x] Integração localhost (nós reais, S1–A–C): rotas com IDs e métrica em saltos; anúncio
+  não volta ao emissor; ativação e desativação até ao servidor; queda do cliente remove o
+  ramo até ao servidor; queda do montante deixa a rota sem caminho com o pedido pendente.
+- [x] Integração localhost (S1–A–{C1, C2}, forwarder UDP e RTP): uma cópia no troço S1–A e
+  duas a partir de A, sem perdas; C1 sai e C2 continua; sem clientes, S1 não emite.
 - [ ] CORE: ativar dois clientes e desativar um mantém o outro a receber; desativar o
   último deixa a rota sem tráfego.
 - [ ] CORE: exercitar as topologias 1 e 2 antes do cenário 3.
 
-Comando atual para os testes do modelo local:
+Ensaios no CORE necessários para dar a etapa como validada:
+
+1. Cenário 1: S1 → O2 → C1 a reproduzir.
+2. Dois clientes: um só fluxo no troço comum (contadores `--stats` e `tcpdump`).
+3. Desativar um cliente mantém o outro; desativar o último deixa a rota sem tráfego.
+4. Cenário 2: o caminho alternativo escolhe o custo menor.
+5. Queda do montante: tempo até o cliente voltar a receber.
+6. Reinício do servidor: o fluxo regressa (depende do passo 6).
+7. Cenário 3 com 2 servidores, 2 fluxos cada e clientes em ramos partilhados.
+8. `tc netem` em O3–O5 (cenário 3): O5 troca para O7 uma só vez, sem oscilar (passo 5).
+9. Matar e reiniciar o servidor: o `WITHDRAW` chega aos clientes e o fluxo regressa com a época 1.
+
+Comandos:
 
 ```sh
-PYTHONPATH=src python3 -m unittest tests.test_routing -v
+PYTHONPATH=src python3 -m unittest tests.test_routing -v        # modelo (nós falsos)
+PYTHONPATH=src python3 -m unittest tests.test_integration -v    # nós reais em localhost
 ```
 
-Os testes atuais cobrem o modelo, o publicador, aprendizagem, ativação/desativação,
-subscrições partilhadas, queda de vizinhos, reaprendizagem por caminho alternativo, mudança
-do montante e anúncios a vizinhos novos. O encaminhamento dos pacotes está integrado; os
-ensaios destas alterações no CORE continuam pendentes.
+`tests/test_integration.py` dá a cada nó um IP de loopback (127.0.0.1–4), porque todos os
+forwarders usam a mesma porta UDP, como no CORE. O nó A (127.0.0.1) inicia todas as ligações
+TCP, para que o IP visto na ligação TCP coincida com a origem dos datagramas UDP. Se o sistema
+não aceitar esses endereços, o teste do plano de dados é saltado.
 
 ## Critério de conclusão da Etapa 2
 

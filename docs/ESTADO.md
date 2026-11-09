@@ -2,7 +2,7 @@
 
 > Ficheiro vivo: é atualizado sempre que algo é feito. Serve para saber o ponto da situação,
 > relembrar as decisões e preparar as conversas com os docentes.
-> **Última atualização: 2026-11-03.**
+> **Última atualização: 2026-11-09.**
 
 ## 1. Resumo em 30 segundos
 
@@ -13,7 +13,10 @@
   ficheiro de topologia e devolve os vizinhos) e **estratégia 1** (`ott viz1 viz2`: vizinhos à mão).
 - **Estado:** a Etapa 2 origina anúncios periódicos, aprende e propaga rotas por fluxo,
   encaminha ativações/desativações e já tem encaminhamento RTP/JPEG por UDP pelos ramos ativos.
-  Os ensaios de integração do plano de dados e a reação a falhas no CORE continuam pendentes.
+  Até 2026-11-09 isto só funcionava nos testes com nós falsos: os handlers recebiam o objeto
+  `Neighbor` em vez do ID (corrigido no commit `e83e37b`). Com nós reais em localhost, o fluxo
+  ponta a ponta está agora validado (`tests/test_integration.py`). Falta o CORE e as melhorias
+  decididas na revisão de 2026-11-09 (ver `docs/ETAPA2.md`, "Revisão de 2026-11-09").
   **Elemento 1 concluído:** todas as funcionalidades estão implementadas e foram ensaiadas no CORE (cenário 2 e
   cenário 3 com 11 nós) e medidas com 10 repetições (secção 7). Os ensaios acharam e corrigiram 4 defeitos
   (D17–D19 e o contador de défice); ver secção 7 e o registo de alterações.
@@ -63,6 +66,12 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 | D17 | Quem fecha uma ligação duplicada envia `BYE` com `reason: "duplicate"`; quem o recebe retira a ligação **sem `down`** e espera até 3 s pela vencedora (`DUPLICATE_GRACE`), que é adotada sem novo `up` | Num arranque simultâneo o outro lado fechava, depois de nós a darmos como `up`, a ligação perdedora: o E2 via `down`+`up` falsos (apagaria rotas à toa). Alternativas rejeitadas: só o nó de menor id liga (quebra o D6) ou adiar sempre todos os `down` (esconde quedas reais). |
 | D18 | `TCP_NODELAY` em todas as ligações entre vizinhos | O algoritmo de Nagle retinha as mensagens pequenas (PING/PONG cruzados) à espera do ACK: RTT de 37 ms inicial nos clientes e 60–80 ms com atraso de 20 ms/lado (esperado 41 ms). Com NODELAY: 41,1–41,6 ms. O RTT é a métrica do E2, por isso tem de ser fiável. |
 | D19 | Ligar a um substituto logo que é proposto, e repor o contador de défice ao atingir X vizinhos | Poupava-se o ciclo de 2 s; e o contador antigo podia contar défice já resolvido (artefacto visto nas medições). |
+| D20 | Os handlers registados com `register_handler` recebem o **ID** do vizinho (`fn(node, neighbor_id, msg)`) | Era o contrato documentado e o que `routing.py` usa; o `_dispatch` passava o objeto `Neighbor` e partia a Etapa 2 com nós reais. |
+| D21 | Métrica: saltos; em empate, RTT acumulado com histerese (> 20 % e > 1 ms), depois o ID do vizinho. Escolha a partir de uma tabela de candidatos por vizinho (**por implementar**) | Cumpre "métricas da rede" sem oscilações; a regra atual "primeira cópia da época ganha" pode alternar entre caminhos de custo igual. |
+| D22 | Falhas: `WITHDRAW` explícito com reparação rápida (condição de viabilidade), rota sem caminho aceita qualquer época, tempo de vida de 6 × o intervalo como rede de segurança (**por implementar**) | Um servidor reiniciado (época 1) deixa de ficar bloqueado; um servidor morto deixa de manter rotas ativas para sempre. |
+| D23 | Plano de dados com RPF estrito: só se aceitam datagramas do montante (**por implementar**) | Elimina duplicados e ciclos de dados; aceita-se uma falha curta ao trocar de montante. |
+| D24 | Subscrições agregadas por ramo: `ACTIVATE` na transição 0→1, `DEACTIVATE` na 1→0 (**por implementar**) | Fiel à tabela do enunciado ("Destinos: O7, O3") e escala com o número de clientes; o servidor deixa de conhecer cada cliente. |
+| D25 | Dois servidores com fluxos distintos; chave `(server_id, flow)` mantém-se | Requisito mínimo do enunciado (pág. 3); falta acrescentar `S2` às topologias. |
 
 ## 4. Arquitetura (resumo)
 
@@ -98,9 +107,11 @@ Definidos e validados os campos de `ANNOUNCE`, `ACTIVATE` e `DEACTIVATE` (ver
 Continuam pendentes o formato de `ROUTE_TEST` e os ensaios de integração e falhas da Etapa 2
 no CORE. O encaminhamento UDP está implementado em `src/ott/forwarding.py` e integrado na CLI.
 
+Os handlers recebem `fn(node, neighbor_id, msg)`, em que `neighbor_id` é uma string (D20).
+
 ## 6. Como testar
 
-**Suite completa (60 testes, ~16 s):**
+**Suite completa (66 testes, ~20 s):**
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -t .
@@ -125,18 +136,20 @@ PYTHONPATH=src python3 -m unittest tests.test_routing -v
 PYTHONPATH=src python3 -m unittest tests.test_protocol tests.test_routing -v
 ```
 
-**Suite completa (46 testes, cerca de 7 s):**
+**Integração da Etapa 2 com nós reais em localhost** (6 testes, ~4 s):
 
 ```sh
-PYTHONPATH=src python3 -m unittest discover -s tests -t .
+PYTHONPATH=src python3 -m unittest tests.test_integration -v
 ```
 
 Cobrem: validação do protocolo, overlay por bootstrapper e recuperação, eventos up/down, RTT, ligação
 duplicada, vizinho calado (timeout), mensagem inválida, substituto, alvos expirados e tentativas em paralelo.
 `tests/test_routing.py` cobre o modelo, publicação, aprendizagem por saltos, supressão de
 duplicados/anúncios antigos, melhoria de caminho, subscrições partilhadas e reação local a
-falhas e vizinhos novos. O encaminhamento RTP/JPEG por UDP está integrado; falta ensaiar a
-distribuição ponta a ponta no overlay e a recuperação de falhas no CORE.
+falhas e vizinhos novos, mas com nós falsos. `tests/test_integration.py` usa `OverlayNode`
+reais: anúncios, ativação/desativação, quedas do cliente e do montante (S1–A–C) e o plano de
+dados UDP/RTP com dois clientes num ramo partilhado (S1–A–{C1, C2}). Falta ensaiar a
+distribuição e a recuperação de falhas no CORE.
 
 **No CORE:** `docs/testes-core.md` tem os comandos de cada nó para os cenários 1, 2 e 3 e a lista de testes
 (arranque, saída limpa, queda abrupta, nó congelado `kill -STOP`, link em baixo, RTT com atraso, substituto).
@@ -221,6 +234,9 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - RTT ≈ 1–2 ms em CORE sem atraso: inclui processamento em Python (o `ping` dá 0,1 ms); não afeta a comparação entre caminhos.
 - Sem autenticação nem cifra no controlo.
 - O cenário 2 desenhado tem 2 nós intermédios; o enunciado mostra 3 (S1 liga a um só, que se liga aos outros dois).
+- Etapa 2 (revisão de 2026-11-09, ver `docs/ETAPA2.md`): um servidor reiniciado não volta a ser aprendido (época 1 rejeitada); sem retirada nem expiração de rotas; o montante pode oscilar entre caminhos de custo igual; o forwarder aceita dados de qualquer vizinho; a métrica ignora o RTT. Todas têm decisão tomada (D21–D24) e estão por implementar.
+- A origem dos datagramas UDP identifica-se pelo IP do *peer* TCP (`neighbor_for_address`); validar no CORE em nós com várias interfaces.
+- `docs/testes-core.md` e `docs/CHECKPOINT1.md` são citados neste ficheiro mas não estão no repositório.
 
 ## 9. Por fazer
 
@@ -234,7 +250,9 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 **Outros elementos (para saber o que depende de nós)**
 - [x] E2 (controlo): tabela de rotas, anúncios, ativação/desativação e reação local a alterações de vizinhos.
-- [ ] E2: ensaios ponta a ponta de distribuição e falhas/recuperação no CORE.
+- [x] E2: corrigir o argumento dos handlers e validar ponta a ponta em localhost com nós reais (2026-11-09).
+- [ ] E2: passos 3–10 do plano em `docs/ETAPA2.md` (subscrições agregadas, RPF, candidatos e RTT, `WITHDRAW`, tempo de vida, `S2`).
+- [ ] E2: ensaios ponta a ponta de distribuição e falhas/recuperação no CORE (ensaios 1–9 em `docs/ETAPA2.md`).
 - [ ] E3: interface de apresentação do vídeo, cenários e medições de streaming.
 
 ## 10. Perguntas para os docentes
@@ -251,6 +269,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-09 | **Revisão da Etapa 2** face ao enunciado. Defeito crítico corrigido (commit `e83e37b`): `OverlayNode._dispatch` passava o objeto `Neighbor` aos handlers, por isso com nós reais o `ACTIVATE` nunca saía, o anúncio voltava ao emissor e as quedas não invalidavam rotas (D20). Novo `tests/test_integration.py` (6 testes com nós reais: rotas, ativação, quedas e plano de dados S1–A–{C1, C2}); falhavam todos antes da correção. Suite: 66 testes, todos passam. Decididas as melhorias D21–D25; plano ordenado em `docs/ETAPA2.md`. Nada ensaiado no CORE. |
 | 2026-11-03 | Etapa 2: integrado o plano de dados UDP à CLI. `--publish-flow` emite MJPEG/RTP só quando há destinos ativos; `--subscribe SERVIDOR:FLUXO` ativa a rota e recolhe estatísticas; nós intermédios replicam uma cópia por vizinho a jusante. Atualizados README, protocolo e roadmap. Ensaios de integração no CORE ainda por fazer; não foram executados testes nesta alteração. |
 | 2026-11-03 | `docs/testes-core.md` reorganizado por **nome do nó no CORE** (`S1`, `r1`–`r10`, `C1`–`C9` no cenário 3), com uma tabela por cenário "nó do CORE → comando → vizinhos esperados" e a distinção explícita entre o nome do nó e o id overlay (`-i`); os testes T1–T10 e B1–B8 passaram a indicar o nó do CORE onde correr cada comando. |
 | 2026-11-03 | `docs/testes-core.md` reescrito na parte dos testes: método (ott em segundo plano com log em ficheiro, `date` para medir), interfaces de cada nó, testes gerais T1–T10 com comandos e valores esperados/medidos, tabela de onde aplicar cada um nos cenários 1, 2 e 3, e testes do bootstrap no cenário 3 (B1–B8: registo, bootstrapper tardio, id desconhecido, bootstrapper cai e volta, substitutos, estratégia 1). O B7 (substituto `O10`) está deduzido do código e ainda não foi ensaiado; o B5 (religação ao bootstrapper reposto) também. |
