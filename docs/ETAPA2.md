@@ -267,6 +267,18 @@ seguintes. Estado atual de cada uma:
   último deixa a rota sem tráfego.
 - [ ] CORE: exercitar as topologias 1 e 2 antes do cenário 3.
 
+Cenário 3: nó do CORE onde corre cada nó overlay (fiel à Figura 1, D13). Todos com
+`-b 10.0.18.20`; o servidor é o `O1` (subscrições `O1:filme_a`).
+
+| Overlay | O1 | O2 | O3 | O4 | O5 | O6 | O7 | O8 | O9 | O10 | O11 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Nó do CORE | S1 | r1 | r3 | C8 | r9 | r10 | r5 | C2 | C4 | C6 | C7 |
+
+A O5 (r9) tem dois caminhos com o mesmo número de saltos até ao servidor: via O3 (overlay
+O3–O5 = r3>r6>r9; no r9, `eth2` liga ao r6) e via O7 (O5–O7 = r9>r7>r5; no r9, `eth1` liga
+ao r7). Os ensaios 6 e 8 usam estes dois caminhos (`netem` no r9 na interface do caminho
+ativo). Nós do CORE livres para um segundo servidor: C1, C3, C5 e C9.
+
 Ensaios no CORE necessários para dar a etapa como validada:
 
 1. Cenário 1: S1 → O2 → C1 a reproduzir.

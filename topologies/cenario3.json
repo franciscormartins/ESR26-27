@@ -1,5 +1,5 @@
 {
-  "_comment": "Cenário 3: overlay da Figura 1 sobre o underlay de cenario3.xml (routers r1-r10, switches s1-s5, S1 e C1-C9). 'core' = nó do CORE onde corre cada nó overlay (PROPOSTA a confirmar; segue as etiquetas da Figura 1: O1=S1, O4=C1, O8=C2, O9=C3, O10=C4, O11=C5, e cada aresta overlay entre routers é um link direto do underlay). 'host' = IP da interface eth0 do nó (routers) ou do host. Todos os nós usam -b <IP de O1>.",
+  "_comment": "Cenário 3: overlay da Figura 1 sobre o underlay de cenario3.xml (routers r1-r10, switches s1-s5, S1 e C1-C9). O underlay do XML é isomorfo ao da Figura 1 (n10=r1, n9=r3, n8=r2, n7=r5, n6=r4, n5=r6, n4=r7, n3=r8, n2=r9, n1=r10). 'core' = nó do CORE onde corre cada nó overlay, igual à figura: O2=r1, O3=r3, O5=r9, O6=r10, O7=r5; cada cliente no switch do router do seu nó overlay (O4=C8 em r6, O8=C2 em r5, O9=C4 em r10, O10=C6 e O11=C7 em r9). As ligações virtuais atravessam 0 a 2 ligações físicas (ex.: O3-O5 = r3>r6>r9, como no enunciado). 'host' = IP da eth0 do nó. Todos os nós usam -b <IP de O1>.",
   "nodes": {
     "O1": {
       "host": "10.0.18.20",
@@ -25,13 +25,13 @@
       ]
     },
     "O4": {
-      "host": "10.0.18.21",
-      "core": "C1",
+      "host": "10.0.17.20",
+      "core": "C8",
       "neighbors": []
     },
     "O5": {
-      "host": "10.0.7.2",
-      "core": "r4",
+      "host": "10.0.0.1",
+      "core": "r9",
       "neighbors": [
         "O6",
         "O7",
@@ -40,16 +40,16 @@
       ]
     },
     "O6": {
-      "host": "10.0.4.2",
-      "core": "r5",
+      "host": "10.0.0.2",
+      "core": "r10",
       "neighbors": [
         "O7",
         "O9"
       ]
     },
     "O7": {
-      "host": "10.0.9.2",
-      "core": "r2",
+      "host": "10.0.4.2",
+      "core": "r5",
       "neighbors": [
         "O8"
       ]
@@ -60,18 +60,18 @@
       "neighbors": []
     },
     "O9": {
-      "host": "10.0.19.21",
-      "core": "C3",
-      "neighbors": []
-    },
-    "O10": {
       "host": "10.0.20.21",
       "core": "C4",
       "neighbors": []
     },
+    "O10": {
+      "host": "10.0.16.20",
+      "core": "C6",
+      "neighbors": []
+    },
     "O11": {
-      "host": "10.0.20.20",
-      "core": "C5",
+      "host": "10.0.16.21",
+      "core": "C7",
       "neighbors": []
     }
   }

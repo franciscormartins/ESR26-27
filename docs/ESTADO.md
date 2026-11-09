@@ -22,7 +22,7 @@
   cenário 3 com 11 nós) e medidas com 10 repetições (secção 7). Os ensaios acharam e corrigiram 4 defeitos
   (D17–D19 e o contador de défice); ver secção 7 e o registo de alterações.
 - Falta ainda, fora do E1: validação ponta a ponta da Etapa 2 no CORE e a interface de streaming/apresentação da Etapa 4.
-  Do E1 só dependem de ti a confirmação da atribuição overlay→CORE do cenário 3 e a revisão do texto do relatório.
+  Do E1 só depende de ti a revisão do texto do relatório (a atribuição overlay→CORE do cenário 3 foi decidida em 2026-11-09, D13).
 
 ## 2. O que está feito (elemento 1)
 
@@ -38,7 +38,7 @@
 | RTT por vizinho entregue ao E2 | ✅ feito (`node.rtt(id)`, `node.rtts()`); ensaiado no CORE, também com atraso (`tc netem`) | `node.py` |
 | Eventos `vizinho_up/down` para o E2 | ✅ feito (`on_neighbor_up/down`) | `node.py` |
 | Testes de saída/entrada de nós com anotação de resultados | ✅ feito: cenários 2 e 3 no CORE e localhost, 10 repetições (secção 7) | `tests/medicoes.py`, `docs/testes-core.md` |
-| Overlay completo no cenário 3 (11 nós) | ✅ ensaiado no CORE (atribuição overlay→CORE ainda por confirmar pelo grupo) | `topologies/cenario3.*` |
+| Overlay completo no cenário 3 (11 nós) | ✅ ensaiado no CORE com a atribuição anterior; atribuição fiel à Figura 1 decidida em 2026-11-09 (D13), ainda por ensaiar | `topologies/cenario3.*` |
 | Relatório: secção do E1 | ✅ escrita (`e1_overlay.tex`, incluída em `main.tex`); rever com o grupo | `docs/relatorio/` |
 
 Também feito (apoio ao grupo): topologias CORE dos cenários 1, 2 e 3 (`topologies/*.xml`), com o
@@ -60,7 +60,7 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 | D10 | Substitutos só com `--min-neighbors X` (por omissão desligado) | Os clientes são folhas (1 vizinho) e não devem ser forçados a ter X. O bootstrapper propõe nós já registados, perto dos vizinhos atuais, e esquece os que não ligam em 10 s. |
 | D11 | Uma só tentativa de ligação em curso por alvo | Evitava acumular threads quando um vizinho está lento ou inalcançável. |
 | D12 | Um só endereço (`host`) por nó no ficheiro de topologia | Simples; basta um dos lados alcançar o outro. **Limitação** para nós com várias interfaces (ver 8). |
-| D13 | Cenário 3: underlay com 10 routers FRR/OSPF (`r1`–`r10`), 5 switches e `S1` + `C1`–`C9`; nós overlay também nos routers | A Figura 1 põe nós overlay em routers. Atribuição overlay→CORE **por confirmar**, escolhida pelas etiquetas da figura (O1=S1, O4=C1, O8=C2, O9=C3, O10=C4, O11=C5) e de modo a que as 6 arestas overlay entre routers (O2–O3, O2–O7, O3–O5, O5–O6, O5–O7, O6–O7) sejam links diretos do underlay: O2=r1, O3=r3, O5=r4, O6=r5, O7=r2. Ver `docs/testes-core.md`. |
+| D13 | Cenário 3: underlay com 10 routers FRR/OSPF (`r1`–`r10`), 5 switches e `S1` + `C1`–`C9`; nós overlay também nos routers. **Atribuição overlay→CORE fiel à Figura 1 (decidida em 2026-11-09):** O1=S1, O2=r1, O3=r3, O4=C8, O5=r9, O6=r10, O7=r5, O8=C2, O9=C4, O10=C6, O11=C7 | O underlay do XML é isomorfo ao da Figura 1 (n10=r1, n9=r3, n8=r2, n7=r5, n6=r4, n5=r6, n4=r7, n3=r8, n2=r9, n1=r10; verificado por comparação dos grafos). Com esta atribuição as ligações virtuais atravessam 0 a 2 ligações físicas, como no enunciado (O3–O5 = r3>r6>r9, o "n9 → n5 → n2" do texto), e cada cliente fica no switch do router do seu nó overlay. A atribuição anterior (O4=C1, O5=r4, O6=r5, O7=r2, O9=C3, O10=C4, O11=C5) punha todas as ligações overlay entre routers sobre ligações diretas, o que copiava o underlay, e fazia o vídeo para O4 atravessar r1–r3 duas vezes. |
 | D14 | Routers com FRR (não Quagga) e `frr.conf`/`frrboot.sh` próprios no XML, **reaplicáveis com `topologies/aplicar_frr.py`**; o `frrboot.sh` manda o stdio dos daemons para `/dev/null` | O Quagga instalado não tem `vtysh`, e o CORE 9.2.1 gera config que o FRR 10 rejeita (ver `docs/testes-core.md`). Redesenhar o cenário na GUI repõe os serviços do Quagga e apaga a config (aconteceu em 2026-11-03), daí o programa. Sem o redirecionamento, o `zebra`/`ospfd` herdavam os pipes do comando de arranque e o CORE ficava preso em `INSTANTIATION` (os hosts nunca recebiam rota por defeito). |
 | D15 | Decidido implementar a Estratégia 1 do enunciado. Estado de rota indexado por `(servidor, fluxo)`, com vizinho de montante, candidatos por vizinho, destinos a jusante, subscritores locais, saltos, atraso acumulado e época. `fluxo` identifica o conteúdo/stream multimédia (ex.: `filme_a`). | Anúncios do servidor constroem as rotas; pedidos dos clientes abrem e fecham ramos partilhados. Roadmap em `docs/ETAPA2.md`; modelo em `docs/protocolo.md`. |
 | D16 | Protocolo E2 definido: `ANNOUNCE(server_id, flow, epoch, metric)`; `ACTIVATE`/`DEACTIVATE(server_id, flow, subscriber_id)`. Custo em saltos, época crescente por fluxo, IDs overlay para servidor/cliente e nome estável para fluxo. | Suporta vários fluxos e servidores; handlers dos três tipos implementados. |
@@ -252,7 +252,8 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] Ensaiar no CORE: timeout/link em baixo, RTT com atraso, substituto, arranque simultâneo, bootstrapper tardio (2026-11-02, 10 repetições).
 - [x] Ensaiar o overlay no cenário 3 (11 nós) com a atribuição proposta (2026-11-02).
 - [x] Passar a especificação e os resultados para o relatório (`docs/relatorio/e1_overlay.tex`, incluída em `main.tex`).
-- [ ] **Tu:** confirmar a atribuição overlay→CORE do cenário 3 (proposta atualizada em 2026-11-03 para o XML redesenhado; se mudar, só se altera o `cenario3.json` e o `testes-core.md`).
+- [x] Atribuição overlay→CORE do cenário 3: decidida em 2026-11-09, fiel à Figura 1 (D13; `cenario3.json` atualizado).
+- [ ] Repetir no CORE o overlay completo do cenário 3 com a nova atribuição (os resultados 3, 4, 8 e 11 da secção 7 foram obtidos com a atribuição anterior).
 - [ ] **Grupo:** rever `docs/protocolo.md` (inclui o `BYE reason=duplicate`) e o texto `e1_overlay.tex`; o `babel` em português do `main.tex` não está instalado nesta máquina (compila noutra com `texlive-babel-portuguese`).
 - [ ] Decidir se refazemos o cenário 2 com 3 intermédios, como no enunciado.
 
@@ -283,6 +284,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-09 | **Cenário 3 alinhado com a Figura 1.** Verificado que o `cenario3.json` é consistente com o `cenario3.xml` (nós e IPs) e que as 12 ligações overlay coincidem com a figura; o underlay do XML é isomorfo ao da figura. A atribuição overlay→CORE passou a ser a da figura (D13): O4=C8, O5=r9, O6=r10, O7=r5, O9=C4, O10=C6, O11=C7 (O1, O2, O3 e O8 mantêm-se). JSON validado contra o XML e o `BootstrapService`. Ensaios de cenário 3 da secção 7 ficam como históricos da atribuição anterior. |
 | 2026-11-09 | **Ensaio 4 da Etapa 2 no CORE (cenário 2).** Com C1 (atrás de O2) e C2 (atrás de O1) subscritos, cada ramo segue o caminho de 2 saltos (S1→O2→C1 e S1→O1→C2) e a ligação O1–O2 não transporta dados (em O1 e O2, `encaminhados` = `recebidos`). S1 envia uma cópia por ramo (40/s). Clientes a 20/s sem perdas, jitter ≤ 0,13 ms; `descartados=0` e `RPF=0` em todos os nós, incluindo os que têm 3 interfaces. |
 | 2026-11-09 | **Primeiros ensaios da Etapa 2 no CORE (cenário 1).** S1 – O2 – {C1, C2}, nós arrancados em terminais do `core-gui`. Ensaios 1 e 2 passaram: uma cópia por pacote no troço S1–O2 (20/s), O2 replica exatamente 2× para C1 e C2, cada cliente recebe 20/s, sem novas perdas, jitter 0,06–0,12 ms, `descartados=0` e `RPF=0` em todos os nós. Os `perdidos` acumulados (≈ 435) vêm de antes da janela medida, com `reinicios=1`: são imagens emitidas sem caminho ativo, não perdas na rede (nota em `docs/ETAPA2.md`, "Resultados no CORE"). |
 | 2026-11-09 | **Etapa 2, passos 8 e 9.** Retirado `RouteEntry.seen_announcements` (só era escrito e crescia sem limite; a deteção de cópias repetidas e antigas é feita pela época e pelos candidatos); testes dos valores por omissão passam a cobrir `candidates`, `local_subscribers`, `epoch` e `delay`. Revisão final da documentação face ao código: `protocolo.md` (§2, §6, §7), `ETAPA2.md` (ponto da situação, secções 1–3, lacunas, ensaio 6 substituído pela reparação rápida no cenário 3, estado face ao critério de conclusão), `ETAPA2_NOTAS.md`, este ficheiro (resumo, D15, interface) e `AGENTS.md`. Suite: 101 testes, todos passam. Nada ensaiado no CORE. |
