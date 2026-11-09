@@ -19,18 +19,15 @@ destinos a jusante. A rota local de `O4` pode ter este aspeto:
 origin = "S1"
 flow = "filme_a"
 upstream = "O3"
-subscriptions = {
-    "C1": {"C1"},
-    "C2": {"C2"},
-}
 destinations = {"C1", "C2"}
+local_subscribers = set()
 state = "ativa"
 ```
 
-As chaves de `subscriptions` são os vizinhos de jusante. Os valores são os IDs
-dos clientes cujos pedidos chegaram por cada vizinho. Se ambos os clientes
-estivessem atrás de `O5`, a entrada em `O4` seria `{"O5": {"C1", "C2"}}` e
-`destinations` seria `{"O5"}`.
+As subscrições são **agregadas por ramo**: `destinations` guarda os vizinhos de
+jusante que pediram o fluxo, não os clientes. Se `C1` e `C2` estivessem ambos
+atrás de `O5`, `destinations` em `O4` seria apenas `{"O5"}`, e `O4` nem saberia
+quantos clientes há atrás de `O5`.
 
 ## Constantes e estados
 
@@ -50,12 +47,10 @@ Cada nó mantém a sua própria entrada; as entradas não são partilhadas entre
   `math.inf` indica que o nó perdeu o caminho e ainda não aprendeu uma alternativa.
 - `upstream`: vizinho que leva na direção do servidor. É `None` no servidor ou
   enquanto a rota estiver invalidada.
-- `destinations`: vizinhos a jusante que têm pelo menos um subscritor.
-- `subscriptions`: mapa de vizinho a jusante para os IDs dos clientes que pediram
-  o fluxo através desse vizinho.
+- `destinations`: vizinhos a jusante que pediram o fluxo (cada um conta uma vez).
 - `local_subscribers`: subscrições que terminam neste nó, como no próprio cliente.
-- `state`: fica `"ativa"` quando há subscritores e um caminho válido até ao
-  servidor; caso contrário, fica `"inativa"`.
+- `state`: fica `"ativa"` quando há procura (subscritores locais ou destinos) e
+  um caminho válido até ao servidor; caso contrário, fica `"inativa"`.
 - `seen_announcements`: identidades de anúncios processados, no formato
   `servidor:fluxo:epoch`.
 - `epoch`: época mais recente do anúncio que atualizou a rota.
@@ -101,6 +96,12 @@ O encaminhador UDP usa isto para não devolver um pacote à ligação de entrada
 como o resultado é por vizinho, vários clientes no mesmo ramo recebem uma só
 cópia nesse troço.
 
+### `upstream_of(origin, flow)`
+
+Devolve o vizinho de montante atual, ou `None` se a rota não existir, se este
+nó for a origem ou se a rota estiver sem caminho. O encaminhador usa-o para o
+RPF estrito: só aceita datagramas vindos deste vizinho.
+
 ### `publish_local(origin, flow, epoch)` e `has_local_subscription(origin, flow)`
 
 O publicador atualiza a rota local de origem com o bloqueio da tabela. O
@@ -132,39 +133,28 @@ uma exceção, regista-a no log e continua a processar eventos seguintes.
 
 ## Funções auxiliares de subscrições
 
-### `_subscriber_ids(route)`
+### `_has_demand(route)`
 
-Devolve um conjunto com os IDs registados localmente e em todos os ramos a
-jusante. É usado quando uma rota muda de montante, para mover os pedidos ativos
-para o novo caminho.
-
-### `_has_subscriber(route, subscriber)`
-
-Verifica se um cliente continua subscrito localmente ou através de algum vizinho
-a jusante. Se o mesmo cliente existir por mais de um ramo, remover um dos ramos
-não deve cancelar a subscrição restante.
-
-### `_subscriber_count(route)`
-
-Conta os registos de subscrição locais e a jusante. É usado para determinar se
-a rota tem procura ativa.
+Indica se a rota tem procura: pelo menos um subscritor local ou um vizinho em
+`destinations`. As transições de "sem procura" para "com procura" (e vice-versa)
+são as únicas que geram mensagens para o montante.
 
 ### `_refresh_state(route, node_id=None)`
 
-Atualiza duas partes da entrada:
+Define `state` como `"ativa"` se houver procura e um caminho válido. O caminho é
+válido se este nó for o servidor da rota (`route.origin == node_id`) ou se tiver
+um vizinho `upstream`.
 
-1. Reconstrói `destinations` com os vizinhos cujos conjuntos de subscritores não
-   estão vazios.
-2. Define `state` como `"ativa"` se houver subscrições e um caminho válido.
+### `_route_message(node, msg_type, route, subscriber_id=None)`
 
-O caminho é válido se este nó for o servidor da rota (`route.origin == node_id`)
-ou se tiver um vizinho `upstream`.
+Constrói um `ACTIVATE` ou `DEACTIVATE`. `src` passa a ser o ID do nó que a
+envia; `server_id` e `flow` identificam a rota. `subscriber_id` só é incluído se
+for indicado e serve apenas de informação nos logs.
 
-### `_route_message(node, msg_type, route, subscriber_id)`
-
-Constrói uma mensagem de controlo de subscrição. `src` passa a ser o ID do nó
-que a envia; `server_id`, `flow` e `subscriber_id` identificam a subscrição
-original.
+Se um envio falhar, o nó descarta a ligação e dispara `neighbor_down`: a rota
+fica sem caminho mas mantém a procura, e o `ACTIVATE` é reenviado ao montante
+aprendido a seguir. Por isso as funções abaixo não desfazem o registo quando o
+envio falha.
 
 ## Subscrições locais
 
@@ -173,25 +163,19 @@ original.
 Chamado pelo cliente quando quer receber um fluxo.
 
 1. Usa `node.id` como `subscriber_id` se não for indicado outro.
-2. Valida o ID e procura a rota.
-3. Se não houver rota, devolve `False`.
-4. Se esse subscritor já estiver registado localmente, devolve `True` sem duplicar
-   a ativação.
-5. Regista a subscrição e atualiza o estado.
-6. Se houver `upstream`, envia-lhe `ACTIVATE`.
+2. Valida o ID e procura a rota. Se não houver rota, devolve `False`.
+3. Se esse subscritor já estiver registado localmente, devolve `True`.
+4. Regista o subscritor e atualiza o estado.
+5. Se a rota não tinha procura e há `upstream`, envia-lhe `ACTIVATE`.
 
-Se a rota existir mas estiver temporariamente sem montante, guarda a subscrição
-local como pendente. Quando surgir uma rota alternativa, o handler do anúncio
-reativa as subscrições.
-
-Exemplo: se o cliente `C1` tiver a rota `S1/filme_a` com `upstream="O4"`, a
-chamada envia `ACTIVATE` a `O4`.
+Se a rota estiver temporariamente sem montante, a procura fica pendente e o
+handler do anúncio abre o ramo quando surgir uma rota alternativa.
 
 ### `deactivate(node, origin, flow, subscriber_id=None)`
 
-Remove uma subscrição local. Se ela existia, atualiza o estado e envia
-`DEACTIVATE` pelo `upstream`, quando houver um. Se não existir rota ou subscrição
-local, devolve `False`.
+Remove o subscritor local. Se a rota ficar sem procura, envia `DEACTIVATE` pelo
+`upstream`, quando houver um. Se não existir rota ou subscrição local, devolve
+`False`.
 
 ## Handlers de mensagens
 
@@ -199,34 +183,26 @@ local, devolve `False`.
 
 Trata um `ACTIVATE` recebido de um vizinho a jusante.
 
-1. Extrai servidor, fluxo e `subscriber_id` da mensagem.
-2. Procura a rota. Recusa a mensagem se não conhecer a rota ou se ela veio do
+1. Procura a rota. Recusa a mensagem se não conhecer a rota ou se ela veio do
    `upstream` — uma ativação deve chegar pelo lado dos clientes.
-3. Regista o subscritor sob o vizinho emissor.
-4. Se o subscritor já estiver registado noutro ramo deste nó, guarda também este
-   ramo, mas não cria um segundo registo a montante.
-5. Caso seja uma nova subscrição, envia `ACTIVATE` ao `upstream`, se existir.
-6. Se o envio falhar, remove o registo acabado de inserir e atualiza o estado.
+2. Se o vizinho já estiver em `destinations`, é uma repetição: devolve `True`.
+3. Acrescenta o vizinho a `destinations` e atualiza o estado.
+4. Só se a rota não tinha procura antes envia `ACTIVATE` ao `upstream`.
 
 No servidor, `upstream` é `None`: o pedido fica registado como destino e não é
 reencaminhado mais longe.
 
 ### `handle_deactivate(node, neighbor, msg)`
 
-Remove do ramo indicado o subscritor que pediu para sair.
+Fecha o ramo do vizinho que pediu para sair.
 
 1. Se a rota não existir, devolve `False`.
-2. Se esse subscritor não estiver registado pelo vizinho, trata a repetição como
-   inofensiva e devolve `True`.
-3. Remove o cliente do conjunto desse vizinho e apaga a chave se o conjunto ficar
-   vazio.
-4. Atualiza `destinations` e `state`.
-5. Se o cliente ainda existir localmente ou por outro ramo, não propaga a
-   desativação.
-6. Caso contrário, envia `DEACTIVATE` ao `upstream`, se existir.
+2. Se o vizinho não estiver em `destinations`, trata a repetição como inofensiva.
+3. Retira o vizinho e atualiza o estado.
+4. Só se a rota ficar sem procura envia `DEACTIVATE` ao `upstream`.
 
-Assim, se `C1` cancelar em `O4`, o ramo de `C2` continua ativo. A desativação de
-`C1` percorre os montantes até ao servidor para remover esse cliente específico.
+Assim, se `C1` cancelar em `O4`, o ramo de `C2` continua ativo e nada sobe. Só
+quando `C2` também sair é que `O4` fecha o seu ramo em `O3`.
 
 ### `handle_announce(node, neighbor, msg)`
 
@@ -241,13 +217,13 @@ Aprende uma rota anunciada pelo servidor ou por um nó intermédio.
    atualizar a rota mesmo que o custo seja maior.
 6. Recusa escolher como montante um vizinho que já seja destino a jusante.
 7. Guarda a métrica, época e novo `upstream`; atualiza o estado.
-8. Se o montante mudou, envia `DEACTIVATE` pelo caminho antigo e `ACTIVATE` pelo
-   novo para cada subscritor ainda ativo.
+8. Se o montante mudou e a rota tem procura, envia um só `DEACTIVATE` pelo
+   caminho antigo e um só `ACTIVATE` pelo novo (o ramo é agregado).
 9. Reenvia o anúncio atualizado aos outros vizinhos, excluindo o emissor.
 
 Exemplo: `O4` tem custo 3 via `O3` e recebe de `O5` um anúncio cujo custo é 1.
 O custo candidato de `O4` passa a 2 (`1 + 1`). Como é melhor, `upstream` muda
-para `O5`; as subscrições são movidas e o anúncio com métrica 2 é reenviado.
+para `O5`; o ramo é movido e o anúncio com métrica 2 é reenviado.
 
 ## Reação a alterações de vizinhos
 
@@ -256,11 +232,11 @@ para `O5`; as subscrições são movidas e o anúncio com métrica 2 é reenviad
 Atualiza todas as rotas quando um vizinho cai.
 
 - Se o vizinho era `upstream`, define `upstream=None`, coloca `metric=math.inf` e
-  deixa a rota inativa. Conserva as subscrições para reaplicá-las quando aprender
-  um caminho alternativo.
-- Se era destino a jusante, remove as subscrições desse ramo. Para clientes que
-  deixaram de existir noutro sítio, envia `DEACTIVATE` ao montante ainda ligado.
-- Recalcula `destinations` e `state`.
+  deixa a rota inativa. Conserva a procura para abrir o ramo quando aprender um
+  caminho alternativo.
+- Se era destino a jusante, retira-o de `destinations`. Se a rota ficar sem
+  procura, envia `DEACTIVATE` ao montante ainda ligado.
+- Recalcula `state`.
 
 ### `handle_neighbor_up(node, neighbor)`
 
@@ -311,12 +287,16 @@ o encerramento do servidor.
 - `OverlayForwarder` escuta os datagramas RTP/JPEG em UDP e consulta
   `RoutingTable.active_destinations` para replicar pelos ramos ativos. O vizinho
   de entrada é excluído e clientes no mesmo ramo partilham uma cópia.
+- RPF estrito: um datagrama só é entregue e reencaminhado se vier de
+  `upstream_of(origin, flow)`; os restantes são contados em `rpf_dropped`.
 - A CLI inicia publicadores com `--publish-flow` e subscrições com
   `--subscribe SERVIDOR:FLUXO`; ao terminar com Ctrl-C, desativa as subscrições.
-- As quedas e recuperações de vizinhos têm testes unitários, mas ainda precisam
-  de ensaios de integração no CORE, incluindo continuidade do tráfego após falhas.
+- As quedas e recuperações de vizinhos têm testes unitários e de integração em
+  localhost (`tests/test_integration.py`), mas ainda precisam de ensaios no CORE,
+  incluindo continuidade do tráfego após falhas.
 - A rota usa o menor número de saltos aprendido pelos anúncios. Não se escolhe
   intencionalmente um percurso mais longo apenas por já estar ativo.
 - As mensagens de subscrição não têm confirmação de entrega.
 - As épocas do publicador são mantidas em memória e começam novamente quando o
-  processo do servidor é reiniciado.
+  processo do servidor é reiniciado; os nós rejeitam essas épocas antigas até à
+  implementação do `WITHDRAW` (passo 6 em `ETAPA2.md`).

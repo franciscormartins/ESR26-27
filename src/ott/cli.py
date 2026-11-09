@@ -143,8 +143,9 @@ def main(argv=None):
                 for key, receiver in receivers.items():
                     if key in active_subscriptions:
                         log.info("fluxo %s:%s: %s", key[0], key[1], receiver.stats)
-                log.info("dados UDP: recebidos=%d encaminhados=%d descartados=%d",
-                         forwarder.received, forwarder.forwarded, forwarder.dropped)
+                log.info("dados UDP: recebidos=%d encaminhados=%d descartados=%d (RPF=%d)",
+                         forwarder.received, forwarder.forwarded, forwarder.dropped,
+                         forwarder.rpf_dropped)
     except KeyboardInterrupt:
         pass
     finally:

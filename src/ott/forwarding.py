@@ -15,7 +15,8 @@ class OverlayForwarder:
 
     Cada ligação overlay continua a usar TCP para controlo. Os datagramas RTP
     viajam por UDP, um por vizinho a jusante, sem duplicar cópias para vários
-    subscritores atrás do mesmo vizinho.
+    subscritores atrás do mesmo vizinho. Um datagrama só é aceite (entregue
+    localmente e reencaminhado) se vier do vizinho de montante da rota (RPF).
     """
 
     def __init__(self, node, routing_table, port=DATA_PORT, bind="0.0.0.0"):
@@ -32,7 +33,8 @@ class OverlayForwarder:
         self._local_receivers = {}
         self.received = 0
         self.forwarded = 0
-        self.dropped = 0
+        self.dropped = 0       # todos os descartes (inválidos, não vizinhos, RPF)
+        self.rpf_dropped = 0   # descartados por não virem do montante (RPF)
 
     def set_local_receiver(self, origin, flow, receiver):
         """Associa um consumidor local, por exemplo o descodificador RTP."""
@@ -81,6 +83,17 @@ class OverlayForwarder:
             if incoming is None:
                 self.dropped += 1
                 log.debug("datagrama de origem não vizinha %s descartado", address[0])
+                continue
+
+            # RPF estrito: só se aceitam dados vindos do montante atual da rota.
+            # Elimina cópias duplicadas durante uma troca de montante e quebra
+            # ciclos de dados transitórios (aceita-se uma falha curta na troca).
+            upstream = self.routing_table.upstream_of(origin, flow)
+            if incoming != upstream:
+                self.dropped += 1
+                self.rpf_dropped += 1
+                log.debug("RPF: %s:%s vindo de %s, montante %s: descartado",
+                          origin, flow, incoming, upstream)
                 continue
 
             if self.routing_table.has_local_subscription(origin, flow):

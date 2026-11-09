@@ -25,12 +25,12 @@ class RouteEntry:
             existe atualmente um caminho válido conhecido.
         upstream: Vizinho no melhor caminho conhecido em direção ao servidor;
             ``None`` no próprio servidor ou quando a rota está invalidada.
-        destinations: IDs dos vizinhos a jusante com pelo menos um subscritor.
-        subscriptions: Mapa ``vizinho_a_jusante -> conjunto de subscriber_id``.
-            Permite remover um cliente sem apagar o ramo usado por outros.
+        destinations: IDs dos vizinhos a jusante que pediram o fluxo. As
+            subscrições são agregadas por ramo: cada vizinho conta uma vez,
+            seja qual for o número de clientes atrás dele.
         local_subscribers: Clientes/subscrições terminados neste nó localmente.
-        state: ``ativa`` quando há subscritores e um caminho válido para a origem;
-            caso contrário, ``inativa``.
+        state: ``ativa`` quando há procura (subscritores locais ou destinos) e
+            um caminho válido para a origem; caso contrário, ``inativa``.
         seen_announcements: Identidades ``servidor:fluxo:epoch`` processadas.
         epoch: Época mais recente do anúncio que atualizou esta rota.
     """
@@ -39,7 +39,6 @@ class RouteEntry:
     metric: float
     upstream: Optional[str] = None
     destinations: Set[str] = field(default_factory=set)
-    subscriptions: dict = field(default_factory=dict)
     local_subscribers: Set[str] = field(default_factory=set)
     state: str = INACTIVE
     seen_announcements: Set[str] = field(default_factory=set)
@@ -57,6 +56,10 @@ class RoutingTable:
     ``attach(node)`` liga anúncios, subscrições e eventos de vizinhança ao nó.
     ``activate``/``deactivate`` iniciam e terminam subscrições locais; os handlers
     mantêm os ramos dos vizinhos e propagam alterações pelo caminho de montante.
+
+    As subscrições são agregadas: um nó só envia ``ACTIVATE`` ao montante quando
+    a procura passa de zero para um (primeiro subscritor local ou primeiro ramo
+    a jusante) e ``DEACTIVATE`` quando volta a zero.
     """
     def __init__(self):
         self.routes: dict[Tuple[str, str], RouteEntry] = {}
@@ -97,6 +100,12 @@ class RoutingTable:
             if route is None or route.state != ACTIVE:
                 return ()
             return tuple(sorted(route.destinations.difference(exclude)))
+
+    def upstream_of(self, origin, flow):
+        """Vizinho de montante atual da rota, ou ``None`` (origem ou sem caminho)."""
+        with self._lock:
+            route = self.routes.get((origin, flow))
+            return None if route is None else route.upstream
 
     def has_local_subscription(self, origin, flow):
         """Indica se este nó tem um cliente local subscrito ao fluxo."""
@@ -160,39 +169,33 @@ class RoutingTable:
                 log.exception("erro ao tratar alteração do vizinho %s", neighbor)
 
     @staticmethod
-    def _subscriber_ids(route):
-        return set(route.local_subscribers).union(
-            *(set(subscribers) for subscribers in route.subscriptions.values()))
-
-    @staticmethod
-    def _has_subscriber(route, subscriber):
-        return (subscriber in route.local_subscribers or
-                any(subscriber in subscribers
-                    for subscribers in route.subscriptions.values()))
-
-    @staticmethod
-    def _subscriber_count(route):
-        return len(route.local_subscribers) + sum(
-            len(subscribers) for subscribers in route.subscriptions.values())
+    def _has_demand(route):
+        """Há procura quando existe um subscritor local ou um ramo a jusante."""
+        return bool(route.local_subscribers or route.destinations)
 
     @staticmethod
     def _refresh_state(route, node_id=None):
-        route.destinations = {neighbor for neighbor, subscribers
-                              in route.subscriptions.items() if subscribers}
         path_valid = route.origin == node_id or route.upstream is not None
-        route.state = (ACTIVE if path_valid and RoutingTable._subscriber_count(route)
+        route.state = (ACTIVE if path_valid and RoutingTable._has_demand(route)
                        else INACTIVE)
 
     @staticmethod
-    def _route_message(node, msg_type, route, subscriber_id):
-        return make_msg(msg_type, node.id, server_id=route.origin,
-                        flow=route.flow, subscriber_id=subscriber_id)
+    def _route_message(node, msg_type, route, subscriber_id=None):
+        fields = {"server_id": route.origin, "flow": route.flow}
+        if subscriber_id is not None:  # informativo: quem abriu/fechou o ramo
+            fields["subscriber_id"] = subscriber_id
+        return make_msg(msg_type, node.id, **fields)
+
+    # Nota sobre envios falhados: se ``node.send`` falhar, o nó descarta a
+    # ligação e dispara ``neighbor_down``; a rota fica sem caminho mas mantém a
+    # procura, e o ``ACTIVATE`` é reenviado ao montante aprendido a seguir
+    # (``handle_announce``). Por isso o pedido fica registado mesmo assim.
 
     def activate(self, node, origin, flow, subscriber_id=None):
-        """Ativa localmente um fluxo e envia o pedido pelo montante, se existir.
+        """Regista um subscritor local e abre o ramo a montante, se for o primeiro.
 
-        ``subscriber_id`` identifica o cliente até ao servidor; por omissão usa-se
-        o ID overlay do próprio nó.
+        Devolve ``False`` se a rota ainda não é conhecida. ``subscriber_id`` é
+        por omissão o ID overlay do nó e segue no pedido só como informação.
         """
         subscriber_id = node.id if subscriber_id is None else subscriber_id
         if not isinstance(subscriber_id, str) or not subscriber_id:
@@ -203,21 +206,17 @@ class RoutingTable:
                 return False
             if subscriber_id in route.local_subscribers:
                 return True
+            first = not self._has_demand(route)
             route.local_subscribers.add(subscriber_id)
             self._refresh_state(route, node.id)
-            upstream = route.upstream
-        if upstream is None:
-            return True
-        msg = self._route_message(node, MsgType.ACTIVATE, route, subscriber_id)
-        if node.send(upstream, msg):
-            return True
-        with self._lock:
-            route.local_subscribers.discard(subscriber_id)
-            self._refresh_state(route, node.id)
-        return False
+            upstream = route.upstream if first else None
+        if upstream is not None:
+            node.send(upstream, self._route_message(
+                node, MsgType.ACTIVATE, route, subscriber_id))
+        return True
 
     def deactivate(self, node, origin, flow, subscriber_id=None):
-        """Remove a subscrição local e desativa o percurso se ficar sem clientes."""
+        """Remove o subscritor local e fecha o ramo a montante se ficar sem procura."""
         subscriber_id = node.id if subscriber_id is None else subscriber_id
         if not isinstance(subscriber_id, str) or not subscriber_id:
             raise ValueError("subscriber_id tem de ser uma string não vazia")
@@ -227,67 +226,48 @@ class RoutingTable:
                 return False
             route.local_subscribers.remove(subscriber_id)
             self._refresh_state(route, node.id)
-            upstream = route.upstream
-        if upstream is None:
-            return True
-        return node.send(upstream, self._route_message(
-            node, MsgType.DEACTIVATE, route, subscriber_id))
+            upstream = route.upstream if not self._has_demand(route) else None
+        if upstream is not None:
+            node.send(upstream, self._route_message(
+                node, MsgType.DEACTIVATE, route, subscriber_id))
+        return True
 
     def handle_activate(self, node, neighbor, msg):
-        """Regista o cliente no ramo e propaga a subscrição uma só vez."""
+        """Acrescenta o vizinho aos destinos e propaga só a primeira procura."""
         data = msg["data"]
-        origin, flow, subscriber = (data["server_id"], data["flow"],
-                                    data["subscriber_id"])
+        origin, flow = data["server_id"], data["flow"]
         with self._lock:
             route = self.routes.get((origin, flow))
             if route is None or neighbor == route.upstream:
                 return False
-            subscribers = route.subscriptions.setdefault(neighbor, set())
-            if self._has_subscriber(route, subscriber):
-                # Mesmo cliente vindo por outro ramo: guardar o ramo local,
-                # mas não criar uma subscrição duplicada a montante.
-                subscribers.add(subscriber)
-                self._refresh_state(route, node.id)
-                return True
-            subscribers.add(subscriber)
+            if neighbor in route.destinations:
+                return True  # ramo já aberto: pedido repetido
+            first = not self._has_demand(route)
+            route.destinations.add(neighbor)
             self._refresh_state(route, node.id)
-            upstream = route.upstream
-        if upstream is None:
-            return True
-        forwarded = self._route_message(node, MsgType.ACTIVATE, route, subscriber)
-        if node.send(upstream, forwarded):
-            return True
-        with self._lock:
-            route.subscriptions.get(neighbor, set()).discard(subscriber)
-            if not route.subscriptions.get(neighbor):
-                route.subscriptions.pop(neighbor, None)
-            self._refresh_state(route, node.id)
-        return False
+            upstream = route.upstream if first else None
+        if upstream is not None:
+            node.send(upstream, self._route_message(
+                node, MsgType.ACTIVATE, route, data.get("subscriber_id")))
+        return True
 
     def handle_deactivate(self, node, neighbor, msg):
-        """Remove o cliente do ramo e propaga a desativação se já não subsistir."""
+        """Retira o vizinho dos destinos e fecha o ramo a montante se ficar vazio."""
         data = msg["data"]
-        origin, flow, subscriber = (data["server_id"], data["flow"],
-                                    data["subscriber_id"])
+        origin, flow = data["server_id"], data["flow"]
         with self._lock:
             route = self.routes.get((origin, flow))
             if route is None:
                 return False
-            subscribers = route.subscriptions.get(neighbor)
-            if not subscribers or subscriber not in subscribers:
-                return True  # pedido repetido: estado já está desativado
-            subscribers.remove(subscriber)
-            if not subscribers:
-                route.subscriptions.pop(neighbor, None)
-            still_subscribed = self._has_subscriber(route, subscriber)
+            if neighbor not in route.destinations:
+                return True  # pedido repetido: o ramo já está fechado
+            route.destinations.discard(neighbor)
             self._refresh_state(route, node.id)
-            upstream = route.upstream if not still_subscribed else None
-        if upstream is None:
-            return True
-        forwarded = self._route_message(node, MsgType.DEACTIVATE, route, subscriber)
-        if node.send(upstream, forwarded):
-            return True
-        return False
+            upstream = route.upstream if not self._has_demand(route) else None
+        if upstream is not None:
+            node.send(upstream, self._route_message(
+                node, MsgType.DEACTIVATE, route, data.get("subscriber_id")))
+        return True
 
     def handle_announce(self, node, neighbor, msg):
         """Aprende um caminho e propaga apenas rotas novas ou melhoradas."""
@@ -322,39 +302,35 @@ class RoutingTable:
                 route.seen_announcements.add(identity)
                 return False
             self._refresh_state(route, node.id)
-            subscribers = self._subscriber_ids(route) if old_upstream != neighbor else set()
-            changed_upstream = old_upstream != neighbor
+            # O ramo agregado muda de montante: um só DEACTIVATE/ACTIVATE.
+            move_branch = old_upstream != neighbor and self._has_demand(route)
             forwarded = make_msg(MsgType.ANNOUNCE, node.id, server_id=origin,
                                  flow=flow, epoch=epoch, metric=route.metric)
-        if changed_upstream and subscribers:
+        if move_branch:
             if old_upstream is not None:
-                for subscriber in subscribers:
-                    node.send(old_upstream, self._route_message(
-                        node, MsgType.DEACTIVATE, route, subscriber))
-            for subscriber in subscribers:
-                node.send(neighbor, self._route_message(
-                    node, MsgType.ACTIVATE, route, subscriber))
+                node.send(old_upstream, self._route_message(
+                    node, MsgType.DEACTIVATE, route))
+            node.send(neighbor, self._route_message(node, MsgType.ACTIVATE, route))
         node.broadcast(forwarded, exclude={neighbor})
         return True
 
     def handle_neighbor_down(self, node, neighbor):
-        """Invalida montantes caídos e remove subscrições do ramo desligado."""
+        """Invalida montantes caídos e remove o ramo do vizinho desligado."""
         deactivations = []
         with self._lock:
             for route in self.routes.values():
-                removed = set(route.subscriptions.pop(neighbor, set()))
+                removed = neighbor in route.destinations
+                route.destinations.discard(neighbor)
                 upstream_lost = route.upstream == neighbor
                 if upstream_lost:
                     route.upstream = None
                     route.metric = math.inf
                 self._refresh_state(route, node.id)
-                if not upstream_lost and route.upstream is not None:
-                    for subscriber in removed:
-                        if not self._has_subscriber(route, subscriber):
-                            deactivations.append((route, route.upstream, subscriber))
-        for route, upstream, subscriber in deactivations:
-            node.send(upstream, self._route_message(
-                node, MsgType.DEACTIVATE, route, subscriber))
+                if (removed and not upstream_lost and route.upstream is not None
+                        and not self._has_demand(route)):
+                    deactivations.append((route, route.upstream))
+        for route, upstream in deactivations:
+            node.send(upstream, self._route_message(node, MsgType.DEACTIVATE, route))
 
     def handle_neighbor_up(self, node, neighbor):
         """Envia ao novo vizinho anúncios das rotas válidas já conhecidas."""

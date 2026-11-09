@@ -75,26 +75,28 @@ O publicador emite a ronda inicial imediatamente e a tabela local fica com a rot
 servidor. Os nós vizinhos aprendem e propagam as rotas. A CLI também permite subscrever e
 encaminhar os dados; os ensaios de integração no CORE estão listados abaixo.
 
-### 4. Ativação e desativação - implementado (controlo)
+### 4. Ativação e desativação - implementado (subscrições agregadas por ramo)
 
 - [x] Definir como o cliente seleciona servidor/fluxo e inicia a subscrição.
 - [x] Encaminhar `ACTIVATE` pelo vizinho de montante até ao servidor.
 - [x] Em cada salto, registar o vizinho emissor como destino a jusante.
-- [x] Encaminhar `DEACTIVATE` pelo mesmo caminho e remover essa subscrição.
+- [x] Encaminhar `DEACTIVATE` pelo mesmo caminho e remover esse ramo.
+- [x] Agregar por ramo: só a primeira procura sobe (`ACTIVATE`) e só a última sai (`DEACTIVATE`).
 - [x] Manter a rota ativa enquanto existir pelo menos uma subscrição local ou a jusante; caso contrário,
   marcá-la inativa.
 - [x] Tornar operações repetidas seguras (ativação/desativação duplicada não corrompe o estado).
 
 `RoutingTable.attach(node)` regista também os handlers de `ACTIVATE` e `DEACTIVATE`.
 O cliente inicia/termina a sua subscrição com `table.activate(node, server_id, flow)` e
-`table.deactivate(node, server_id, flow)`; o `subscriber_id` é por omissão o ID do nó.
-Cada nó encaminha o pedido unicast para o seu `upstream`, mudando `src` para o seu próprio
-ID e mantendo o `subscriber_id` original. Os nós intermédios guardam os clientes por vizinho
-de jusante. Cada subscrição distinta sobe ao servidor e a respetiva remoção propaga
-`DEACTIVATE`; o estado do ramo mantém-se ativo enquanto pelo menos um cliente o usar.
-Assim, vários clientes atrás do mesmo nó partilham o ramo e a remoção de um não interrompe
-os restantes. O estado `ativa` reflete a existência de pelo menos uma subscrição local ou a
-jusante e um caminho válido para o servidor.
+`table.deactivate(node, server_id, flow)`; o `subscriber_id` local é por omissão o ID do nó.
+Desde 2026-11-09 as subscrições são **agregadas por ramo** (D24): cada nó guarda em
+`destinations` os vizinhos a jusante que pediram o fluxo e só envia `ACTIVATE` ao
+`upstream` quando a procura (subscritores locais ou destinos) passa de zero para um, e
+`DEACTIVATE` quando volta a zero. Um segundo cliente atrás de um nó já ativo não gera
+mensagens a montante, e a saída de um cliente não interrompe os restantes. Uma troca de
+montante gera um só `DEACTIVATE` e um só `ACTIVATE`. `subscriber_id` passou a opcional nas
+mensagens e só serve de informação. O servidor deixa de conhecer os clientes individuais.
+O estado `ativa` reflete a existência de procura e de um caminho válido para o servidor.
 
 Isto atualiza o estado de controlo. A CLI inicia a subscrição com `--subscribe` e o
 encaminhador de dados usa esse estado para abrir/fechar os ramos UDP.
@@ -144,6 +146,11 @@ origem envia uma cópia para cada destino a jusante ativo; cada intermédio repe
 sem devolver o datagrama ao vizinho de entrada. Vários subscritores atrás do mesmo vizinho
 partilham uma cópia nesse ramo. Os nós de destino entregam o RTP ao `StreamReceiver` local.
 
+Desde 2026-11-09 o forwarder aplica **RPF estrito** (D23): um datagrama só é entregue e
+reencaminhado se vier do montante atual (`RoutingTable.upstream_of`). Os restantes são
+contados em `rpf_dropped`, visível em `--stats`. Ao trocar de montante perde-se o que chegar
+do antigo até o novo começar a enviar.
+
 O encaminhamento reutiliza os troços comuns da árvore construída pelos `upstream` escolhidos
 pelos anúncios (métrica atual: número de saltos). A implementação não escolhe deliberadamente
 um caminho alternativo com custo superior só por esse ramo já estar ativo; essa otimização
@@ -163,9 +170,9 @@ seguintes, ainda **por resolver** no código:
 | L2 | O servidor reinicia com `epoch=1` e os nós rejeitam épocas inferiores à guardada | Um servidor reiniciado nunca volta a ser aprendido |
 | L3 | Não há retirada nem expiração de rotas | Um servidor morto deixa rotas `ativa` para sempre |
 | L4 | Numa época nova, a primeira cópia ganha; empates não têm critério determinista | O montante pode oscilar a cada ronda (ex.: O5 via O3/O7 no cenário 3) |
-| L5 | O forwarder aceita datagramas de qualquer vizinho | Duplicados ao trocar de montante; ciclos de dados transitórios |
+| L5 | ~~O forwarder aceita datagramas de qualquer vizinho~~ — **resolvido** pelo RPF estrito (passo 4) | Duplicados ao trocar de montante; ciclos de dados transitórios |
 | L7 | A origem UDP é identificada pelo IP do *peer* TCP | Validar no CORE em nós com várias interfaces |
-| L8 | `protocolo.md` §7 diz que só a transição 0→1 propaga `ACTIVATE`; o código propaga cada subscritor. `seen_announcements` só é escrito e cresce sem limite | Documentação incoerente |
+| L8 | ~~`protocolo.md` §7 diz que só a transição 0→1 propaga `ACTIVATE`; o código propaga cada subscritor~~ — **resolvido** com a agregação (passo 3). Falta: `seen_announcements` só é escrito e cresce sem limite (passo 8) | Documentação incoerente |
 
 **Decisões tomadas pelo grupo:**
 
@@ -185,8 +192,8 @@ seguintes, ainda **por resolver** no código:
 - [x] 0. Teste de integração com `OverlayNode` reais (S1–A–C).
 - [x] 1. Handlers recebem o ID do vizinho (`node.py`).
 - [x] 2. Teste do plano de dados S1–A–{C1, C2} em localhost.
-- [ ] 3. Subscrições agregadas por ramo (`routing.py`, `protocol.py`).
-- [ ] 4. RPF estrito no `OverlayForwarder` (`RoutingTable.upstream_of`).
+- [x] 3. Subscrições agregadas por ramo (`routing.py`, `protocol.py`).
+- [x] 4. RPF estrito no `OverlayForwarder` (`RoutingTable.upstream_of`).
 - [ ] 5. Tabela de candidatos e desempate por RTT (campo `delay`).
 - [ ] 6. `WITHDRAW`, reparação rápida e aceitação de qualquer época numa rota sem caminho.
 - [ ] 7. Tempo de vida de rotas e candidatos.
@@ -211,6 +218,13 @@ seguintes, ainda **por resolver** no código:
   ramo até ao servidor; queda do montante deixa a rota sem caminho com o pedido pendente.
 - [x] Integração localhost (S1–A–{C1, C2}, forwarder UDP e RTP): uma cópia no troço S1–A e
   duas a partir de A, sem perdas; C1 sai e C2 continua; sem clientes, S1 não emite.
+- [x] Unidade: subscrições agregadas (só a primeira e a última procura sobem; pedidos
+  repetidos idempotentes; `ACTIVATE` sem `subscriber_id`; ACTIVATE do montante rejeitado;
+  queda de um destino com outros ativos não sobe nada; troca de montante com vários ramos
+  gera um só par `DEACTIVATE`/`ACTIVATE`).
+- [x] RPF (`tests/test_forwarding.py`, UDP real em loopback): só o montante é entregue e
+  reencaminhado; após troca de montante, o antigo é descartado; sem rota ou sem caminho tudo é
+  descartado; o próprio fluxo que volta ao nó de origem não é reencaminhado.
 - [ ] CORE: ativar dois clientes e desativar um mantém o outro a receber; desativar o
   último deixa a rota sem tráfego.
 - [ ] CORE: exercitar as topologias 1 e 2 antes do cenário 3.
@@ -232,6 +246,7 @@ Comandos:
 ```sh
 PYTHONPATH=src python3 -m unittest tests.test_routing -v        # modelo (nós falsos)
 PYTHONPATH=src python3 -m unittest tests.test_integration -v    # nós reais em localhost
+PYTHONPATH=src python3 -m unittest tests.test_forwarding -v     # RPF no plano de dados
 ```
 
 `tests/test_integration.py` dá a cada nó um IP de loopback (127.0.0.1–4), porque todos os

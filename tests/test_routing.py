@@ -247,25 +247,55 @@ class RouteActivationTest(unittest.TestCase):
         self.assertEqual([m[1]["type"] for m in node.sent], ["ACTIVATE", "DEACTIVATE"])
         self.assertEqual(route.state, INACTIVE)
 
-    def test_downstream_subscribers_share_upstream_branch(self):
+    def types_sent(self, node):
+        return [(peer, msg["type"]) for peer, msg in node.sent]
+
+    def test_branches_are_aggregated_only_first_and_last_go_upstream(self):
         table, node = RoutingTable(), self.Node()
         route = self.make_route(table)
 
         table.handle_activate(node, "C1", self.request(MsgType.ACTIVATE, "client-1"))
-        table.handle_activate(node, "C1", self.request(MsgType.ACTIVATE, "client-2"))
-        self.assertEqual(route.destinations, {"C1"})
-        self.assertEqual(route.subscriptions["C1"], {"client-1", "client-2"})
-        self.assertEqual([m[1]["type"] for m in node.sent], ["ACTIVATE", "ACTIVATE"])
+        table.handle_activate(node, "C2", self.request(MsgType.ACTIVATE, "client-2"))
+        self.assertTrue(table.activate(node, "S1", "filme_a"))  # subscritor local
+        self.assertEqual(route.destinations, {"C1", "C2"})
+        self.assertEqual(self.types_sent(node), [("O1", "ACTIVATE")])
+        self.assertEqual(node.sent[0][1]["data"]["subscriber_id"], "client-1")
 
         table.handle_deactivate(node, "C1", self.request(MsgType.DEACTIVATE, "client-1"))
+        self.assertTrue(table.deactivate(node, "S1", "filme_a"))
         self.assertEqual(route.state, ACTIVE)
-        self.assertEqual([m[1]["type"] for m in node.sent],
-                         ["ACTIVATE", "ACTIVATE", "DEACTIVATE"])
-        table.handle_deactivate(node, "C1", self.request(MsgType.DEACTIVATE, "client-2"))
+        self.assertEqual(len(node.sent), 1)  # ainda há procura (C2)
+
+        table.handle_deactivate(node, "C2", self.request(MsgType.DEACTIVATE, "client-2"))
         self.assertEqual(route.destinations, set())
         self.assertEqual(route.state, INACTIVE)
-        self.assertEqual([m[1]["type"] for m in node.sent],
-                         ["ACTIVATE", "ACTIVATE", "DEACTIVATE", "DEACTIVATE"])
+        self.assertEqual(self.types_sent(node), [("O1", "ACTIVATE"), ("O1", "DEACTIVATE")])
+
+    def test_repeated_requests_from_same_branch_are_idempotent(self):
+        table, node = RoutingTable(), self.Node()
+        route = self.make_route(table)
+
+        self.assertTrue(table.handle_activate(node, "C1", self.request(MsgType.ACTIVATE, "a")))
+        self.assertTrue(table.handle_activate(node, "C1", self.request(MsgType.ACTIVATE, "b")))
+        self.assertEqual(route.destinations, {"C1"})
+        self.assertTrue(table.handle_deactivate(node, "C1", self.request(MsgType.DEACTIVATE, "a")))
+        self.assertTrue(table.handle_deactivate(node, "C1", self.request(MsgType.DEACTIVATE, "b")))
+        self.assertEqual(self.types_sent(node), [("O1", "ACTIVATE"), ("O1", "DEACTIVATE")])
+
+    def test_requests_without_subscriber_id_are_accepted_and_forwarded(self):
+        table, node = RoutingTable(), self.Node()
+        self.make_route(table)
+        request = make_msg(MsgType.ACTIVATE, "C1", server_id="S1", flow="filme_a")
+
+        self.assertTrue(table.handle_activate(node, "C1", request))
+        self.assertEqual(self.types_sent(node), [("O1", "ACTIVATE")])
+        self.assertNotIn("subscriber_id", node.sent[0][1]["data"])
+
+    def test_activation_from_upstream_is_rejected(self):
+        table, node = RoutingTable(), self.Node()
+        route = self.make_route(table)
+        self.assertFalse(table.handle_activate(node, "O1", self.request(MsgType.ACTIVATE, "x")))
+        self.assertEqual(route.destinations, set())
 
     def test_server_registers_and_removes_downstream_subscription(self):
         table, node = RoutingTable(), self.Node()
@@ -323,6 +353,19 @@ class RouteActivationTest(unittest.TestCase):
         self.assertEqual([(peer, msg["type"]) for peer, msg in node.sent],
                          [("O1", "DEACTIVATE")])
 
+    def test_downstream_failure_keeps_branch_while_other_destinations_remain(self):
+        table, node = RoutingTable(), self.Node()
+        route = self.make_route(table)
+        table.handle_activate(node, "C1", self.request(MsgType.ACTIVATE, "C1"))
+        table.handle_activate(node, "C2", self.request(MsgType.ACTIVATE, "C2"))
+        node.sent.clear()
+
+        table.handle_neighbor_down(node, "C1")
+
+        self.assertEqual(route.destinations, {"C2"})
+        self.assertEqual(route.state, ACTIVE)
+        self.assertEqual(node.sent, [])
+
     def test_new_neighbor_receives_announcements_for_known_routes(self):
         table, node = RoutingTable(), self.Node()
         route = self.make_route(table)
@@ -335,10 +378,12 @@ class RouteActivationTest(unittest.TestCase):
         self.assertEqual(announcement["type"], "ANNOUNCE")
         self.assertEqual(announcement["data"]["metric"], route.metric)
 
-    def test_better_announcement_moves_active_subscriptions_to_new_upstream(self):
+    def test_better_announcement_moves_branch_to_new_upstream_once(self):
         table, node = RoutingTable(), self.Node()
         route = self.make_route(table)
         table.handle_activate(node, "C1", self.request(MsgType.ACTIVATE, "C1"))
+        table.handle_activate(node, "C2", self.request(MsgType.ACTIVATE, "C2"))
+        table.activate(node, "S1", "filme_a")
         node.sent.clear()
 
         message = make_msg(MsgType.ANNOUNCE, "O5", server_id="S1",

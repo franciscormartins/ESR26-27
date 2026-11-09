@@ -81,12 +81,16 @@ REQUIRED = {
         "server_id": _is_str, "flow": _is_str,
         "epoch": _is_pos_int, "metric": _is_nonnegative_num,
     },
-    MsgType.ACTIVATE: {
-        "server_id": _is_str, "flow": _is_str, "subscriber_id": _is_str,
-    },
-    MsgType.DEACTIVATE: {
-        "server_id": _is_str, "flow": _is_str, "subscriber_id": _is_str,
-    },
+    MsgType.ACTIVATE: {"server_id": _is_str, "flow": _is_str},
+    MsgType.DEACTIVATE: {"server_id": _is_str, "flow": _is_str},
+}
+
+# campos opcionais em "data": se estiverem presentes, têm de ser válidos
+OPTIONAL = {
+    # subscrições agregadas por ramo: subscriber_id é só informativo (quem abriu
+    # ou fechou o ramo), não identifica a subscrição
+    MsgType.ACTIVATE: {"subscriber_id": _is_str},
+    MsgType.DEACTIVATE: {"subscriber_id": _is_str},
 }
 
 
@@ -110,6 +114,9 @@ def validate(msg):
         if field not in data:
             raise ProtocolError(f"{mtype}: falta o campo '{field}'")
         if not ok(data[field]):
+            raise ProtocolError(f"{mtype}: campo '{field}' inválido: {data[field]!r}")
+    for field, ok in OPTIONAL.get(mtype, {}).items():
+        if field in data and not ok(data[field]):
             raise ProtocolError(f"{mtype}: campo '{field}' inválido: {data[field]!r}")
     return msg
 
