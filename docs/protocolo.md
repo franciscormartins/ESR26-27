@@ -40,7 +40,7 @@ não depende de o JSON conter ou não quebras de linha e permite rejeitar mensag
 | `ANNOUNCE` | servidor → overlay | `server_id`, `flow`, `epoch`, `metric` (`delay` opcional) | anúncio periódico de um fluxo; reencaminhado pelos nós |
 | `WITHDRAW` | nó → vizinhos | `server_id`, `flow`, `epoch` | o nó perdeu o caminho para o fluxo e não tem alternativa viável |
 | `ACTIVATE`, `DEACTIVATE` | nó → vizinho de montante | `server_id`, `flow` (`subscriber_id` opcional, informativo) | abrir/fechar o ramo deste nó para um fluxo (subscrições agregadas) |
-| `ROUTE_TEST` | – | a definir (E2) | teste de caminhos (Etapa 3) |
+| `ROUTE_TEST` | – | a definir (Etapa 3) | teste de caminhos (Etapa 3); ainda não implementado |
 
 `PING`/`PONG` cumprem o papel do "HELLO/KEEPALIVE (nó, timestamp)" do guião. O `ts` é o relógio
 **monotónico do emissor do PING**; só ele o interpreta (o outro lado limita-se a devolvê-lo),
@@ -265,12 +265,19 @@ clientes ──ACTIVATE──> ... ──> S1                                   
 - O bootstrapper só sabe que um nó está vivo porque se registou ou pediu substitutos; não o expira.
 - O ficheiro de topologia é estático: um nó novo tem de existir no ficheiro.
 - Não há autenticação nem cifra no controlo.
+- Rotas (Etapa 2): o RTT só desempata caminhos com o mesmo número de saltos; uma troca de
+  montante provoca uma falha curta no vídeo (RPF estrito); depois de um `WITHDRAW` sem
+  alternativa, os ramos só reabrem quando o caminho é reaprendido (até um intervalo de
+  anúncio); todos os nós têm de usar o mesmo `--announce-interval`; `ACTIVATE`/`DEACTIVATE`
+  não têm confirmação; o servidor não conhece os clientes individuais (subscrições agregadas).
+- O vizinho de entrada de um datagrama UDP é identificado pelo IP da ligação TCP; ainda não
+  foi validado no CORE em nós com várias interfaces.
 
 ## 7. Modelo de estado das rotas (Etapa 2)
 
 A estratégia decidida para a Etapa 2 é a **Estratégia 1 do enunciado**: anúncios periódicos
 do servidor, propagados por inundação controlada; os clientes ativam a rota quando pedem o
-fluxo. Esta secção fixa o estado local necessário antes de implementar as interações.
+fluxo. Esta secção descreve o estado local que cada nó mantém por rota.
 
 Cada entrada é identificada por `(servidor, fluxo)` e contém:
 
@@ -285,7 +292,6 @@ Cada entrada é identificada por `(servidor, fluxo)` e contém:
 | `candidates` | último anúncio (época, saltos, atraso) de cada vizinho; o montante é escolhido entre eles |
 | `destinations` | conjunto de vizinhos a jusante que pediram o fluxo |
 | `state` | `inativa` ou `ativa`; ativa quando há subscritores locais/a jusante e caminho válido |
-| `seen_announcements` | identificadores de anúncios já processados, para evitar repetições e ciclos |
 
 O par `(origin, flow)` identifica uma transmissão: o mesmo servidor pode oferecer vários
 conteúdos, e servidores diferentes podem usar o mesmo identificador de fluxo sem colisão.

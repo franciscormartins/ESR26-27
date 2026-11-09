@@ -46,7 +46,6 @@ class RouteEntry:
         local_subscribers: Clientes/subscrições terminados neste nó localmente.
         state: ``ativa`` quando há procura (subscritores locais ou destinos) e
             um caminho válido para a origem; caso contrário, ``inativa``.
-        seen_announcements: Identidades ``servidor:fluxo:epoch`` processadas.
         epoch: Época mais recente conhecida para esta rota.
         delay: Atraso acumulado estimado até ao servidor (s), pela soma de
             metade do RTT de cada ligação; ``math.inf`` se desconhecido.
@@ -60,7 +59,6 @@ class RouteEntry:
     destinations: Set[str] = field(default_factory=set)
     local_subscribers: Set[str] = field(default_factory=set)
     state: str = INACTIVE
-    seen_announcements: Set[str] = field(default_factory=set)
     epoch: int = 0
     delay: float = math.inf
     candidates: Dict[str, Candidate] = field(default_factory=dict)
@@ -162,7 +160,6 @@ class RoutingTable:
             route.delay = 0.0
             route.upstream = None
             route.epoch = epoch
-            route.seen_announcements.add(f"{origin}:{flow}:{epoch}")
             self._refresh_state(route, origin)
             return route
 
@@ -478,7 +475,6 @@ class RoutingTable:
                 route.candidates[neighbor] = candidate  # renova o tempo de vida
                 return False  # cópia repetida
             route.candidates[neighbor] = candidate
-            route.seen_announcements.add(f"{origin}:{flow}:{epoch}")
             epoch_advanced = epoch > route.epoch
             if epoch_advanced:
                 route.epoch = epoch

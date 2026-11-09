@@ -22,10 +22,11 @@ implementadas.
 ## Arquitetura e decisões atuais
 
 - O projeto usa Python 3 e, tanto quanto possível, apenas a biblioteca standard.
-- O controlo do overlay usa TCP; o vídeo está previsto para UDP.
+- O controlo do overlay usa TCP; o vídeo (RTP/MJPEG) segue por UDP (`src/ott/forwarding.py`).
 - Os nós overlay e o bootstrapper estão em `src/ott/`.
-- `src/ott/routing.py` contém o modelo inicial da tabela de rotas. A tabela é
-  indexada por `(servidor, fluxo)`.
+- `src/ott/routing.py` contém a tabela de rotas, os anúncios, as subscrições
+  agregadas por ramo, o `WITHDRAW` e o tempo de vida. A tabela é indexada por
+  `(servidor, fluxo)`; o plano da Etapa 2 está em `docs/ETAPA2.md`.
 - `flow` identifica o conteúdo ou stream multimédia transmitido.
 - A Etapa 2 segue a Estratégia 1 do enunciado: anúncios do servidor propagados
   pelo overlay e ativação da rota por pedido do cliente.

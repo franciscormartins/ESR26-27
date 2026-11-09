@@ -6,8 +6,8 @@ import time
 import threading
 from dataclasses import replace
 
-from ott.routing import (ACTIVE, INACTIVE, AnnouncementPublisher, RouteEntry,
-                         RoutingTable)
+from ott.routing import (ACTIVE, INACTIVE, AnnouncementPublisher, Candidate,
+                         RouteEntry, RoutingTable)
 from ott.protocol import MsgType, make_msg
 
 
@@ -28,7 +28,9 @@ class RouteEntryTest(unittest.TestCase):
         self.assertEqual(route.key, ("S1", "filme_a"))
         self.assertIsNone(route.upstream)
         self.assertEqual(route.destinations, set())
-        self.assertEqual(route.seen_announcements, set())
+        self.assertEqual(route.local_subscribers, set())
+        self.assertEqual(route.candidates, {})
+        self.assertEqual((route.epoch, route.delay), (0, float("inf")))
         self.assertEqual(route.state, INACTIVE)
 
     def test_mutable_defaults_are_independent(self):
@@ -36,10 +38,12 @@ class RouteEntryTest(unittest.TestCase):
         second = RouteEntry(flow="filme_b", origin="S1", metric=0)
 
         first.destinations.add("O2")
-        first.seen_announcements.add("ann-1")
+        first.local_subscribers.add("C1")
+        first.candidates["O1"] = Candidate(1, 0)
 
         self.assertEqual(second.destinations, set())
-        self.assertEqual(second.seen_announcements, set())
+        self.assertEqual(second.local_subscribers, set())
+        self.assertEqual(second.candidates, {})
 
     def test_active_state_can_be_set(self):
         route = RouteEntry(flow="filme_a", origin="S1", metric=1, state=ACTIVE)

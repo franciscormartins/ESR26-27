@@ -11,12 +11,13 @@
   opcionalmente, pede vizinhos substitutos ao bootstrapper.
 - O overlay constrói-se de duas formas: **estratégia 2** (`ott -b <bootstrapper>`: o servidor lê um
   ficheiro de topologia e devolve os vizinhos) e **estratégia 1** (`ott viz1 viz2`: vizinhos à mão).
-- **Estado:** a Etapa 2 origina anúncios periódicos, aprende e propaga rotas por fluxo,
-  encaminha ativações/desativações e já tem encaminhamento RTP/JPEG por UDP pelos ramos ativos.
-  Até 2026-11-09 isto só funcionava nos testes com nós falsos: os handlers recebiam o objeto
-  `Neighbor` em vez do ID (corrigido no commit `e83e37b`). Com nós reais em localhost, o fluxo
-  ponta a ponta está agora validado (`tests/test_integration.py`). Falta o CORE e as melhorias
-  decididas na revisão de 2026-11-09 (ver `docs/ETAPA2.md`, "Revisão de 2026-11-09").
+- **Etapa 2 (estado em 2026-11-09):** anúncios periódicos por fluxo; montante escolhido por
+  saltos com desempate pelo RTT (com histerese); subscrições agregadas por ramo; dados RTP/JPEG
+  por UDP pelos ramos ativos com RPF estrito; reparação rápida, `WITHDRAW` e tempo de vida das
+  rotas para falhas e reinício do servidor. Tudo coberto por 101 testes automáticos, incluindo
+  nós reais em localhost. Até 2026-11-09 a Etapa 2 só funcionava com nós falsos (handlers
+  recebiam o objeto `Neighbor`, corrigido em `e83e37b`). **Falta:** segundo servidor nas
+  topologias e todos os ensaios no CORE (ver `docs/ETAPA2.md`).
   **Elemento 1 concluído:** todas as funcionalidades estão implementadas e foram ensaiadas no CORE (cenário 2 e
   cenário 3 com 11 nós) e medidas com 10 repetições (secção 7). Os ensaios acharam e corrigiram 4 defeitos
   (D17–D19 e o contador de défice); ver secção 7 e o registo de alterações.
@@ -61,7 +62,7 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 | D12 | Um só endereço (`host`) por nó no ficheiro de topologia | Simples; basta um dos lados alcançar o outro. **Limitação** para nós com várias interfaces (ver 8). |
 | D13 | Cenário 3: underlay com 10 routers FRR/OSPF (`r1`–`r10`), 5 switches e `S1` + `C1`–`C9`; nós overlay também nos routers | A Figura 1 põe nós overlay em routers. Atribuição overlay→CORE **por confirmar**, escolhida pelas etiquetas da figura (O1=S1, O4=C1, O8=C2, O9=C3, O10=C4, O11=C5) e de modo a que as 6 arestas overlay entre routers (O2–O3, O2–O7, O3–O5, O5–O6, O5–O7, O6–O7) sejam links diretos do underlay: O2=r1, O3=r3, O5=r4, O6=r5, O7=r2. Ver `docs/testes-core.md`. |
 | D14 | Routers com FRR (não Quagga) e `frr.conf`/`frrboot.sh` próprios no XML, **reaplicáveis com `topologies/aplicar_frr.py`**; o `frrboot.sh` manda o stdio dos daemons para `/dev/null` | O Quagga instalado não tem `vtysh`, e o CORE 9.2.1 gera config que o FRR 10 rejeita (ver `docs/testes-core.md`). Redesenhar o cenário na GUI repõe os serviços do Quagga e apaga a config (aconteceu em 2026-11-03), daí o programa. Sem o redirecionamento, o `zebra`/`ospfd` herdavam os pipes do comando de arranque e o CORE ficava preso em `INSTANTIATION` (os hosts nunca recebiam rota por defeito). |
-| D15 | Decidido implementar a Estratégia 1 do enunciado. Estado de rota indexado por `(servidor, fluxo)`, com vizinho de montante, destinos a jusante, subscritores, custo em saltos, época e anúncios vistos. `fluxo` identifica o conteúdo/stream multimédia (ex.: `filme_a`). | Anúncios do servidor constroem as rotas; pedidos dos clientes abrem e fecham ramos partilhados. Roadmap em `docs/ETAPA2.md`; modelo em `docs/protocolo.md`. |
+| D15 | Decidido implementar a Estratégia 1 do enunciado. Estado de rota indexado por `(servidor, fluxo)`, com vizinho de montante, candidatos por vizinho, destinos a jusante, subscritores locais, saltos, atraso acumulado e época. `fluxo` identifica o conteúdo/stream multimédia (ex.: `filme_a`). | Anúncios do servidor constroem as rotas; pedidos dos clientes abrem e fecham ramos partilhados. Roadmap em `docs/ETAPA2.md`; modelo em `docs/protocolo.md`. |
 | D16 | Protocolo E2 definido: `ANNOUNCE(server_id, flow, epoch, metric)`; `ACTIVATE`/`DEACTIVATE(server_id, flow, subscriber_id)`. Custo em saltos, época crescente por fluxo, IDs overlay para servidor/cliente e nome estável para fluxo. | Suporta vários fluxos e servidores; handlers dos três tipos implementados. |
 | D17 | Quem fecha uma ligação duplicada envia `BYE` com `reason: "duplicate"`; quem o recebe retira a ligação **sem `down`** e espera até 3 s pela vencedora (`DUPLICATE_GRACE`), que é adotada sem novo `up` | Num arranque simultâneo o outro lado fechava, depois de nós a darmos como `up`, a ligação perdedora: o E2 via `down`+`up` falsos (apagaria rotas à toa). Alternativas rejeitadas: só o nó de menor id liga (quebra o D6) ou adiar sempre todos os `down` (esconde quedas reais). |
 | D18 | `TCP_NODELAY` em todas as ligações entre vizinhos | O algoritmo de Nagle retinha as mensagens pequenas (PING/PONG cruzados) à espera do ACK: RTT de 37 ms inicial nos clientes e 60–80 ms com atraso de 20 ms/lado (esperado 41 ms). Com NODELAY: 41,1–41,6 ms. O RTT é a métrica do E2, por isso tem de ser fiável. |
@@ -95,15 +96,16 @@ Cada nó tem threads para: aceitar ligações, uma por vizinho (leitura) e uma d
 ## 5. Interface para o Elemento 2 e 3
 
 ```python
-node.register_handler("ANNOUNCE", fn)   # routing_table.attach regista os três handlers E2
+node.register_handler("ANNOUNCE", fn)   # fn(node, vizinho_id, msg); attach regista os 4 handlers E2
 node.send(id, make_msg(...)) ; node.broadcast(msg, exclude={origem})
 node.neighbor_ids()
 node.on_neighbor_up(fn) ; node.on_neighbor_down(fn)   # fn(node, id)
 node.rtt(id) ; node.rtts()                            # segundos (média móvel) ou None
 ```
 
-Definidos e validados os campos de `ANNOUNCE`, `ACTIVATE` e `DEACTIVATE` (ver
-`docs/protocolo.md` §7.1). `RoutingTable.attach(node)` regista os três handlers.
+Definidos e validados os campos de `ANNOUNCE`, `ACTIVATE`, `DEACTIVATE` e `WITHDRAW` (ver
+`docs/protocolo.md` §7.1). `RoutingTable.attach(node)` regista os quatro handlers, os eventos
+de vizinhança e, com `route_ttl`, a thread do tempo de vida; `RoutingTable.close()` pára-a.
 Continuam pendentes o formato de `ROUTE_TEST` e os ensaios de integração e falhas da Etapa 2
 no CORE. O encaminhamento UDP está implementado em `src/ott/forwarding.py` e integrado na CLI.
 
@@ -260,7 +262,8 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] E2: subscrições agregadas por ramo e RPF estrito (passos 3 e 4, 2026-11-09).
 - [x] E2: candidatos com desempate por RTT, `WITHDRAW` e reparação rápida (passos 5 e 6, 2026-11-09).
 - [x] E2: tempo de vida das rotas (passo 7, 2026-11-09).
-- [ ] E2: passos 8–10 do plano em `docs/ETAPA2.md` (limpeza de `seen_announcements`, documentação final, `S2`).
+- [x] E2: retirar `seen_announcements` e revisão final da documentação (passos 8 e 9, 2026-11-09).
+- [ ] E2: segundo servidor `S2` nas topologias (passo 10).
 - [ ] E2: ensaios ponta a ponta de distribuição e falhas/recuperação no CORE (ensaios 1–9 em `docs/ETAPA2.md`).
 - [ ] E3: interface de apresentação do vídeo, cenários e medições de streaming.
 
@@ -278,6 +281,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-09 | **Etapa 2, passos 8 e 9.** Retirado `RouteEntry.seen_announcements` (só era escrito e crescia sem limite; a deteção de cópias repetidas e antigas é feita pela época e pelos candidatos); testes dos valores por omissão passam a cobrir `candidates`, `local_subscribers`, `epoch` e `delay`. Revisão final da documentação face ao código: `protocolo.md` (§2, §6, §7), `ETAPA2.md` (ponto da situação, secções 1–3, lacunas, ensaio 6 substituído pela reparação rápida no cenário 3, estado face ao critério de conclusão), `ETAPA2_NOTAS.md`, este ficheiro (resumo, D15, interface) e `AGENTS.md`. Suite: 101 testes, todos passam. Nada ensaiado no CORE. |
 | 2026-11-09 | **Etapa 2, passo 7.** Tempo de vida dos candidatos: `RoutingTable(route_ttl=...)`, opção `--route-ttl` (por omissão 6 × `--announce-interval`, tem de ser maior que o intervalo); thread que esquece candidatos sem anúncios e trata o montante expirado como uma perda (reparação rápida ou `WITHDRAW`); cópias repetidas renovam o tempo de vida; `--announce-interval` passa a ser validado em todos os nós; o caminho de erro do bootstrapper também fecha a tabela. 9 testes novos em `test_routing.py` e 4 em `tests/test_cli.py` (novo). Suite: 101 testes, todos passam; testes de rede repetidos 3×. Atualizados README, `protocolo.md` (§3.7 e §5), `ETAPA2.md`, `ETAPA2_NOTAS.md`. Nada ensaiado no CORE. |
 | 2026-11-09 | **Etapa 2, passos 5 e 6.** Tabela de candidatos por vizinho em `RouteEntry.candidates`; seleção por saltos, depois atraso acumulado (campo opcional `delay` no `ANNOUNCE`, RTT/2 por ligação) com histerese de 20 % e 1 ms, e menor ID sem RTT; o montante atual mantém-se numa época nova até enviar a sua cópia (D21, resolve L4). Nova mensagem `WITHDRAW`; perda do montante tenta reparação rápida com condição de viabilidade e, sem alternativa, retira a rota, desfaz os ramos e envia `WITHDRAW`; rota sem caminho aceita qualquer época (D22, resolve L2 e a retirada de L3). 13 testes de unidade novos, validação das mensagens novas e 1 ensaio de reinício do servidor com nós reais. Suite: 88 testes, todos passam; testes de rede repetidos 3×. Documentação atualizada (`protocolo.md` §3.7, `ETAPA2.md`, `ETAPA2_NOTAS.md`). Nada ensaiado no CORE. |
 | 2026-11-09 | **Etapa 2, passos 3 e 4.** Subscrições agregadas por ramo (D24): `RouteEntry.subscriptions` desaparece, `destinations` passa a ser a fonte de verdade, `ACTIVATE`/`DEACTIVATE` só nas transições 0↔1, um só par numa troca de montante; `subscriber_id` opcional no protocolo (`OPTIONAL` em `protocol.py`). RPF estrito no `OverlayForwarder` (D23) com `RoutingTable.upstream_of` e contador `rpf_dropped` em `--stats`. Novo `tests/test_forwarding.py` (4 testes) e testes de rotas reescritos para a agregação. Atualizados `protocolo.md`, `ETAPA2.md` e `ETAPA2_NOTAS.md`. Suite: 74 testes, todos passam; testes de rede repetidos 3×. Nada ensaiado no CORE. |

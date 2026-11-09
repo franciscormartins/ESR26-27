@@ -51,8 +51,6 @@ Cada nó mantém a sua própria entrada; as entradas não são partilhadas entre
 - `local_subscribers`: subscrições que terminam neste nó, como no próprio cliente.
 - `state`: fica `"ativa"` quando há procura (subscritores locais ou destinos) e
   um caminho válido até ao servidor; caso contrário, fica `"inativa"`.
-- `seen_announcements`: identidades de anúncios processados, no formato
-  `servidor:fluxo:epoch`.
 - `epoch`: época mais recente conhecida para a rota.
 - `delay`: atraso acumulado estimado até ao servidor, em segundos (soma de
   metade do RTT de cada ligação); `math.inf` se desconhecido.

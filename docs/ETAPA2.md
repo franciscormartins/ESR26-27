@@ -13,13 +13,18 @@ até ao servidor.
 
 Esta escolha é compatível com as primitivas de overlay existentes (`send` e `broadcast`).
 
+**Ponto da situação (2026-11-09).** Os passos 0 a 9 do plano (ver "Revisão de 2026-11-09")
+estão feitos e cobertos por testes automáticos, incluindo ensaios com nós reais em localhost
+(101 testes na suite). Faltam o segundo servidor nas topologias (passo 10) e **todos os
+ensaios no CORE** (passo 11); nenhum comportamento da Etapa 2 foi ainda observado no CORE.
+
 ## Estado e tarefas
 
 ### 1. Modelo do estado de rota - concluído
 
 - [x] Definir uma entrada por `(servidor, fluxo)`.
-- [x] Guardar origem, identificador de fluxo, custo, vizinho de montante, destinos a
-  jusante, estado ativo/inativo e anúncios já vistos.
+- [x] Guardar origem, identificador de fluxo, saltos, atraso acumulado, época, vizinho de
+  montante, candidatos por vizinho, destinos a jusante, subscritores locais e estado.
 - [x] Implementar operações locais `get`, `put` e `remove` em `RoutingTable`.
 - [x] Testar valores por omissão, chaves, operações e validação em `tests/test_routing.py`.
 - [x] Documentar que `flow` identifica o conteúdo/stream multimédia transmitido.
@@ -31,10 +36,10 @@ Implementação: `src/ott/routing.py`. Testes: `tests/test_routing.py`.
 - [x] Confirmar a Estratégia 1 como abordagem a implementar.
 - [x] Usar o ID overlay do nó como identificador de servidor/cliente e um nome estável
   configurado como identificador de fluxo.
-- [x] Definir e validar campos de `ANNOUNCE`, `ACTIVATE` e `DEACTIVATE` em
+- [x] Definir e validar campos de `ANNOUNCE`, `ACTIVATE`, `DEACTIVATE` e `WITHDRAW` em
   `src/ott/protocol.py` e `docs/protocolo.md`.
 - [x] Definir `(server_id, flow, epoch)` como identidade de anúncio; épocas crescentes por
-  fluxo distinguem rondas, e a métrica menor dentro da mesma época melhora a rota.
+  fluxo distinguem rondas, e o montante é escolhido entre os candidatos (secção 3).
 - [x] Definir custo inicial 0 no servidor e incremento de 1 por salto (número de saltos).
 - [x] Definir que cada fluxo é anunciado independentemente; `server_id` permite dois ou mais
   servidores anunciarem fluxos sem colisão.
@@ -44,9 +49,8 @@ Implementação: `src/ott/routing.py`. Testes: `tests/test_routing.py`.
 - [x] Permitir ao servidor criar anúncios periódicos para cada fluxo.
 - [x] Ao iniciar o anúncio, criar a rota local do servidor com custo 0 e sem vizinho de montante.
 - [x] Ao receber um anúncio, rejeitar mensagens inválidas (validadas pelo protocolo) e detetar duplicados/ciclos.
-- [x] Calcular o custo via vizinho emissor e comparar com a rota guardada.
-- [x] Guardar o vizinho de montante quando se aprende uma rota melhor.
-- [x] Reenviar anúncios aos restantes vizinhos sem os devolver ao emissor.
+- [x] Calcular o custo via cada vizinho (saltos e atraso) e escolher o montante entre os candidatos.
+- [x] Reenviar anúncios aos restantes vizinhos sem os devolver ao emissor nem ao montante.
 - [x] Métrica: número de saltos; em empate, atraso acumulado (RTT/2 por ligação, campo `delay`)
   com histerese; sem RTT, menor ID (D21, 2026-11-09).
 - [x] Tabela de candidatos por vizinho: a primeira cópia de uma época nova já não derruba o
@@ -68,9 +72,10 @@ de 20 % e 1 ms; sem RTT medido, ganha o menor ID. O montante atual continua vál
 época anterior até enviar a nova, por isso a ordem de chegada das cópias não provoca trocas.
 O nó propaga o anúncio quando a época avança, o montante muda ou os saltos mudam (normalmente
 uma vez por ronda), a todos menos o emissor e o montante. Cópias antigas, repetidas e
-anúncios que regressam ao servidor de origem não são propagados. A validação dos campos é feita pelo protocolo antes do handler. O
-`AnnouncementPublisher` cria também a rota local (métrica 0, sem montante) a cada
-ronda. A CLI liga a tabela ao nó mesmo quando não há publicador local.
+anúncios que regressam ao servidor de origem não são propagados. A validação dos campos é
+feita pelo protocolo antes do handler. O `AnnouncementPublisher` cria também a rota local
+(métrica 0, atraso 0, sem montante) a cada ronda. A CLI liga a tabela ao nó mesmo quando não
+há publicador local.
 
 Exemplo para o nó servidor/bootstrapper `S1`:
 
@@ -94,7 +99,7 @@ encaminhar os dados; os ensaios de integração no CORE estão listados abaixo.
   marcá-la inativa.
 - [x] Tornar operações repetidas seguras (ativação/desativação duplicada não corrompe o estado).
 
-`RoutingTable.attach(node)` regista também os handlers de `ACTIVATE` e `DEACTIVATE`.
+`RoutingTable.attach(node)` regista também os handlers de `ACTIVATE`, `DEACTIVATE` e `WITHDRAW`.
 O cliente inicia/termina a sua subscrição com `table.activate(node, server_id, flow)` e
 `table.deactivate(node, server_id, flow)`; o `subscriber_id` local é por omissão o ID do nó.
 Desde 2026-11-09 as subscrições são **agregadas por ramo** (D24): cada nó guarda em
@@ -167,7 +172,7 @@ contados em `rpf_dropped`, visível em `--stats`. Ao trocar de montante perde-se
 do antigo até o novo começar a enviar.
 
 O encaminhamento reutiliza os troços comuns da árvore construída pelos `upstream` escolhidos
-pelos anúncios (métrica atual: número de saltos). A implementação não escolhe deliberadamente
+pelos anúncios (métrica: número de saltos, com o atraso como desempate). A implementação não escolhe deliberadamente
 um caminho alternativo com custo superior só por esse ramo já estar ativo; essa otimização
 global da árvore não faz parte da métrica de menor caminho implementada.
 
@@ -178,7 +183,7 @@ Exemplo: no servidor, acrescentar `--publish-flow filme_a`; no cliente, usar
 ## Revisão de 2026-11-09: decisões e próximos passos
 
 Uma revisão do código face ao enunciado (pág. 2-4) encontrou o defeito acima e as lacunas
-seguintes, ainda **por resolver** no código:
+seguintes. Estado atual de cada uma:
 
 | # | Lacuna | Impacto |
 |---|---|---|
@@ -186,8 +191,8 @@ seguintes, ainda **por resolver** no código:
 | L3 | ~~Não há retirada nem expiração de rotas~~ — **resolvido**: retirada (passo 6) e tempo de vida (passo 7) | Um servidor morto deixa rotas `ativa` para sempre |
 | L4 | ~~Numa época nova, a primeira cópia ganha; empates não têm critério determinista~~ — **resolvido** (passo 5) | O montante pode oscilar a cada ronda (ex.: O5 via O3/O7 no cenário 3) |
 | L5 | ~~O forwarder aceita datagramas de qualquer vizinho~~ — **resolvido** pelo RPF estrito (passo 4) | Duplicados ao trocar de montante; ciclos de dados transitórios |
-| L7 | A origem UDP é identificada pelo IP do *peer* TCP | Validar no CORE em nós com várias interfaces |
-| L8 | ~~`protocolo.md` §7 diz que só a transição 0→1 propaga `ACTIVATE`; o código propaga cada subscritor~~ — **resolvido** com a agregação (passo 3). Falta: `seen_announcements` só é escrito e cresce sem limite (passo 8) | Documentação incoerente |
+| L7 | A origem UDP é identificada pelo IP do *peer* TCP — **por validar** no CORE | Nós com várias interfaces podem ver datagramas descartados como "origem não vizinha" |
+| L8 | ~~`protocolo.md` §7 diz que só a transição 0→1 propaga `ACTIVATE`; o código propaga cada subscritor; `seen_announcements` só é escrito e cresce sem limite~~ — **resolvido** (passos 3, 8 e 9) | Documentação incoerente |
 
 **Decisões tomadas pelo grupo:**
 
@@ -212,8 +217,8 @@ seguintes, ainda **por resolver** no código:
 - [x] 5. Tabela de candidatos e desempate por RTT (campo `delay`).
 - [x] 6. `WITHDRAW`, reparação rápida e aceitação de qualquer época numa rota sem caminho.
 - [x] 7. Tempo de vida de rotas e candidatos.
-- [ ] 8. Retirar `seen_announcements`.
-- [ ] 9. Atualizar `protocolo.md`, este ficheiro e `ESTADO.md` com o comportamento final.
+- [x] 8. Retirar `seen_announcements`.
+- [x] 9. Atualizar `protocolo.md`, este ficheiro e `ESTADO.md` com o comportamento final.
 - [ ] 10. Segundo servidor (`S2`, 2 fluxos cada) em `cenario2.json` e `cenario3.json`.
 - [ ] 11. Ensaios no CORE (lista abaixo).
 
@@ -227,7 +232,7 @@ seguintes, ainda **por resolver** no código:
 - [ ] Integração CORE: caminhos alternativos escolhem o custo menor.
 - [x] Unidade: queda do vizinho de montante invalida a rota e anúncio alternativo reativa subscrições.
 - [x] Unidade: queda de um destino remove o ramo e desativa a subscrição a montante.
-- [x] Unidade: caminho melhor troca o montante e move subscrições ativas.
+- [x] Unidade: caminho melhor troca o montante e move o ramo ativo.
 - [x] Integração localhost (nós reais, S1–A–C): rotas com IDs e métrica em saltos; anúncio
   não volta ao emissor; ativação e desativação até ao servidor; queda do cliente remove o
   ramo até ao servidor; queda do montante deixa a rota sem caminho com o pedido pendente.
@@ -267,7 +272,8 @@ Ensaios no CORE necessários para dar a etapa como validada:
 3. Desativar um cliente mantém o outro; desativar o último deixa a rota sem tráfego.
 4. Cenário 2: o caminho alternativo escolhe o custo menor.
 5. Queda do montante: tempo até o cliente voltar a receber.
-6. Reinício do servidor: o fluxo regressa (depende do passo 6).
+6. Queda de um nó intermédio com alternativa de custo igual (cenário 3, cair O3 com O5 a
+   receber): reparação rápida via O7, sem `WITHDRAW`; medir a falha no vídeo (RPF).
 7. Cenário 3 com 2 servidores, 2 fluxos cada e clientes em ramos partilhados.
 8. `tc netem` em O3–O5 (cenário 3): O5 troca para O7 uma só vez, sem oscilar (passo 5).
 9. Matar e reiniciar o servidor: o `WITHDRAW` chega aos clientes e o fluxo regressa com a época 1.
@@ -278,6 +284,8 @@ Comandos:
 PYTHONPATH=src python3 -m unittest tests.test_routing -v        # modelo (nós falsos)
 PYTHONPATH=src python3 -m unittest tests.test_integration -v    # nós reais em localhost
 PYTHONPATH=src python3 -m unittest tests.test_forwarding -v     # RPF no plano de dados
+PYTHONPATH=src python3 -m unittest tests.test_cli -v            # opções da CLI
+PYTHONPATH=src python3 -m unittest discover -s tests -t .       # tudo (101 testes)
 ```
 
 `tests/test_integration.py` dá a cada nó um IP de loopback (127.0.0.1–4), porque todos os
@@ -292,3 +300,8 @@ os nós encaminharem os dados pela árvore de distribuição construída sobre o
 caminhos conhecidos, e uma falha de vizinho provocar atualização da rota sem deixar tráfego
 preso em caminhos inválidos. Registar os resultados e limitações em `docs/ESTADO.md` e no
 relatório.
+
+**Estado face ao critério (2026-11-09):** os três pontos estão cobertos por testes automáticos
+em localhost (dois clientes num ramo partilhado, uma cópia por troço; queda de cliente, de
+montante e do servidor com recuperação). Só se dá a etapa como **validada** depois dos ensaios
+1 a 9 no CORE, com os resultados registados em `docs/ESTADO.md`.

@@ -11,22 +11,23 @@ relatório em `docs/relatorio/`.
 | `src/ott/node.py` | `OverlayNode`: ligações aos vizinhos, HELLO, keepalive, RTT, eventos up/down, substitutos, handlers | 1 |
 | `src/ott/bootstrapper.py` | serviço que devolve os vizinhos (e substitutos) de cada nó a partir de um ficheiro | 1 |
 | `src/ott/cli.py` | comando `ott` | 1 |
-| `src/ott/routing.py` | modelo de rotas, anúncios, subscrições e destinos ativos | 2 |
-| `src/ott/forwarding.py` | encaminhamento UDP pelos ramos ativos da árvore overlay | 2 |
+| `src/ott/routing.py` | tabela de rotas: anúncios, escolha do montante (saltos + RTT), subscrições agregadas, `WITHDRAW`, tempo de vida | 2 |
+| `src/ott/forwarding.py` | encaminhamento UDP pelos ramos ativos da árvore overlay (RPF estrito) | 2 |
 | `src/ott/streaming/` | pacotes de vídeo (cabeçalho origem/fluxo + RTP), emissor MJPEG e recetor UDP | 2/4 |
 | `progex/` | código de apoio do livro (Kurose) e `movie.Mjpeg`, só como referência | 4 |
 | `topologies/` | cenários 1–3 (ajustar `host` aos IPs do CORE) | – |
 | `tests/` | testes automáticos (`python3 -m unittest discover -s tests -t .`) e `medicoes.py` (tempos em localhost, 10 repetições) | – |
 | `docs/ESTADO.md` | **ponto da situação**: o que está feito, decisões, como testar, pendentes, perguntas ao docente | – |
-| `docs/protocolo.md` | especificação das mensagens e interações | 1 |
-| `docs/testes-core.md` | comandos por nó e testes a fazer nos cenários 1–3 no CORE | – |
+| `docs/protocolo.md` | especificação das mensagens e interações | 1, 2 |
+| `docs/ETAPA2.md` | plano, decisões e testes da Etapa 2 | 2 |
+| `docs/testes-core.md` | comandos por nó e testes a fazer nos cenários 1–3 no CORE (**não está no repositório**) | – |
 
 Etapa 3 (PING de teste de caminhos): mensagem `ROUTE_TEST`, a tratar com um handler.
 
 ## Como as outras etapas se ligam ao nó
 
 ```python
-node.register_handler("ANNOUNCE", fn)      # fn(node, neighbor, msg)
+node.register_handler("ANNOUNCE", fn)      # fn(node, neighbor_id, msg)
 node.send(neighbor_id, make_msg(...))      # unicast a um vizinho
 node.broadcast(msg, exclude={origem})      # inundação controlada
 node.neighbor_ids()                        # vizinhos ativos
