@@ -127,6 +127,30 @@ class RoutingIntegrationTest(unittest.TestCase):
         self.assertEqual(route_c.state, INACTIVE)
         self.assertEqual(route_c.local_subscribers, {"C"})  # pedido fica pendente
 
+    def test_restarted_server_is_relearned_and_branch_reopens(self):
+        self.assertTrue(self.tables["C"].activate(self.nodes["C"], "S1", FLOW))
+        self.assertTrue(wait_for(
+            lambda: self.tables["S1"].active_destinations("S1", FLOW) == ("A",)))
+        self.assertTrue(wait_for(lambda: self.tables["C"].get("S1", FLOW).epoch >= 3))
+
+        # O servidor morre: A perde o montante, retira a rota e o C fica sem caminho.
+        self.publisher.stop()
+        self.nodes["S1"].stop()
+        route_c = self.tables["C"].get("S1", FLOW)
+        self.assertTrue(wait_for(lambda: route_c.upstream is None))
+
+        # Reinício: a época recomeça em 1 e tem de voltar a ser aceite.
+        server = self.nodes["S1"] = make_node("S1", BASE)
+        self.tables["S1"] = RoutingTable().attach(server)
+        server.start()
+        self.publisher = AnnouncementPublisher(
+            server, [FLOW], interval=0.3, routing_table=self.tables["S1"]).start()
+        self.assertTrue(wait_for(
+            lambda: self.tables["S1"].active_destinations("S1", FLOW) == ("A",)))
+        self.assertEqual(route_c.upstream, "A")
+        self.assertEqual(route_c.state, ACTIVE)
+        self.assertLess(route_c.epoch, 10)
+
 
 DATA_HOSTS = {"A": "127.0.0.1", "S1": "127.0.0.2", "C1": "127.0.0.3", "C2": "127.0.0.4"}
 DATA_PORT = 47590

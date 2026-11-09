@@ -47,20 +47,28 @@ Implementação: `src/ott/routing.py`. Testes: `tests/test_routing.py`.
 - [x] Calcular o custo via vizinho emissor e comparar com a rota guardada.
 - [x] Guardar o vizinho de montante quando se aprende uma rota melhor.
 - [x] Reenviar anúncios aos restantes vizinhos sem os devolver ao emissor.
-- [x] Começar por usar número de saltos como métrica; deixar RTT como extensão posterior.
-- [x] Evitar que um anúncio mais antigo substitua uma rota aprendida numa época mais nova.
+- [x] Métrica: número de saltos; em empate, atraso acumulado (RTT/2 por ligação, campo `delay`)
+  com histerese; sem RTT, menor ID (D21, 2026-11-09).
+- [x] Tabela de candidatos por vizinho: a primeira cópia de uma época nova já não derruba o
+  montante atual (resolve L4).
+- [x] Evitar que um anúncio mais antigo substitua uma rota com caminho; uma rota sem caminho
+  aceita qualquer época (servidor reiniciado, resolve L2).
 
 A publicação está implementada em `AnnouncementPublisher` (`src/ott/routing.py`) e ligada à
 CLI. `--publish-flow ID` pode repetir-se para vários fluxos; `--announce-interval S` define
 o intervalo (por omissão, 5 s). O publicador emite imediatamente a primeira ronda e depois
-incrementa `epoch` por fluxo a cada ronda. Cada anúncio usa `server_id=node.id` e `metric=0`.
+incrementa `epoch` por fluxo a cada ronda. Cada anúncio usa `server_id=node.id`, `metric=0` e
+`delay=0`.
 O teste unitário cobre múltiplos fluxos, épocas, periodicidade, paragem e configuração inválida.
 
-`RoutingTable.attach(node)` instala o handler de `ANNOUNCE`. O handler soma um salto à
-métrica recebida, guarda a rota e o vizinho emissor, e inunda o anúncio apenas quando
-aprende uma época nova ou encontra um custo menor na época atual. Cópias antigas,
-duplicadas, não melhoradas e anúncios que regressam ao servidor de origem não são
-propagados. A validação dos campos é feita pelo protocolo antes do handler. O
+`RoutingTable.attach(node)` instala o handler de `ANNOUNCE`. Desde 2026-11-09, cada anúncio
+atualiza o **candidato** do vizinho emissor (época, saltos e atraso anunciados) e o montante
+é reavaliado: menos saltos ganha; com os mesmos saltos, só se troca se o atraso melhorar mais
+de 20 % e 1 ms; sem RTT medido, ganha o menor ID. O montante atual continua válido com a
+época anterior até enviar a nova, por isso a ordem de chegada das cópias não provoca trocas.
+O nó propaga o anúncio quando a época avança, o montante muda ou os saltos mudam (normalmente
+uma vez por ronda), a todos menos o emissor e o montante. Cópias antigas, repetidas e
+anúncios que regressam ao servidor de origem não são propagados. A validação dos campos é feita pelo protocolo antes do handler. O
 `AnnouncementPublisher` cria também a rota local (métrica 0, sem montante) a cada
 ronda. A CLI liga a tabela ao nó mesmo quando não há publicador local.
 
@@ -101,24 +109,31 @@ O estado `ativa` reflete a existência de procura e de um caminho válido para o
 Isto atualiza o estado de controlo. A CLI inicia a subscrição com `--subscribe` e o
 encaminhador de dados usa esse estado para abrir/fechar os ramos UDP.
 
-### 5. Reação a alterações do overlay - implementado (base)
+### 5. Reação a alterações do overlay - implementado (reparação rápida e `WITHDRAW`)
 
 - [x] Usar `on_neighbor_up` e `on_neighbor_down` para invalidar ou reaprender rotas.
 - [x] Enviar ao vizinho novo os anúncios das rotas válidas já conhecidas; o servidor mantém anúncios periódicos.
 - [x] Limpar destinos a jusante associados a vizinhos que caíram e desativar o ramo se já não tiver clientes.
 - [x] Marcar sem caminho como inativa; após aprender um montante alternativo, reativar as subscrições e propagar o anúncio atualizado.
+- [x] Reparação rápida com condição de viabilidade e `WITHDRAW` quando não há alternativa (D22, 2026-11-09).
+- [ ] Tempo de vida das rotas como rede de segurança (passo 7).
 
 `RoutingTable.attach(node)` liga os eventos de vizinhança a uma fila processada por uma thread
-de fundo, para os callbacks do overlay apenas enfileirarem o evento. Quando cai o montante,
-a rota mantém os pedidos locais/a jusante, mas passa a sem caminho (`upstream=None`, métrica
-infinita localmente e estado inativo). Uma rota alternativa anunciada mais tarde assume o
-montante e recebe os `ACTIVATE` pendentes; o antigo montante recebe `DEACTIVATE` quando a
-rota muda enquanto ainda está ligado. Se cair um destino, esse ramo é removido e as
-desativações necessárias sobem. A proteção contra ciclos usa split horizon (não reenviar ao
-emissor, nem anunciar ao montante recém-ligado) e rejeita um destino a jusante como montante.
+de fundo, para os callbacks do overlay apenas enfileirarem o evento. Quando cai o montante
+(ou ele envia `WITHDRAW`), o nó tenta primeiro uma **reparação rápida**: um candidato que
+tenha anunciado menos saltos do que a rota perdida (condição de viabilidade; um vizinho que
+use este nó como caminho nunca a cumpre). Se existir, o ramo passa para ele sem esperar pela
+ronda seguinte. Se não existir, a rota fica sem caminho, os candidatos e os destinos a jusante
+são apagados (os subscritores locais ficam pendentes) e o nó envia `WITHDRAW` aos vizinhos;
+cada vizinho que o tinha como montante repete o procedimento. Quando o caminho volta a ser
+aprendido (mesmo com uma época inferior, se o servidor reiniciou), os nós a jusante voltam a
+pedir o fluxo. Se cair um destino, esse ramo é removido e, se ficar sem procura, sobe
+`DEACTIVATE`. A proteção contra ciclos usa a condição de viabilidade, split horizon (não
+reenviar ao emissor nem ao montante) e rejeita um destino a jusante como montante.
 
-Esta reação é coberta por testes unitários; falta ensaiar quedas, recuperações e caminhos
-alternativos no CORE.
+Esta reação é coberta por testes unitários e pelo reinício do servidor com nós reais
+(`tests/test_integration.py`); falta ensaiar quedas, recuperações e caminhos alternativos no
+CORE.
 
 ### 6. Integração do encaminhamento dos dados - implementado; validado em localhost, CORE pendente
 
@@ -167,9 +182,9 @@ seguintes, ainda **por resolver** no código:
 
 | # | Lacuna | Impacto |
 |---|---|---|
-| L2 | O servidor reinicia com `epoch=1` e os nós rejeitam épocas inferiores à guardada | Um servidor reiniciado nunca volta a ser aprendido |
-| L3 | Não há retirada nem expiração de rotas | Um servidor morto deixa rotas `ativa` para sempre |
-| L4 | Numa época nova, a primeira cópia ganha; empates não têm critério determinista | O montante pode oscilar a cada ronda (ex.: O5 via O3/O7 no cenário 3) |
+| L2 | ~~O servidor reinicia com `epoch=1` e os nós rejeitam épocas inferiores à guardada~~ — **resolvido** (passo 6) | Um servidor reiniciado nunca volta a ser aprendido |
+| L3 | ~~Não há retirada~~ nem expiração de rotas — retirada **resolvida** (passo 6); expiração no passo 7 | Um servidor morto deixa rotas `ativa` para sempre |
+| L4 | ~~Numa época nova, a primeira cópia ganha; empates não têm critério determinista~~ — **resolvido** (passo 5) | O montante pode oscilar a cada ronda (ex.: O5 via O3/O7 no cenário 3) |
 | L5 | ~~O forwarder aceita datagramas de qualquer vizinho~~ — **resolvido** pelo RPF estrito (passo 4) | Duplicados ao trocar de montante; ciclos de dados transitórios |
 | L7 | A origem UDP é identificada pelo IP do *peer* TCP | Validar no CORE em nós com várias interfaces |
 | L8 | ~~`protocolo.md` §7 diz que só a transição 0→1 propaga `ACTIVATE`; o código propaga cada subscritor~~ — **resolvido** com a agregação (passo 3). Falta: `seen_announcements` só é escrito e cresce sem limite (passo 8) | Documentação incoerente |
@@ -194,8 +209,8 @@ seguintes, ainda **por resolver** no código:
 - [x] 2. Teste do plano de dados S1–A–{C1, C2} em localhost.
 - [x] 3. Subscrições agregadas por ramo (`routing.py`, `protocol.py`).
 - [x] 4. RPF estrito no `OverlayForwarder` (`RoutingTable.upstream_of`).
-- [ ] 5. Tabela de candidatos e desempate por RTT (campo `delay`).
-- [ ] 6. `WITHDRAW`, reparação rápida e aceitação de qualquer época numa rota sem caminho.
+- [x] 5. Tabela de candidatos e desempate por RTT (campo `delay`).
+- [x] 6. `WITHDRAW`, reparação rápida e aceitação de qualquer época numa rota sem caminho.
 - [ ] 7. Tempo de vida de rotas e candidatos.
 - [ ] 8. Retirar `seen_announcements`.
 - [ ] 9. Atualizar `protocolo.md`, este ficheiro e `ESTADO.md` com o comportamento final.
@@ -222,6 +237,16 @@ seguintes, ainda **por resolver** no código:
   repetidos idempotentes; `ACTIVATE` sem `subscriber_id`; ACTIVATE do montante rejeitado;
   queda de um destino com outros ativos não sobe nada; troca de montante com vários ramos
   gera um só par `DEACTIVATE`/`ACTIVATE`).
+- [x] Unidade, seleção (passo 5): época nova pelo caminho pior não causa trocas; empate sem
+  RTT decidido pelo menor ID em qualquer ordem; empate decidido pelo atraso em qualquer ordem;
+  ganho abaixo da histerese não troca, ganho grande troca e fica estável; menos saltos ganha
+  mesmo com pior atraso; `delay` acumulado e só anunciado quando conhecido.
+- [x] Unidade, falhas (passo 6): reparação rápida sem `WITHDRAW`; alternativa não viável leva a
+  `WITHDRAW`; `WITHDRAW` de outro vizinho só remove o candidato; `WITHDRAW` do montante move o
+  ramo para a alternativa; retirada em cascata limpa os destinos; rota sem caminho aceita a
+  época 1 de um servidor reiniciado; rota com caminho rejeita épocas antigas.
+- [x] Integração localhost: servidor morto e reiniciado (época 1) é reaprendido e o ramo
+  S1–A–C volta a abrir.
 - [x] RPF (`tests/test_forwarding.py`, UDP real em loopback): só o montante é entregue e
   reencaminhado; após troca de montante, o antigo é descartado; sem rota ou sem caminho tudo é
   descartado; o próprio fluxo que volta ao nó de origem não é reencaminhado.

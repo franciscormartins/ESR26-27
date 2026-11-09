@@ -67,8 +67,8 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 | D18 | `TCP_NODELAY` em todas as ligações entre vizinhos | O algoritmo de Nagle retinha as mensagens pequenas (PING/PONG cruzados) à espera do ACK: RTT de 37 ms inicial nos clientes e 60–80 ms com atraso de 20 ms/lado (esperado 41 ms). Com NODELAY: 41,1–41,6 ms. O RTT é a métrica do E2, por isso tem de ser fiável. |
 | D19 | Ligar a um substituto logo que é proposto, e repor o contador de défice ao atingir X vizinhos | Poupava-se o ciclo de 2 s; e o contador antigo podia contar défice já resolvido (artefacto visto nas medições). |
 | D20 | Os handlers registados com `register_handler` recebem o **ID** do vizinho (`fn(node, neighbor_id, msg)`) | Era o contrato documentado e o que `routing.py` usa; o `_dispatch` passava o objeto `Neighbor` e partia a Etapa 2 com nós reais. |
-| D21 | Métrica: saltos; em empate, RTT acumulado com histerese (> 20 % e > 1 ms), depois o ID do vizinho. Escolha a partir de uma tabela de candidatos por vizinho (**por implementar**) | Cumpre "métricas da rede" sem oscilações; a regra atual "primeira cópia da época ganha" pode alternar entre caminhos de custo igual. |
-| D22 | Falhas: `WITHDRAW` explícito com reparação rápida (condição de viabilidade), rota sem caminho aceita qualquer época, tempo de vida de 6 × o intervalo como rede de segurança (**por implementar**) | Um servidor reiniciado (época 1) deixa de ficar bloqueado; um servidor morto deixa de manter rotas ativas para sempre. |
+| D21 | Métrica: saltos; em empate, RTT acumulado com histerese (> 20 % e > 1 ms), depois o ID do vizinho. Escolha a partir de uma tabela de candidatos por vizinho; o montante atual vale também com a época anterior (**implementado** em 2026-11-09) | Cumpre "métricas da rede" sem oscilações; a regra antiga "primeira cópia da época ganha" alternava entre caminhos de custo igual. |
+| D22 | Falhas: `WITHDRAW` explícito com reparação rápida (condição de viabilidade), rota sem caminho aceita qualquer época (**implementado** em 2026-11-09); tempo de vida de 6 × o intervalo como rede de segurança (**por implementar**, passo 7) | Um servidor reiniciado (época 1) deixa de ficar bloqueado; um servidor morto deixa de manter rotas ativas para sempre. |
 | D23 | Plano de dados com RPF estrito: só se aceitam datagramas do montante (**implementado** em 2026-11-09) | Elimina duplicados e ciclos de dados; aceita-se uma falha curta ao trocar de montante. |
 | D24 | Subscrições agregadas por ramo: `ACTIVATE` na transição 0→1, `DEACTIVATE` na 1→0; `subscriber_id` opcional e informativo (**implementado** em 2026-11-09) | Fiel à tabela do enunciado ("Destinos: O7, O3") e escala com o número de clientes; o servidor deixa de conhecer cada cliente. |
 | D25 | Dois servidores com fluxos distintos; chave `(server_id, flow)` mantém-se | Requisito mínimo do enunciado (pág. 3); falta acrescentar `S2` às topologias. |
@@ -111,7 +111,7 @@ Os handlers recebem `fn(node, neighbor_id, msg)`, em que `neighbor_id` é uma st
 
 ## 6. Como testar
 
-**Suite completa (74 testes, ~22 s):**
+**Suite completa (88 testes, ~23 s):**
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -t .
@@ -236,7 +236,9 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - RTT ≈ 1–2 ms em CORE sem atraso: inclui processamento em Python (o `ping` dá 0,1 ms); não afeta a comparação entre caminhos.
 - Sem autenticação nem cifra no controlo.
 - O cenário 2 desenhado tem 2 nós intermédios; o enunciado mostra 3 (S1 liga a um só, que se liga aos outros dois).
-- Etapa 2 (revisão de 2026-11-09, ver `docs/ETAPA2.md`): um servidor reiniciado não volta a ser aprendido (época 1 rejeitada); sem retirada nem expiração de rotas; o montante pode oscilar entre caminhos de custo igual; a métrica ignora o RTT. Têm decisão tomada (D21, D22) e estão por implementar.
+- Etapa 2: ainda não há tempo de vida das rotas (passo 7); uma rota só é invalidada por queda de ligação ou `WITHDRAW`. Uma retirada pode perder-se se a ligação cair a meio; o tempo de vida cobre esse caso.
+- O RTT só desempata caminhos com o mesmo número de saltos. Nos primeiros segundos de uma ligação ainda não há RTT: o desempate é pelo ID e, quando o RTT aparece, pode haver uma troca única de montante.
+- Depois de um `WITHDRAW`, os ramos a jusante são desfeitos e só voltam a abrir quando o caminho é reaprendido (até um intervalo de anúncio, 5 s por omissão); a reparação rápida evita isto quando há alternativa viável.
 - Com RPF estrito, uma troca de montante provoca uma falha curta no vídeo (até o novo montante começar a enviar); por medir no CORE.
 - Com subscrições agregadas, o servidor não sabe quantos clientes tem: só vê os ramos que lhe pedem o fluxo.
 - A origem dos datagramas UDP identifica-se pelo IP do *peer* TCP (`neighbor_for_address`); validar no CORE em nós com várias interfaces.
@@ -256,7 +258,8 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] E2 (controlo): tabela de rotas, anúncios, ativação/desativação e reação local a alterações de vizinhos.
 - [x] E2: corrigir o argumento dos handlers e validar ponta a ponta em localhost com nós reais (2026-11-09).
 - [x] E2: subscrições agregadas por ramo e RPF estrito (passos 3 e 4, 2026-11-09).
-- [ ] E2: passos 5–10 do plano em `docs/ETAPA2.md` (candidatos e RTT, `WITHDRAW`, tempo de vida, limpeza, documentação, `S2`).
+- [x] E2: candidatos com desempate por RTT, `WITHDRAW` e reparação rápida (passos 5 e 6, 2026-11-09).
+- [ ] E2: passos 7–10 do plano em `docs/ETAPA2.md` (tempo de vida, limpeza, documentação, `S2`).
 - [ ] E2: ensaios ponta a ponta de distribuição e falhas/recuperação no CORE (ensaios 1–9 em `docs/ETAPA2.md`).
 - [ ] E3: interface de apresentação do vídeo, cenários e medições de streaming.
 
@@ -274,6 +277,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-09 | **Etapa 2, passos 5 e 6.** Tabela de candidatos por vizinho em `RouteEntry.candidates`; seleção por saltos, depois atraso acumulado (campo opcional `delay` no `ANNOUNCE`, RTT/2 por ligação) com histerese de 20 % e 1 ms, e menor ID sem RTT; o montante atual mantém-se numa época nova até enviar a sua cópia (D21, resolve L4). Nova mensagem `WITHDRAW`; perda do montante tenta reparação rápida com condição de viabilidade e, sem alternativa, retira a rota, desfaz os ramos e envia `WITHDRAW`; rota sem caminho aceita qualquer época (D22, resolve L2 e a retirada de L3). 13 testes de unidade novos, validação das mensagens novas e 1 ensaio de reinício do servidor com nós reais. Suite: 88 testes, todos passam; testes de rede repetidos 3×. Documentação atualizada (`protocolo.md` §3.7, `ETAPA2.md`, `ETAPA2_NOTAS.md`). Nada ensaiado no CORE. |
 | 2026-11-09 | **Etapa 2, passos 3 e 4.** Subscrições agregadas por ramo (D24): `RouteEntry.subscriptions` desaparece, `destinations` passa a ser a fonte de verdade, `ACTIVATE`/`DEACTIVATE` só nas transições 0↔1, um só par numa troca de montante; `subscriber_id` opcional no protocolo (`OPTIONAL` em `protocol.py`). RPF estrito no `OverlayForwarder` (D23) com `RoutingTable.upstream_of` e contador `rpf_dropped` em `--stats`. Novo `tests/test_forwarding.py` (4 testes) e testes de rotas reescritos para a agregação. Atualizados `protocolo.md`, `ETAPA2.md` e `ETAPA2_NOTAS.md`. Suite: 74 testes, todos passam; testes de rede repetidos 3×. Nada ensaiado no CORE. |
 | 2026-11-09 | **Revisão da Etapa 2** face ao enunciado. Defeito crítico corrigido (commit `e83e37b`): `OverlayNode._dispatch` passava o objeto `Neighbor` aos handlers, por isso com nós reais o `ACTIVATE` nunca saía, o anúncio voltava ao emissor e as quedas não invalidavam rotas (D20). Novo `tests/test_integration.py` (6 testes com nós reais: rotas, ativação, quedas e plano de dados S1–A–{C1, C2}); falhavam todos antes da correção. Suite: 66 testes, todos passam. Decididas as melhorias D21–D25; plano ordenado em `docs/ETAPA2.md`. Nada ensaiado no CORE. |
 | 2026-11-03 | Etapa 2: integrado o plano de dados UDP à CLI. `--publish-flow` emite MJPEG/RTP só quando há destinos ativos; `--subscribe SERVIDOR:FLUXO` ativa a rota e recolhe estatísticas; nós intermédios replicam uma cópia por vizinho a jusante. Atualizados README, protocolo e roadmap. Ensaios de integração no CORE ainda por fazer; não foram executados testes nesta alteração. |

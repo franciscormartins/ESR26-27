@@ -5,13 +5,26 @@ import math
 import queue
 import threading
 import time
-from typing import Optional, Set, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 from .protocol import MsgType, make_msg
 
 INACTIVE = "inativa"
 ACTIVE = "ativa"
 log = logging.getLogger("ott.routing")
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """Último anúncio recebido de um vizinho para uma rota.
+
+    ``metric`` e ``delay`` são os valores anunciados pelo vizinho (antes de
+    somar o salto e o atraso da ligação até ele); ``delay`` é infinito se o
+    vizinho não o conhecia.
+    """
+    epoch: int
+    metric: float
+    delay: float = math.inf
 
 
 @dataclass
@@ -32,7 +45,11 @@ class RouteEntry:
         state: ``ativa`` quando há procura (subscritores locais ou destinos) e
             um caminho válido para a origem; caso contrário, ``inativa``.
         seen_announcements: Identidades ``servidor:fluxo:epoch`` processadas.
-        epoch: Época mais recente do anúncio que atualizou esta rota.
+        epoch: Época mais recente conhecida para esta rota.
+        delay: Atraso acumulado estimado até ao servidor (s), pela soma de
+            metade do RTT de cada ligação; ``math.inf`` se desconhecido.
+        candidates: Mapa ``vizinho -> Candidate`` com o último anúncio de cada
+            vizinho; o montante é escolhido entre eles.
     """
     flow: str
     origin: str
@@ -43,6 +60,8 @@ class RouteEntry:
     state: str = INACTIVE
     seen_announcements: Set[str] = field(default_factory=set)
     epoch: int = 0
+    delay: float = math.inf
+    candidates: Dict[str, Candidate] = field(default_factory=dict)
 
     @property
     def key(self):
@@ -60,8 +79,14 @@ class RoutingTable:
     As subscrições são agregadas: um nó só envia ``ACTIVATE`` ao montante quando
     a procura passa de zero para um (primeiro subscritor local ou primeiro ramo
     a jusante) e ``DEACTIVATE`` quando volta a zero.
+
+    O montante é escolhido entre os candidatos (último anúncio de cada vizinho):
+    menos saltos; em empate, menor atraso acumulado, mas só se a melhoria passar
+    a histerese (``delay_hysteresis`` relativo e ``delay_min_gain`` absoluto, em s).
     """
-    def __init__(self):
+    def __init__(self, delay_hysteresis=0.2, delay_min_gain=0.001):
+        self.delay_hysteresis = delay_hysteresis
+        self.delay_min_gain = delay_min_gain
         self.routes: dict[Tuple[str, str], RouteEntry] = {}
         self._lock = threading.RLock()
         self._attached_nodes = set()
@@ -121,6 +146,7 @@ class RoutingTable:
                 route = RouteEntry(flow=flow, origin=origin, metric=0)
                 self.routes[route.key] = route
             route.metric = 0
+            route.delay = 0.0
             route.upstream = None
             route.epoch = epoch
             route.seen_announcements.add(f"{origin}:{flow}:{epoch}")
@@ -142,6 +168,9 @@ class RoutingTable:
                                   current, neighbor, msg))
         node.register_handler(MsgType.DEACTIVATE,
                               lambda current, neighbor, msg: self.handle_deactivate(
+                                  current, neighbor, msg))
+        node.register_handler(MsgType.WITHDRAW,
+                              lambda current, neighbor, msg: self.handle_withdraw(
                                   current, neighbor, msg))
         node.on_neighbor_up(lambda current, neighbor: self._queue_neighbor_event(
             "up", current, neighbor))
@@ -269,83 +298,230 @@ class RoutingTable:
                 node, MsgType.DEACTIVATE, route, data.get("subscriber_id")))
         return True
 
+    # -- seleção do montante (métrica: saltos, depois atraso) ----------------
+
+    @staticmethod
+    def _link_delay(node, neighbor):
+        """Metade do RTT medido para o vizinho, ou infinito se ainda não há amostra."""
+        rtt = getattr(node, "rtt", None)
+        sample = rtt(neighbor) if callable(rtt) else None
+        return math.inf if sample is None else sample / 2
+
+    def _cost(self, node, neighbor, candidate):
+        """Custo do caminho via ``neighbor``: (saltos, atraso acumulado em s)."""
+        return (candidate.metric + 1,
+                candidate.delay + self._link_delay(node, neighbor))
+
+    @staticmethod
+    def _valid_candidate(route, neighbor, candidate):
+        """Candidatos da época atual; o montante atual vale também com a anterior.
+
+        Assim, numa época nova a primeira cópia a chegar não derruba o montante
+        atual antes de este ter tido tempo de enviar a sua cópia.
+        """
+        if neighbor in route.destinations:
+            return False  # um ramo a jusante nunca é montante
+        if candidate.epoch == route.epoch:
+            return True
+        return neighbor == route.upstream and candidate.epoch == route.epoch - 1
+
+    def _delay_better(self, new, current):
+        """Atraso ``new`` melhor do que ``current`` acima da histerese."""
+        if math.isinf(new):
+            return False
+        if math.isinf(current):
+            return True
+        gain = current - new
+        return gain > max(self.delay_min_gain, self.delay_hysteresis * current)
+
+    def _select(self, node, route, feasible_below=None):
+        """Escolhe o montante: menos saltos; empate pelo atraso (com histerese);
+        empate final (atrasos desconhecidos) pelo ID do vizinho.
+
+        ``feasible_below`` aplica a condição de viabilidade da reparação rápida:
+        só servem candidatos que anunciaram menos saltos do que esse valor.
+        Devolve ``(vizinho, (saltos, atraso))`` ou ``(None, None)``.
+        """
+        options = []
+        for neighbor, candidate in route.candidates.items():
+            if not self._valid_candidate(route, neighbor, candidate):
+                continue
+            if feasible_below is not None and not candidate.metric < feasible_below:
+                continue
+            options.append((self._cost(node, neighbor, candidate), neighbor))
+        if not options:
+            return None, None
+        best_cost, best = min(options, key=lambda o: (o[0][0], o[0][1], o[1]))
+        current = route.upstream
+        current_cost = next((cost for cost, nb in options if nb == current), None)
+        if current_cost is None or best == current:
+            return best, best_cost
+        if best_cost[0] < current_cost[0]:
+            return best, best_cost              # menos saltos: troca sempre
+        if self._delay_better(best_cost[1], current_cost[1]):
+            return best, best_cost              # mesmo nº de saltos, atraso bem melhor
+        if math.isinf(best_cost[1]) and math.isinf(current_cost[1]) and best < current:
+            return best, best_cost              # sem RTT: desempate determinista pelo ID
+        return current, current_cost
+
+    def _announce_msg(self, node, route):
+        fields = {"server_id": route.origin, "flow": route.flow,
+                  "epoch": route.epoch, "metric": route.metric}
+        if math.isfinite(route.delay):
+            fields["delay"] = route.delay
+        return make_msg(MsgType.ANNOUNCE, node.id, **fields)
+
+    @staticmethod
+    def _run(node, actions):
+        """Executa, fora do bloqueio, os envios decididos sob o bloqueio."""
+        for action in actions:
+            if action[0] == "send":
+                node.send(action[1], action[2])
+            else:
+                node.broadcast(action[1], exclude=action[2])
+
+    # -- anúncios ------------------------------------------------------------
+
     def handle_announce(self, node, neighbor, msg):
-        """Aprende um caminho e propaga apenas rotas novas ou melhoradas."""
+        """Regista o candidato, reavalia o montante e propaga se algo mudou.
+
+        Propaga quando a época avança (uma vez por ronda), quando o montante
+        muda ou quando muda o número de saltos. Devolve ``True`` se propagou.
+        """
         data = msg["data"]  # OverlayNode já validou a mensagem recebida.
         origin, flow, epoch = data["server_id"], data["flow"], data["epoch"]
         if origin == node.id:  # não aprender o próprio anúncio ao fechar um ciclo
             return False
-        candidate = data["metric"] + 1
-        identity = f"{origin}:{flow}:{epoch}"
+        candidate = Candidate(epoch, data["metric"], data.get("delay", math.inf))
+        actions = []
         with self._lock:
             route = self.routes.get((origin, flow))
             if route is not None and neighbor in route.destinations:
                 return False  # não escolher um ramo a jusante como montante
-            if route is not None and epoch < route.epoch:
+            if route is None:
+                route = RouteEntry(flow=flow, origin=origin, metric=math.inf)
+                self.routes[route.key] = route
+            if route.upstream is None and epoch < route.epoch:
+                # Rota sem caminho aceita qualquer época (ex.: servidor reiniciado).
+                route.epoch = 0
+                route.candidates.clear()
+            if epoch < route.epoch:
+                return False  # anúncio antigo
+            if route.candidates.get(neighbor) == candidate:
+                return False  # cópia repetida
+            route.candidates[neighbor] = candidate
+            route.seen_announcements.add(f"{origin}:{flow}:{epoch}")
+            epoch_advanced = epoch > route.epoch
+            if epoch_advanced:
+                route.epoch = epoch
+                route.candidates = {nb: c for nb, c in route.candidates.items()
+                                    if c.epoch >= epoch - 1}
+            old_upstream, old_metric = route.upstream, route.metric
+            new_upstream, cost = self._select(node, route)
+            if new_upstream is None:
                 return False
-            old_upstream = route.upstream if route is not None else None
-            if route is None or epoch > route.epoch:
-                if route is None:
-                    route = RouteEntry(flow=flow, origin=origin, metric=candidate,
-                                       upstream=neighbor, epoch=epoch)
-                    self.routes[route.key] = route
-                else:
-                    route.metric = candidate
-                    route.upstream = neighbor
-                    route.epoch = epoch
-                route.seen_announcements.add(identity)
-            elif candidate < route.metric:
-                route.metric = candidate
-                route.upstream = neighbor
-                route.seen_announcements.add(identity)
-            else:
-                route.seen_announcements.add(identity)
-                return False
+            route.upstream = new_upstream
+            route.metric, route.delay = cost
             self._refresh_state(route, node.id)
-            # O ramo agregado muda de montante: um só DEACTIVATE/ACTIVATE.
-            move_branch = old_upstream != neighbor and self._has_demand(route)
-            forwarded = make_msg(MsgType.ANNOUNCE, node.id, server_id=origin,
-                                 flow=flow, epoch=epoch, metric=route.metric)
-        if move_branch:
-            if old_upstream is not None:
-                node.send(old_upstream, self._route_message(
-                    node, MsgType.DEACTIVATE, route))
-            node.send(neighbor, self._route_message(node, MsgType.ACTIVATE, route))
-        node.broadcast(forwarded, exclude={neighbor})
+            moved = new_upstream != old_upstream
+            if moved and self._has_demand(route):
+                # O ramo agregado muda de montante: um só DEACTIVATE/ACTIVATE.
+                if old_upstream is not None:
+                    actions.append(("send", old_upstream, self._route_message(
+                        node, MsgType.DEACTIVATE, route)))
+                actions.append(("send", new_upstream, self._route_message(
+                    node, MsgType.ACTIVATE, route)))
+            propagate = epoch_advanced or moved or route.metric != old_metric
+            if propagate:
+                actions.append(("broadcast", self._announce_msg(node, route),
+                                {neighbor, new_upstream}))
+        self._run(node, actions)
+        return propagate
+
+    # -- perda do montante: reparação rápida ou retirada ---------------------
+
+    def _lose_upstream(self, node, route, still_connected):
+        """Trata a perda do montante (sob o bloqueio); devolve os envios a fazer.
+
+        Tenta primeiro uma alternativa viável: um candidato que anunciou menos
+        saltos do que a rota perdida não pode estar a usar este nó como caminho.
+        Sem alternativa, a rota fica sem caminho, os ramos a jusante são
+        desfeitos e envia-se ``WITHDRAW`` a todos os vizinhos.
+        """
+        actions = []
+        lost, lost_metric = route.upstream, route.metric
+        route.candidates.pop(lost, None)
+        route.upstream = None
+        had_demand = self._has_demand(route)
+        if still_connected and had_demand:
+            # o antigo montante já limpou os destinos; isto só evita restos
+            actions.append(("send", lost, self._route_message(
+                node, MsgType.DEACTIVATE, route)))
+        new_upstream, cost = self._select(node, route, feasible_below=lost_metric)
+        if new_upstream is not None:
+            route.upstream = new_upstream
+            route.metric, route.delay = cost
+            self._refresh_state(route, node.id)
+            if had_demand:
+                actions.append(("send", new_upstream, self._route_message(
+                    node, MsgType.ACTIVATE, route)))
+            actions.append(("broadcast", self._announce_msg(node, route), {new_upstream}))
+            log.info("rota %s:%s reparada via %s (perdido %s)",
+                     route.origin, route.flow, new_upstream, lost)
+            return actions
+        route.metric = route.delay = math.inf
+        route.candidates.clear()
+        route.destinations.clear()  # a jusante volta a pedir quando reaprender
+        self._refresh_state(route, node.id)
+        actions.append(("broadcast", make_msg(
+            MsgType.WITHDRAW, node.id, server_id=route.origin, flow=route.flow,
+            epoch=max(route.epoch, 1)), set()))
+        log.info("rota %s:%s sem caminho (perdido %s): WITHDRAW",
+                 route.origin, route.flow, lost)
+        return actions
+
+    def handle_withdraw(self, node, neighbor, msg):
+        """O vizinho perdeu o caminho: deixa de ser candidato; se era o montante,
+        repara-se a rota ou retira-se também."""
+        data = msg["data"]
+        actions = []
+        with self._lock:
+            route = self.routes.get((data["server_id"], data["flow"]))
+            if route is None:
+                return False
+            route.candidates.pop(neighbor, None)
+            if neighbor != route.upstream:
+                return False
+            actions = self._lose_upstream(node, route, still_connected=True)
+        self._run(node, actions)
         return True
 
     def handle_neighbor_down(self, node, neighbor):
-        """Invalida montantes caídos e remove o ramo do vizinho desligado."""
-        deactivations = []
+        """Invalida montantes caídos e remove o ramo e o candidato do vizinho."""
+        actions = []
         with self._lock:
             for route in self.routes.values():
                 removed = neighbor in route.destinations
                 route.destinations.discard(neighbor)
-                upstream_lost = route.upstream == neighbor
-                if upstream_lost:
-                    route.upstream = None
-                    route.metric = math.inf
+                if route.upstream == neighbor:
+                    actions += self._lose_upstream(node, route, still_connected=False)
+                    continue
+                route.candidates.pop(neighbor, None)
                 self._refresh_state(route, node.id)
-                if (removed and not upstream_lost and route.upstream is not None
-                        and not self._has_demand(route)):
-                    deactivations.append((route, route.upstream))
-        for route, upstream in deactivations:
-            node.send(upstream, self._route_message(node, MsgType.DEACTIVATE, route))
+                if removed and route.upstream is not None and not self._has_demand(route):
+                    actions.append(("send", route.upstream, self._route_message(
+                        node, MsgType.DEACTIVATE, route)))
+        self._run(node, actions)
 
     def handle_neighbor_up(self, node, neighbor):
         """Envia ao novo vizinho anúncios das rotas válidas já conhecidas."""
         announcements = []
         with self._lock:
             for route in self.routes.values():
-                if route.origin == node.id:
-                    valid = True
-                else:
-                    valid = route.upstream is not None
+                valid = route.origin == node.id or route.upstream is not None
                 if valid and route.epoch > 0 and math.isfinite(route.metric) \
                         and neighbor != route.upstream:
-                    announcements.append(make_msg(
-                        MsgType.ANNOUNCE, node.id, server_id=route.origin,
-                        flow=route.flow, epoch=route.epoch, metric=route.metric))
+                    announcements.append(self._announce_msg(node, route))
         for announcement in announcements:
             node.send(neighbor, announcement)
 
@@ -385,7 +561,7 @@ class AnnouncementPublisher:
                 self.routing_table.publish_local(self.node.id, flow, epoch)
             msg = make_msg(MsgType.ANNOUNCE, self.node.id,
                            server_id=self.node.id, flow=flow,
-                           epoch=epoch, metric=0)
+                           epoch=epoch, metric=0, delay=0.0)
             self.node.broadcast(msg)
             messages.append(msg)
             log.debug("anúncio do fluxo %s, época %d", flow, self._epochs[flow])

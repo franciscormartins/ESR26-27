@@ -36,6 +36,7 @@ class MsgType:
     ANNOUNCE = "ANNOUNCE"
     ACTIVATE = "ACTIVATE"
     DEACTIVATE = "DEACTIVATE"
+    WITHDRAW = "WITHDRAW"    # nó -> vizinhos: perdeu o caminho para (servidor, fluxo)
     # Etapa 3 - teste de caminhos
     ROUTE_TEST = "ROUTE_TEST"
 
@@ -83,6 +84,7 @@ REQUIRED = {
     },
     MsgType.ACTIVATE: {"server_id": _is_str, "flow": _is_str},
     MsgType.DEACTIVATE: {"server_id": _is_str, "flow": _is_str},
+    MsgType.WITHDRAW: {"server_id": _is_str, "flow": _is_str, "epoch": _is_pos_int},
 }
 
 # campos opcionais em "data": se estiverem presentes, têm de ser válidos
@@ -91,6 +93,8 @@ OPTIONAL = {
     # ou fechou o ramo), não identifica a subscrição
     MsgType.ACTIVATE: {"subscriber_id": _is_str},
     MsgType.DEACTIVATE: {"subscriber_id": _is_str},
+    # atraso acumulado desde o servidor (s); ausente = desconhecido (infinito)
+    MsgType.ANNOUNCE: {"delay": _is_nonnegative_num},
 }
 
 

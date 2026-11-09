@@ -2,7 +2,7 @@
 
 Implementação de referência: `src/ott/protocol.py` (formato e validação) e `src/ott/node.py` (comportamento).
 Esta especificação cobre as mensagens do elemento 1 (overlay), o controlo de rotas e o
-encaminhamento de dados da Etapa 2. `ANNOUNCE`, `ACTIVATE` e `DEACTIVATE` são tratados por
+encaminhamento de dados da Etapa 2. `ANNOUNCE`, `ACTIVATE`, `DEACTIVATE` e `WITHDRAW` são tratados por
 `src/ott/routing.py`; o RTP/JPEG segue por UDP através de `src/ott/forwarding.py`.
 
 ## 1. Transporte e formato
@@ -37,7 +37,8 @@ não depende de o JSON conter ou não quebras de linha e permite rejeitar mensag
 | `REPLACE` | nó → bootstrapper | `have` (lista de ids), `lost` (lista de ids), `need` (inteiro > 0) | nó com menos de X vizinhos há mais de `replace_interval` s |
 | `NEIGHBORS` | bootstrapper → nó | `neighbors`: lista de `{id, host, port}` | resposta a `REGISTER` ou `REPLACE` (pode ser lista vazia) |
 | `ERROR` | bootstrapper → nó | `reason` (string) | nó desconhecido do ficheiro de topologia |
-| `ANNOUNCE` | servidor → overlay | `server_id`, `flow`, `epoch`, `metric` | anúncio periódico de um fluxo; reencaminhado pelos nós |
+| `ANNOUNCE` | servidor → overlay | `server_id`, `flow`, `epoch`, `metric` (`delay` opcional) | anúncio periódico de um fluxo; reencaminhado pelos nós |
+| `WITHDRAW` | nó → vizinhos | `server_id`, `flow`, `epoch` | o nó perdeu o caminho para o fluxo e não tem alternativa viável |
 | `ACTIVATE`, `DEACTIVATE` | nó → vizinho de montante | `server_id`, `flow` (`subscriber_id` opcional, informativo) | abrir/fechar o ramo deste nó para um fluxo (subscrições agregadas) |
 | `ROUTE_TEST` | – | a definir (E2) | teste de caminhos (Etapa 3) |
 
@@ -55,8 +56,9 @@ Exemplos:
 {"type":"NEIGHBORS","src":"S1","data":{"neighbors":[{"id":"C1","host":"10.0.1.21","port":5000}]}}
 {"type":"REPLACE","src":"C1","data":{"have":[],"lost":["O2"],"need":1}}
 {"type":"ERROR","src":"S1","data":{"reason":"nó desconhecido"}}
-{"type":"ANNOUNCE","src":"S1","data":{"server_id":"S1","flow":"filme_a","epoch":1,"metric":0}}
-{"type":"ANNOUNCE","src":"O2","data":{"server_id":"S1","flow":"filme_a","epoch":1,"metric":1}}
+{"type":"ANNOUNCE","src":"S1","data":{"server_id":"S1","flow":"filme_a","epoch":1,"metric":0,"delay":0.0}}
+{"type":"ANNOUNCE","src":"O2","data":{"server_id":"S1","flow":"filme_a","epoch":1,"metric":1,"delay":0.0007}}
+{"type":"WITHDRAW","src":"O2","data":{"server_id":"S1","flow":"filme_a","epoch":7}}
 {"type":"ACTIVATE","src":"C1","data":{"server_id":"S1","flow":"filme_a","subscriber_id":"C1"}}
 {"type":"ACTIVATE","src":"O2","data":{"server_id":"S1","flow":"filme_a","subscriber_id":"C1"}}
 {"type":"ACTIVATE","src":"O5","data":{"server_id":"S1","flow":"filme_a"}}
@@ -129,7 +131,7 @@ propor-se outro na tentativa seguinte. Se não houver candidatos, `lost` é limp
 
 O servidor é o único que origina rondas `ANNOUNCE`. Os nós intermédios retransmitem essas
 mensagens e podem retransmitir uma nova cópia quando encontram um caminho melhor; não criam
-épocas de anúncio próprias.
+épocas de anúncio próprias. A escolha do caminho e a reação a falhas estão em §3.7.
 
 Quando o cliente quer receber um fluxo, chama `RoutingTable.activate(node, server_id, flow)`.
 As subscrições são **agregadas por ramo**: cada nó guarda os vizinhos a jusante que pediram o
@@ -175,6 +177,52 @@ Na CLI, `--publish-flow ID` anuncia e publica o MJPEG desse fluxo; `--subscribe
 SERVIDOR:FLUXO` ativa a subscrição. Todos os nós do caminho têm de executar `ott` para
 receber e encaminhar os datagramas. `--stats S` mostra estatísticas de receção e encaminhamento.
 
+### 3.7 Escolha do caminho e reação a falhas (Etapa 2)
+
+**Candidatos.** Cada nó guarda, por rota, o último `ANNOUNCE` de cada vizinho (época,
+saltos e atraso anunciados). O custo via um vizinho é `(metric + 1, delay + RTT/2)`, em que
+o RTT é a média móvel medida pelo PING/PONG; sem RTT medido, o atraso é infinito. São
+candidatos válidos os vizinhos com a época atual e, para o montante atual, também a época
+anterior: numa ronda nova, a primeira cópia a chegar não derruba o montante antes de este
+enviar a sua. Um vizinho que está nos destinos a jusante nunca é candidato.
+
+**Seleção** (sempre que chega um anúncio):
+
+1. menos saltos ganha sempre;
+2. com os mesmos saltos, troca-se de montante só se o atraso melhorar mais de 20 % e mais de
+   1 ms (histerese, parâmetros de `RoutingTable`);
+3. se ambos os atrasos forem desconhecidos, ganha o vizinho de menor ID (desempate
+   determinista, independente da ordem de chegada).
+
+O nó propaga o anúncio (a todos menos o emissor e o seu montante) quando a época avança,
+quando o montante muda ou quando muda o número de saltos; ou seja, normalmente uma vez por
+ronda. O campo `delay` só é incluído quando é conhecido.
+
+**Perda do montante** (queda da ligação ou `WITHDRAW` vindo do montante):
+
+1. *Reparação rápida.* Procura-se um candidato válido que tenha anunciado **menos saltos do
+   que a rota perdida** (condição de viabilidade). Um vizinho cujo caminho passe por este nó
+   anunciaria pelo menos os nossos saltos + 1, por isso nunca é escolhido. Se houver, o ramo
+   passa para ele (`ACTIVATE`) e o novo anúncio é propagado, sem `WITHDRAW`.
+2. *Retirada.* Sem alternativa viável, a rota fica sem caminho: os candidatos e os destinos a
+   jusante são apagados (os subscritores locais ficam pendentes) e o nó envia `WITHDRAW` a
+   todos os vizinhos. Quem o recebe retira esse vizinho dos candidatos; só se o emissor for o
+   seu montante é que repete o procedimento, pelo que a retirada desce pela árvore.
+3. Se o `WITHDRAW` veio do montante (ainda ligado) e havia procura, o nó envia-lhe também
+   `DEACTIVATE`, para não ficarem destinos órfãos.
+
+**Épocas depois de uma retirada.** Uma rota sem caminho aceita um anúncio de **qualquer**
+época, mesmo inferior à guardada: é assim que um servidor reiniciado (que recomeça em 1)
+volta a ser aprendido. Uma rota com caminho continua a rejeitar épocas antigas. Os nós a
+jusante voltam a pedir o fluxo (`ACTIVATE`) quando reaprendem o caminho.
+
+```
+servidor S1 morre ──> O2 (vizinho) perde o montante, sem alternativa ──WITHDRAW──> O3, O7
+O3: montante era O2 ──> sem alternativa ──WITHDRAW──> O4, O5 ...   (desce pela árvore)
+S1 reinicia (época 1) ──ANNOUNCE──> O2 (sem caminho: aceita) ──> O3 ... ──> clientes
+clientes ──ACTIVATE──> ... ──> S1                                     (ramos reabertos)
+```
+
 ## 4. Interface para os outros módulos (`OverlayNode`)
 
 | Chamada | Efeito |
@@ -218,9 +266,11 @@ Cada entrada é identificada por `(servidor, fluxo)` e contém:
 |---|---|
 | `origin` | identificador do servidor que origina o fluxo |
 | `flow` | identificador do conteúdo/stream multimédia transmitido (por exemplo, `filme_a` ou `camera_sala`) |
-| `metric` | custo acumulado desde o servidor; a primeira métrica será número de saltos |
-| `upstream` | vizinho do melhor caminho conhecido em direção ao servidor; `None` no servidor |
-| `epoch` | ronda de anúncio mais recente guardada para esta rota |
+| `metric` | número de saltos até ao servidor; `inf` quando a rota está sem caminho |
+| `delay` | atraso acumulado estimado (s), soma de RTT/2 por ligação; `inf` se desconhecido |
+| `upstream` | vizinho escolhido em direção ao servidor; `None` no servidor ou sem caminho |
+| `epoch` | ronda de anúncio mais recente conhecida para esta rota |
+| `candidates` | último anúncio (época, saltos, atraso) de cada vizinho; o montante é escolhido entre eles |
 | `destinations` | conjunto de vizinhos a jusante que pediram o fluxo |
 | `state` | `inativa` ou `ativa`; ativa quando há subscritores locais/a jusante e caminho válido |
 | `seen_announcements` | identificadores de anúncios já processados, para evitar repetições e ciclos |
@@ -229,9 +279,9 @@ O par `(origin, flow)` identifica uma transmissão: o mesmo servidor pode oferec
 conteúdos, e servidores diferentes podem usar o mesmo identificador de fluxo sem colisão.
 O modelo está em `src/ott/routing.py` como `RouteEntry` e `RoutingTable`, indexada por
 `(origin, flow)`. A tabela oferece operações `get`, `put` e `remove`; `attach(node)` instala
-o handler de `ANNOUNCE`. O publicador guarda a rota local com métrica zero. Nos recetores,
-a métrica aumenta em um salto; apenas uma época nova ou um custo melhor na época atual é
-propagado, excluindo o vizinho emissor. `ACTIVATE`/`DEACTIVATE` acrescentam ou retiram o
+os handlers de `ANNOUNCE`, `ACTIVATE`, `DEACTIVATE` e `WITHDRAW`. O publicador guarda a rota
+local com métrica e atraso zero. Nos recetores, o montante é escolhido entre os candidatos
+como descrito em §3.7. `ACTIVATE`/`DEACTIVATE` acrescentam ou retiram o
 vizinho emissor de `destinations` e são encaminhadas unicast pelo `upstream`, com o nó que
 reencaminha como `src`. Cada nó propaga `ACTIVATE` apenas quando a procura (subscritores
 locais ou destinos) passa de zero para um e `DEACTIVATE` quando volta a zero. O cliente usa
@@ -251,17 +301,20 @@ campos de `data`.
 |  | `flow` | identificador estável do conteúdo/stream anunciado |
 |  | `epoch` | inteiro positivo, crescente por servidor e fluxo a cada ronda de anúncio |
 |  | `metric` | número finito ≥ 0; o servidor anuncia 0 e cada salto acrescenta 1 |
+|  | `delay` (opcional) | número finito ≥ 0, em segundos; o servidor anuncia 0 e cada nó soma RTT/2 da ligação por onde recebeu; ausente = desconhecido |
+| `WITHDRAW` | `server_id`, `flow` | identificam a rota que o emissor deixou de conseguir alcançar |
+|  | `epoch` | inteiro positivo; última época conhecida pelo emissor (informativo) |
 | `ACTIVATE` | `server_id`, `flow` | identificam a rota pedida; o ramo é o do vizinho emissor |
 |  | `subscriber_id` (opcional) | string não vazia; só informativo (quem abriu o ramo) |
 | `DEACTIVATE` | `server_id`, `flow` | identificam o ramo que o vizinho emissor está a fechar |
 |  | `subscriber_id` (opcional) | string não vazia; só informativo |
 
 Um anúncio é identificado por `(server_id, flow, epoch)`. Vários anúncios com a mesma
-identidade podem chegar por caminhos diferentes; o nó pode substituir o custo e o vizinho
-de montante quando recebe um custo menor na mesma época, e deve propagar essa melhoria.
-Uma época inferior à já guardada para a mesma rota é antiga e não deve substituir o estado
-mais recente. `epoch` é iniciado em 1 e incrementado pelo servidor por fluxo; os nós não
-comparam relógios entre si.
+identidade podem chegar por caminhos diferentes; cada um atualiza o candidato do vizinho
+emissor e o montante é reavaliado (§3.7). Numa rota com caminho, uma época inferior à já
+guardada é antiga e é ignorada; numa rota sem caminho (depois de uma retirada) é aceite,
+para recuperar de um servidor reiniciado. `epoch` é iniciado em 1 e incrementado pelo
+servidor por fluxo; os nós não comparam relógios entre si.
 
 Cada vizinho conta no máximo uma vez nos destinos de uma rota. Repetir `ACTIVATE` não cria
 um ramo adicional; repetir `DEACTIVATE` é inofensivo. Localmente, cada `subscriber_id` conta

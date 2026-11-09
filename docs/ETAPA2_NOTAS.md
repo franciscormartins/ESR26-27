@@ -53,7 +53,12 @@ Cada nó mantém a sua própria entrada; as entradas não são partilhadas entre
   um caminho válido até ao servidor; caso contrário, fica `"inativa"`.
 - `seen_announcements`: identidades de anúncios processados, no formato
   `servidor:fluxo:epoch`.
-- `epoch`: época mais recente do anúncio que atualizou a rota.
+- `epoch`: época mais recente conhecida para a rota.
+- `delay`: atraso acumulado estimado até ao servidor, em segundos (soma de
+  metade do RTT de cada ligação); `math.inf` se desconhecido.
+- `candidates`: mapa `vizinho -> Candidate(epoch, metric, delay)` com o último
+  anúncio de cada vizinho. `metric` e `delay` são os valores anunciados, antes
+  de somar o salto e a ligação até ao vizinho. O montante é escolhido entre eles.
 
 ### `RouteEntry.key`
 
@@ -206,24 +211,59 @@ quando `C2` também sair é que `O4` fecha o seu ramo em `O3`.
 
 ### `handle_announce(node, neighbor, msg)`
 
-Aprende uma rota anunciada pelo servidor ou por um nó intermédio.
+Regista o anúncio como candidato do vizinho emissor e reavalia o montante.
 
-1. Lê `server_id`, `flow`, `epoch` e `metric`. O overlay já validou os campos da
-   mensagem antes de chamar o handler.
-2. Ignora anúncios que regressaram ao próprio servidor.
-3. Soma `1` à métrica para contabilizar o salto até ao nó atual.
-4. Ignora uma época mais antiga que a guardada.
-5. Na mesma época, só aceita uma métrica menor. Uma época mais recente pode
-   atualizar a rota mesmo que o custo seja maior.
-6. Recusa escolher como montante um vizinho que já seja destino a jusante.
-7. Guarda a métrica, época e novo `upstream`; atualiza o estado.
-8. Se o montante mudou e a rota tem procura, envia um só `DEACTIVATE` pelo
-   caminho antigo e um só `ACTIVATE` pelo novo (o ramo é agregado).
-9. Reenvia o anúncio atualizado aos outros vizinhos, excluindo o emissor.
+1. Ignora anúncios do próprio nó (fecharam um ciclo) e de vizinhos que são
+   destinos a jusante (nunca podem ser montante).
+2. Se a rota está **sem caminho** e a época é inferior à guardada, aceita-a na
+   mesma: apaga os candidatos e recomeça a contagem (servidor reiniciado).
+3. Com caminho, ignora épocas antigas; ignora também uma cópia igual à última
+   recebida desse vizinho.
+4. Guarda `candidates[vizinho]`. Se a época avançou, atualiza `epoch` e apaga
+   candidatos com mais de uma ronda de atraso.
+5. Chama `_select` e aplica o resultado (`upstream`, `metric`, `delay`).
+6. Se o montante mudou e há procura, envia um só `DEACTIVATE` ao antigo e um só
+   `ACTIVATE` ao novo.
+7. Propaga o anúncio (a todos menos o emissor e o montante) se a época avançou,
+   o montante mudou ou o número de saltos mudou. Devolve `True` se propagou.
 
-Exemplo: `O4` tem custo 3 via `O3` e recebe de `O5` um anúncio cujo custo é 1.
-O custo candidato de `O4` passa a 2 (`1 + 1`). Como é melhor, `upstream` muda
-para `O5`; o ramo é movido e o anúncio com métrica 2 é reenviado.
+Exemplo: `O4` usa `O3` com 3 saltos. Na ronda 8 chega primeiro a cópia de `O5`
+com 4 saltos: `O3` continua válido (época 7, é o montante atual) e mantém-se;
+`O4` propaga a época 8 com 3 saltos. Quando chegar a cópia de `O3` da época 8,
+nada muda e nada é propagado.
+
+### `_select(node, route, feasible_below=None)` e auxiliares
+
+- `_link_delay(node, vizinho)`: metade de `node.rtt(vizinho)`, ou infinito.
+- `_cost(...)`: custo via um vizinho, `(metric + 1, delay + ligação)`.
+- `_valid_candidate(...)`: candidato da época atual; o montante atual vale
+  também com a época anterior. Destinos a jusante nunca são válidos.
+- `_delay_better(novo, atual)`: melhoria de atraso acima da histerese
+  (`delay_hysteresis`, 20 %, e `delay_min_gain`, 1 ms).
+- `_select`: entre os candidatos válidos, menos saltos ganha sempre; com os
+  mesmos saltos, só troca de montante se `_delay_better`; com ambos os atrasos
+  desconhecidos, ganha o menor ID. Com `feasible_below`, só servem candidatos
+  que anunciaram menos saltos do que esse valor (condição de viabilidade).
+
+### `handle_withdraw(node, neighbor, msg)`
+
+O vizinho perdeu o caminho: é retirado dos candidatos. Se era o montante,
+chama `_lose_upstream` (com o antigo montante ainda ligado).
+
+### `_lose_upstream(node, route, still_connected)`
+
+Chamada sob o bloqueio quando o montante cai ou envia `WITHDRAW`.
+
+1. Remove o candidato perdido e, se o antigo montante ainda está ligado e havia
+   procura, envia-lhe `DEACTIVATE`.
+2. Tenta a reparação rápida: `_select` com `feasible_below` igual aos saltos da
+   rota perdida. Se houver alternativa, abre o ramo nela (`ACTIVATE`) e propaga
+   o anúncio.
+3. Sem alternativa: rota sem caminho (`metric` e `delay` infinitos), apaga
+   candidatos e destinos (os subscritores locais ficam pendentes) e envia
+   `WITHDRAW` a todos os vizinhos.
+
+Devolve a lista de envios, executados fora do bloqueio por `_run`.
 
 ## Reação a alterações de vizinhos
 
@@ -231,19 +271,15 @@ para `O5`; o ramo é movido e o anúncio com métrica 2 é reenviado.
 
 Atualiza todas as rotas quando um vizinho cai.
 
-- Se o vizinho era `upstream`, define `upstream=None`, coloca `metric=math.inf` e
-  deixa a rota inativa. Conserva a procura para abrir o ramo quando aprender um
-  caminho alternativo.
-- Se era destino a jusante, retira-o de `destinations`. Se a rota ficar sem
-  procura, envia `DEACTIVATE` ao montante ainda ligado.
-- Recalcula `state`.
+- Se o vizinho era `upstream`, chama `_lose_upstream` (reparação ou retirada).
+- Caso contrário, retira-o dos candidatos e de `destinations`. Se era destino e
+  a rota ficou sem procura, envia `DEACTIVATE` ao montante.
 
 ### `handle_neighbor_up(node, neighbor)`
 
-Envia ao novo vizinho um `ANNOUNCE` para cada rota válida e com época conhecida.
-Não envia uma rota ao próprio `upstream`, para evitar anunciar o caminho de
-volta por onde a aprendeu. O servidor pode também voltar a anunciá-la na ronda
-periódica seguinte.
+Envia ao novo vizinho um `ANNOUNCE` (com `delay`, se conhecido) para cada rota
+válida e com época conhecida. Não envia uma rota ao próprio `upstream`. O
+servidor volta também a anunciá-la na ronda periódica seguinte.
 
 ## `AnnouncementPublisher`
 
@@ -262,7 +298,8 @@ Para cada fluxo:
 
 1. Incrementa a época desse fluxo.
 2. Cria ou atualiza a rota local do servidor com custo `0` e sem `upstream`.
-3. Cria uma mensagem `ANNOUNCE` com `src` e `server_id` iguais ao ID do servidor.
+3. Cria uma mensagem `ANNOUNCE` com `src` e `server_id` iguais ao ID do servidor,
+   `metric=0` e `delay=0`.
 4. Transmite a mensagem aos vizinhos com `node.broadcast`.
 
 Devolve a lista de mensagens publicadas.
@@ -294,9 +331,14 @@ o encerramento do servidor.
 - As quedas e recuperações de vizinhos têm testes unitários e de integração em
   localhost (`tests/test_integration.py`), mas ainda precisam de ensaios no CORE,
   incluindo continuidade do tráfego após falhas.
-- A rota usa o menor número de saltos aprendido pelos anúncios. Não se escolhe
-  intencionalmente um percurso mais longo apenas por já estar ativo.
+- A rota usa o menor número de saltos; o RTT só desempata caminhos com os mesmos
+  saltos. Não se escolhe intencionalmente um percurso mais longo apenas por já
+  estar ativo.
+- Sem RTT medido (primeiros segundos de uma ligação), o desempate é pelo ID; quando
+  o RTT aparece pode haver uma troca única de montante.
 - As mensagens de subscrição não têm confirmação de entrega.
-- As épocas do publicador são mantidas em memória e começam novamente quando o
-  processo do servidor é reiniciado; os nós rejeitam essas épocas antigas até à
-  implementação do `WITHDRAW` (passo 6 em `ETAPA2.md`).
+- As épocas do publicador são mantidas em memória e recomeçam em 1 quando o
+  servidor é reiniciado; os nós aceitam-nas porque a queda do servidor provoca
+  `WITHDRAW` e deixa as rotas sem caminho.
+- Ainda não há tempo de vida das rotas (passo 7 em `ETAPA2.md`): uma rota só é
+  invalidada por queda de ligação ou `WITHDRAW`.

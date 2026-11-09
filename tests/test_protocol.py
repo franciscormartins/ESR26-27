@@ -38,6 +38,9 @@ class ProtocolTest(unittest.TestCase):
             # subscrições agregadas: subscriber_id é opcional (informativo)
             make_msg(MsgType.ACTIVATE, "O2", server_id="S1", flow="filme_a"),
             make_msg(MsgType.DEACTIVATE, "O2", server_id="S1", flow="filme_a"),
+            make_msg(MsgType.ANNOUNCE, "A", server_id="S1", flow="filme_a", epoch=1,
+                     metric=1, delay=0.0015),
+            make_msg(MsgType.WITHDRAW, "O2", server_id="S1", flow="filme_a", epoch=3),
         ]
         for m in good:
             self.assertIs(proto.validate(m), m)
@@ -69,6 +72,12 @@ class ProtocolTest(unittest.TestCase):
             make_msg(MsgType.ACTIVATE, "C1", flow="filme_a"),               # falta server_id
             make_msg(MsgType.ACTIVATE, "C1", server_id="S1", flow="filme_a", subscriber_id=7),
             make_msg(MsgType.DEACTIVATE, "C1", server_id="S1", flow="filme_a", subscriber_id=""),
+            make_msg(MsgType.ANNOUNCE, "A", server_id="S1", flow="filme_a", epoch=1,
+                     metric=1, delay=-1),
+            make_msg(MsgType.ANNOUNCE, "A", server_id="S1", flow="filme_a", epoch=1,
+                     metric=1, delay=float("inf")),
+            make_msg(MsgType.WITHDRAW, "O2", server_id="S1", flow="filme_a"),   # falta epoch
+            make_msg(MsgType.WITHDRAW, "O2", server_id="S1", flow="filme_a", epoch=0),
         ]
         for m in bad:
             with self.assertRaises(ProtocolError, msg=repr(m)):
