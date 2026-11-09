@@ -4,6 +4,7 @@
 import unittest
 import time
 import threading
+from dataclasses import replace
 
 from ott.routing import (ACTIVE, INACTIVE, AnnouncementPublisher, RouteEntry,
                          RoutingTable)
@@ -605,6 +606,99 @@ class WithdrawRepairTest(unittest.TestCase):
         route = self.feed(table, node, ("O1", 50, 2))
         self.assertFalse(table.handle_announce(node, "O5", self.announce("O5", 1, 0)))
         self.assertEqual((route.upstream, route.epoch), ("O1", 50))
+
+
+class RouteTtlTest(unittest.TestCase):
+    """Passo 7: tempo de vida como rede de segurança."""
+
+    Node = RouteSelectionTest.Node
+    announce = RouteSelectionTest.announce
+    feed = RouteSelectionTest.feed
+    TTL = 30.0
+
+    def later(self, seconds):
+        return time.monotonic() + seconds
+
+    def test_without_ttl_nothing_expires(self):
+        table, node = RoutingTable(), self.Node()
+        route = self.feed(table, node, ("O1", 1, 1))
+        self.assertEqual(table.expire(node, now=self.later(10_000)), 0)
+        self.assertEqual(route.upstream, "O1")
+
+    def test_invalid_ttl_is_rejected(self):
+        for ttl in (0, -1, float("inf"), float("nan"), True, "30"):
+            with self.subTest(ttl=ttl), self.assertRaises(ValueError):
+                RoutingTable(route_ttl=ttl)
+
+    def test_fresh_candidates_are_kept(self):
+        table, node = RoutingTable(route_ttl=self.TTL), self.Node()
+        route = self.feed(table, node, ("O1", 1, 1), ("O5", 1, 1))
+        self.assertEqual(table.expire(node, now=self.later(self.TTL - 1)), 0)
+        self.assertEqual(set(route.candidates), {"O1", "O5"})
+
+    def test_stale_alternative_is_forgotten_silently(self):
+        table, node = RoutingTable(route_ttl=self.TTL), self.Node()
+        route = self.feed(table, node, ("O1", 1, 1), ("O5", 1, 1))
+        node.received_broadcasts.clear()
+        route.candidates["O1"] = replace(route.candidates["O1"], seen_at=self.later(self.TTL))
+
+        self.assertEqual(table.expire(node, now=self.later(self.TTL + 1)), 1)
+
+        self.assertEqual((route.upstream, set(route.candidates)), ("O1", {"O1"}))
+        self.assertEqual((node.sent, node.received_broadcasts), ([], []))
+
+    def test_stale_upstream_with_fresh_alternative_is_repaired(self):
+        table, node = RoutingTable(route_ttl=self.TTL), self.Node()
+        route = self.feed(table, node, ("O1", 1, 1), ("O5", 1, 1))
+        table.activate(node, "S1", "filme_a")
+        node.sent.clear()
+        route.candidates["O5"] = replace(route.candidates["O5"], seen_at=self.later(self.TTL))
+
+        table.expire(node, now=self.later(self.TTL + 1))
+
+        self.assertEqual(route.upstream, "O5")
+        self.assertEqual([(p, m["type"]) for p, m in node.sent],
+                         [("O1", "DEACTIVATE"), ("O5", "ACTIVATE")])
+
+    def test_stale_upstream_without_alternative_withdraws(self):
+        table, node = RoutingTable(route_ttl=self.TTL), self.Node()
+        route = self.feed(table, node, ("O1", 1, 1))
+        table.handle_activate(node, "C1", make_msg(
+            MsgType.ACTIVATE, "C1", server_id="S1", flow="filme_a"))
+        node.received_broadcasts.clear()
+
+        table.expire(node, now=self.later(self.TTL + 1))
+
+        self.assertIsNone(route.upstream)
+        self.assertEqual((route.destinations, route.state), (set(), INACTIVE))
+        self.assertEqual([m["type"] for m, _ in node.received_broadcasts], ["WITHDRAW"])
+
+    def test_repeated_announcement_renews_lifetime(self):
+        table, node = RoutingTable(route_ttl=self.TTL), self.Node()
+        route = self.feed(table, node, ("O1", 1, 1))
+        first_seen = route.candidates["O1"].seen_at
+        time.sleep(0.01)
+        self.assertFalse(table.handle_announce(node, "O1", self.announce("O1", 1, 1)))
+        self.assertGreater(route.candidates["O1"].seen_at, first_seen)
+
+    def test_origin_route_never_expires(self):
+        table, node = RoutingTable(route_ttl=self.TTL), self.Node()
+        node.id = "S1"
+        route = table.publish_local("S1", "filme_a", 1)
+        table.expire(node, now=self.later(10_000))
+        self.assertEqual((route.metric, route.upstream), (0, None))
+
+    def test_background_thread_expires_silent_upstream(self):
+        table, node = RoutingTable(route_ttl=0.2), self.Node()
+        table.attach(node)
+        try:
+            route = self.feed(table, node, ("O1", 1, 1))
+            deadline = time.monotonic() + 2
+            while route.upstream is not None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertIsNone(route.upstream)
+        finally:
+            table.close()
 
 
 if __name__ == "__main__":

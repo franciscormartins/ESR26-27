@@ -216,6 +216,15 @@ ronda. O campo `delay` só é incluído quando é conhecido.
 volta a ser aprendido. Uma rota com caminho continua a rejeitar épocas antigas. Os nós a
 jusante voltam a pedir o fluxo (`ACTIVATE`) quando reaprendem o caminho.
 
+**Tempo de vida (rede de segurança).** Cada candidato guarda a hora da última receção; uma
+cópia repetida também a renova. Um candidato sem anúncios há mais de `route_ttl` segundos
+(`--route-ttl`, por omissão 6 × `--announce-interval` = 30 s) é esquecido. Se era o montante,
+o nó segue o procedimento da perda do montante (reparação rápida ou `WITHDRAW`), enviando-lhe
+`DEACTIVATE` se havia procura. Cobre casos em que a retirada não chegou (por exemplo, uma
+ligação que caiu a meio da cascata). A verificação corre numa thread da tabela, de
+`route_ttl / 4` em `route_ttl / 4` segundos (no máximo 1 s). As rotas originadas no próprio nó
+nunca expiram.
+
 ```
 servidor S1 morre ──> O2 (vizinho) perde o montante, sem alternativa ──WITHDRAW──> O3, O7
 O3: montante era O2 ──> sem alternativa ──WITHDRAW──> O4, O5 ...   (desce pela árvore)
@@ -245,6 +254,9 @@ clientes ──ACTIVATE──> ... ──> S1                                   
 | `replace_interval` | 5 s | défice de vizinhos tolerado antes (e entre) pedidos REPLACE |
 | `substitute_wait` | 10 s | tempo que um substituto tem para ligar |
 | `DUPLICATE_GRACE` | 3 s | tempo para a ligação vencedora chegar depois de o vizinho fechar uma duplicada |
+| `--announce-interval` | 5 s | intervalo entre rondas de `ANNOUNCE`; igual em todos os nós |
+| `--route-ttl` (`route_ttl`) | 6 × intervalo (30 s) | tempo sem anúncios ao fim do qual um candidato é esquecido; tem de ser maior que o intervalo |
+| `delay_hysteresis` / `delay_min_gain` | 20 % / 1 ms | melhoria mínima de atraso para trocar de montante com os mesmos saltos |
 
 ## 6. Limitações conhecidas
 

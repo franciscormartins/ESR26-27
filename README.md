@@ -48,7 +48,9 @@ node.rtt(id)                               # RTT em segundos (média móvel) ou 
 
 Opções úteis: `--min-neighbors X` (pede substitutos se ficar com menos de X vizinhos),
 `--stats S` (vizinhos, RTT e estatísticas UDP), `--publish-flow ID` (pode repetir-se),
-`--subscribe SERVIDOR:FLUXO` (pode repetir-se), `--video FICHEIRO` e `--fps N`.
+`--subscribe SERVIDOR:FLUXO` (pode repetir-se), `--video FICHEIRO`, `--fps N`,
+`--announce-interval S` (5 s; usar o mesmo em todos os nós) e `--route-ttl S` (esquecer
+caminhos sem anúncios há S segundos; por omissão 6 × o intervalo).
 Todos os nós do caminho overlay têm de executar `ott`; os dados usam UDP na porta 6000,
 enquanto o controlo das ligações e subscrições usa TCP na porta 5000. `Ctrl-C` desativa as
 subscrições locais antes de fechar o nó.

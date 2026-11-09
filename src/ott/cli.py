@@ -8,6 +8,7 @@ Opções úteis nos testes:
   --min-neighbors X   pede substitutos ao bootstrapper se ficar com menos de X vizinhos
   --publish-flow ID   anuncia periodicamente um fluxo originado neste nó (repetível)
   --announce-interval S intervalo entre rondas de anúncios (default: 5 s)
+  --route-ttl S       esquecer rotas sem anúncios há S segundos (default: 6 x intervalo)
   --stats SEGUNDOS    escreve periodicamente os vizinhos e o RTT de cada um
 
 Os endereços têm o formato HOST ou HOST:PORTA.
@@ -54,7 +55,11 @@ def build_parser():
     p.add_argument("--publish-flow", action="append", default=[], metavar="ID",
                    help="anunciar este fluxo periodicamente (opção repetível)")
     p.add_argument("--announce-interval", type=float, default=5.0, metavar="S",
-                   help="intervalo entre rondas de anúncios (default: 5 s)")
+                   help="intervalo entre rondas de anúncios (default: 5 s); "
+                        "usar o mesmo valor em todos os nós")
+    p.add_argument("--route-ttl", type=float, default=None, metavar="S",
+                   help="tempo sem anúncios ao fim do qual um caminho é esquecido "
+                        "(default: 6 x --announce-interval)")
     p.add_argument("--subscribe", action="append", default=[], metavar="SERVIDOR:FLUXO",
                    help="subscrever um fluxo anunciado por um servidor (opção repetível)")
     p.add_argument("--subscriber-id", help="ID do cliente (por omissão usa o ID deste nó)")
@@ -71,9 +76,12 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    if args.publish_flow and (not math.isfinite(args.announce_interval)
-                              or args.announce_interval <= 0):
+    if not math.isfinite(args.announce_interval) or args.announce_interval <= 0:
         raise SystemExit("--announce-interval tem de ser finito e maior que zero")
+    route_ttl = (6 * args.announce_interval if args.route_ttl is None
+                 else args.route_ttl)
+    if not math.isfinite(route_ttl) or route_ttl <= args.announce_interval:
+        raise SystemExit("--route-ttl tem de ser finito e maior que --announce-interval")
     if args.publish_flow and (not math.isfinite(args.fps) or args.fps <= 0):
         raise SystemExit("--fps tem de ser finito e maior que zero")
     if not 1 <= args.data_port <= 65535:
@@ -94,7 +102,7 @@ def main(argv=None):
     node = OverlayNode(args.id, args.bind, args.port, bootstrap_service=service,
                        min_neighbors=args.min_neighbors,
                        replace_interval=args.replace_after)
-    routing_table = RoutingTable()
+    routing_table = RoutingTable(route_ttl=route_ttl)
     routing_table.attach(node)
     publisher = (AnnouncementPublisher(node, args.publish_flow, args.announce_interval,
                                        routing_table=routing_table)
@@ -109,6 +117,7 @@ def main(argv=None):
     if args.bootstrapper:
         host, port = parse_addr(args.bootstrapper)
         if not node.bootstrap(host, port):
+            routing_table.close()
             node.stop()
             raise SystemExit("não foi possível obter vizinhos do bootstrapper")
 
@@ -161,4 +170,5 @@ def main(argv=None):
         forwarder.stop()
         for receiver in receivers.values():
             receiver.stop()
+        routing_table.close()
         node.stop()

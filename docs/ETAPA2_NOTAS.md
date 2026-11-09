@@ -250,6 +250,19 @@ nada muda e nada é propagado.
 O vizinho perdeu o caminho: é retirado dos candidatos. Se era o montante,
 chama `_lose_upstream` (com o antigo montante ainda ligado).
 
+### `expire(node, now=None)`, `_expiry_loop` e `close()`
+
+Rede de segurança do passo 7. Com `RoutingTable(route_ttl=S)`, `attach` inicia
+uma thread que chama `expire` de `S/4` em `S/4` segundos (no máximo 1 s).
+`expire` esquece os candidatos cujo `seen_at` tem mais de `S` segundos. Se um
+deles era o montante, chama `_lose_upstream(..., still_connected=True)`:
+reparação rápida com um candidato ainda recente ou `WITHDRAW`. As rotas
+originadas no próprio nó são ignoradas. Devolve o número de candidatos
+esquecidos. `close()` pára a thread. Sem `route_ttl`, `expire` não faz nada.
+
+Uma cópia repetida de um anúncio não é propagada, mas substitui o candidato
+para renovar o `seen_at`.
+
 ### `_lose_upstream(node, route, still_connected)`
 
 Chamada sob o bloqueio quando o montante cai ou envia `WITHDRAW`.
@@ -340,5 +353,5 @@ o encerramento do servidor.
 - As épocas do publicador são mantidas em memória e recomeçam em 1 quando o
   servidor é reiniciado; os nós aceitam-nas porque a queda do servidor provoca
   `WITHDRAW` e deixa as rotas sem caminho.
-- Ainda não há tempo de vida das rotas (passo 7 em `ETAPA2.md`): uma rota só é
-  invalidada por queda de ligação ou `WITHDRAW`.
+- O tempo de vida (`--route-ttl`, por omissão 6 × o intervalo de anúncio) só
+  funciona se todos os nós usarem o mesmo `--announce-interval`.

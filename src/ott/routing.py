@@ -20,11 +20,13 @@ class Candidate:
 
     ``metric`` e ``delay`` são os valores anunciados pelo vizinho (antes de
     somar o salto e o atraso da ligação até ele); ``delay`` é infinito se o
-    vizinho não o conhecia.
+    vizinho não o conhecia. ``seen_at`` (relógio monotónico) é a hora da última
+    receção, usada pelo tempo de vida; não conta para a igualdade.
     """
     epoch: int
     metric: float
     delay: float = math.inf
+    seen_at: float = field(default_factory=time.monotonic, compare=False)
 
 
 @dataclass
@@ -83,10 +85,21 @@ class RoutingTable:
     O montante é escolhido entre os candidatos (último anúncio de cada vizinho):
     menos saltos; em empate, menor atraso acumulado, mas só se a melhoria passar
     a histerese (``delay_hysteresis`` relativo e ``delay_min_gain`` absoluto, em s).
+
+    ``route_ttl`` (s) é a rede de segurança: um candidato sem anúncios há mais
+    do que esse tempo é esquecido e, se era o montante, a rota é reparada ou
+    retirada como numa queda. ``None`` desliga a expiração.
     """
-    def __init__(self, delay_hysteresis=0.2, delay_min_gain=0.001):
+    def __init__(self, delay_hysteresis=0.2, delay_min_gain=0.001, route_ttl=None):
+        if route_ttl is not None and (not isinstance(route_ttl, (int, float))
+                                      or isinstance(route_ttl, bool)
+                                      or not math.isfinite(route_ttl) or route_ttl <= 0):
+            raise ValueError("route_ttl tem de ser um número finito maior que zero")
         self.delay_hysteresis = delay_hysteresis
         self.delay_min_gain = delay_min_gain
+        self.route_ttl = route_ttl
+        self._expiry_stop = threading.Event()
+        self._expiry_thread = None
         self.routes: dict[Tuple[str, str], RouteEntry] = {}
         self._lock = threading.RLock()
         self._attached_nodes = set()
@@ -176,7 +189,61 @@ class RoutingTable:
             "up", current, neighbor))
         node.on_neighbor_down(lambda current, neighbor: self._queue_neighbor_event(
             "down", current, neighbor))
+        if self.route_ttl is not None and self._expiry_thread is None:
+            self._expiry_thread = threading.Thread(
+                target=self._expiry_loop, args=(node,), name="ott-routing-ttl",
+                daemon=True)
+            self._expiry_thread.start()
         return self
+
+    def close(self):
+        """Pára a verificação periódica do tempo de vida."""
+        self._expiry_stop.set()
+        if self._expiry_thread is not None:
+            self._expiry_thread.join(timeout=2.0)
+
+    def _expiry_loop(self, node):
+        # Verifica com uma granularidade de 1/4 do tempo de vida (máx. 1 s).
+        period = min(self.route_ttl / 4, 1.0)
+        while not self._expiry_stop.wait(period):
+            try:
+                self.expire(node)
+            except Exception:
+                log.exception("erro ao expirar rotas")
+
+    def expire(self, node, now=None):
+        """Esquece candidatos sem anúncios há mais de ``route_ttl`` segundos.
+
+        Se o candidato esquecido era o montante, trata-se como uma perda do
+        montante (reparação rápida ou ``WITHDRAW``). Devolve o número de
+        candidatos esquecidos. Sem ``route_ttl`` não faz nada.
+        """
+        if self.route_ttl is None:
+            return 0
+        now = time.monotonic() if now is None else now
+        expired = 0
+        actions = []
+        with self._lock:
+            for route in self.routes.values():
+                if route.origin == node.id:
+                    continue
+                stale = [nb for nb, c in route.candidates.items()
+                         if now - c.seen_at > self.route_ttl]
+                if not stale:
+                    continue
+                expired += len(stale)
+                upstream_stale = route.upstream in stale
+                for neighbor in stale:
+                    if neighbor != route.upstream:
+                        route.candidates.pop(neighbor)
+                if upstream_stale:
+                    log.info("rota %s:%s: montante %s sem anúncios há mais de %.1f s",
+                             route.origin, route.flow, route.upstream, self.route_ttl)
+                    # o candidato do montante é retirado em _lose_upstream; a
+                    # reparação só usa candidatos ainda dentro do tempo de vida
+                    actions += self._lose_upstream(node, route, still_connected=True)
+        self._run(node, actions)
+        return expired
 
     def _queue_neighbor_event(self, event, node, neighbor):
         self._events.put((event, node, neighbor))
@@ -408,6 +475,7 @@ class RoutingTable:
             if epoch < route.epoch:
                 return False  # anúncio antigo
             if route.candidates.get(neighbor) == candidate:
+                route.candidates[neighbor] = candidate  # renova o tempo de vida
                 return False  # cópia repetida
             route.candidates[neighbor] = candidate
             route.seen_announcements.add(f"{origin}:{flow}:{epoch}")

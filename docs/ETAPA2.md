@@ -116,7 +116,7 @@ encaminhador de dados usa esse estado para abrir/fechar os ramos UDP.
 - [x] Limpar destinos a jusante associados a vizinhos que caíram e desativar o ramo se já não tiver clientes.
 - [x] Marcar sem caminho como inativa; após aprender um montante alternativo, reativar as subscrições e propagar o anúncio atualizado.
 - [x] Reparação rápida com condição de viabilidade e `WITHDRAW` quando não há alternativa (D22, 2026-11-09).
-- [ ] Tempo de vida das rotas como rede de segurança (passo 7).
+- [x] Tempo de vida das rotas como rede de segurança (passo 7, `--route-ttl`, 2026-11-09).
 
 `RoutingTable.attach(node)` liga os eventos de vizinhança a uma fila processada por uma thread
 de fundo, para os callbacks do overlay apenas enfileirarem o evento. Quando cai o montante
@@ -183,7 +183,7 @@ seguintes, ainda **por resolver** no código:
 | # | Lacuna | Impacto |
 |---|---|---|
 | L2 | ~~O servidor reinicia com `epoch=1` e os nós rejeitam épocas inferiores à guardada~~ — **resolvido** (passo 6) | Um servidor reiniciado nunca volta a ser aprendido |
-| L3 | ~~Não há retirada~~ nem expiração de rotas — retirada **resolvida** (passo 6); expiração no passo 7 | Um servidor morto deixa rotas `ativa` para sempre |
+| L3 | ~~Não há retirada nem expiração de rotas~~ — **resolvido**: retirada (passo 6) e tempo de vida (passo 7) | Um servidor morto deixa rotas `ativa` para sempre |
 | L4 | ~~Numa época nova, a primeira cópia ganha; empates não têm critério determinista~~ — **resolvido** (passo 5) | O montante pode oscilar a cada ronda (ex.: O5 via O3/O7 no cenário 3) |
 | L5 | ~~O forwarder aceita datagramas de qualquer vizinho~~ — **resolvido** pelo RPF estrito (passo 4) | Duplicados ao trocar de montante; ciclos de dados transitórios |
 | L7 | A origem UDP é identificada pelo IP do *peer* TCP | Validar no CORE em nós com várias interfaces |
@@ -211,7 +211,7 @@ seguintes, ainda **por resolver** no código:
 - [x] 4. RPF estrito no `OverlayForwarder` (`RoutingTable.upstream_of`).
 - [x] 5. Tabela de candidatos e desempate por RTT (campo `delay`).
 - [x] 6. `WITHDRAW`, reparação rápida e aceitação de qualquer época numa rota sem caminho.
-- [ ] 7. Tempo de vida de rotas e candidatos.
+- [x] 7. Tempo de vida de rotas e candidatos.
 - [ ] 8. Retirar `seen_announcements`.
 - [ ] 9. Atualizar `protocolo.md`, este ficheiro e `ESTADO.md` com o comportamento final.
 - [ ] 10. Segundo servidor (`S2`, 2 fluxos cada) em `cenario2.json` e `cenario3.json`.
@@ -247,6 +247,12 @@ seguintes, ainda **por resolver** no código:
   época 1 de um servidor reiniciado; rota com caminho rejeita épocas antigas.
 - [x] Integração localhost: servidor morto e reiniciado (época 1) é reaprendido e o ramo
   S1–A–C volta a abrir.
+- [x] Unidade, tempo de vida (passo 7): sem `route_ttl` nada expira; valores inválidos são
+  recusados; candidatos recentes ficam; uma alternativa expirada é esquecida sem mensagens; o
+  montante expirado é substituído pela alternativa recente (`DEACTIVATE` ao antigo,
+  `ACTIVATE` ao novo) ou, sem alternativa, a rota é retirada; uma cópia repetida renova o
+  tempo de vida; a rota de origem nunca expira; a thread de fundo expira um montante calado.
+  `tests/test_cli.py` valida `--route-ttl` e `--announce-interval`.
 - [x] RPF (`tests/test_forwarding.py`, UDP real em loopback): só o montante é entregue e
   reencaminhado; após troca de montante, o antigo é descartado; sem rota ou sem caminho tudo é
   descartado; o próprio fluxo que volta ao nó de origem não é reencaminhado.
