@@ -80,7 +80,9 @@ class OverlayTest(unittest.TestCase):
         a = self.nodes["A"] = make_node("A")
         b = self.nodes["B"] = make_node("B")
         got = []
-        b.register_handler("ANNOUNCE", lambda n, nb, m: got.append(m["data"]))
+        senders = []
+        b.register_handler("ANNOUNCE", lambda n, nb, m: (senders.append(nb),
+                                                         got.append(m["data"])))
         a.start()
         b.start()
         a.add_targets({("127.0.0.1", BASE + 2): None})
@@ -90,6 +92,7 @@ class OverlayTest(unittest.TestCase):
             "server_id": "S1", "flow": "filme_a", "epoch": 1, "metric": 1}}
         a.send("B", announce)
         self.assertTrue(wait_for(lambda: got == [announce["data"]]))
+        self.assertEqual(senders, ["A"])  # o handler recebe o ID do vizinho
 
 
     def test_neighbor_events_and_rtt(self):

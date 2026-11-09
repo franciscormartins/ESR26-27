@@ -275,7 +275,10 @@ class OverlayNode:
     # -- mensagens -----------------------------------------------------
 
     def register_handler(self, msg_type, fn):
-        """fn(node, neighbor, msg) é chamado para mensagens do tipo dado."""
+        """fn(node, neighbor_id, msg) é chamado para mensagens do tipo dado.
+
+        ``neighbor_id`` é o ID overlay (string) do vizinho que enviou a mensagem.
+        """
         self._handlers[msg_type] = fn
 
     def send(self, node_id, msg):
@@ -466,7 +469,8 @@ class OverlayNode:
         elif mtype == MsgType.HELLO:
             pass
         elif mtype in self._handlers:
-            self._handlers[mtype](self, nb, msg)
+            # contrato (protocolo.md §4): o handler recebe o ID do vizinho, não o objeto
+            self._handlers[mtype](self, nb.id, msg)
         else:
             log.debug("mensagem %s ignorada (de %s)", mtype, nb.id)
 
