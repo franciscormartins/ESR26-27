@@ -15,8 +15,9 @@ Esta escolha é compatível com as primitivas de overlay existentes (`send` e `b
 
 **Ponto da situação (2026-11-09).** Os passos 0 a 9 do plano (ver "Revisão de 2026-11-09")
 estão feitos e cobertos por testes automáticos, incluindo ensaios com nós reais em localhost
-(101 testes na suite). Faltam o segundo servidor nas topologias (passo 10) e **todos os
-ensaios no CORE** (passo 11); nenhum comportamento da Etapa 2 foi ainda observado no CORE.
+(101 testes na suite). Falta o segundo servidor nas topologias (passo 10) e a maior parte dos
+ensaios no CORE (passo 11): em 2026-11-09 passaram os ensaios 1 e 2 (cenário 1) e 4 (cenário 2);
+os ensaios 3 e 5 a 9 continuam por fazer.
 
 ## Estado e tarefas
 
@@ -227,9 +228,10 @@ seguintes. Estado atual de cada uma:
 - [x] Unidade: atualização da rota quando chega um caminho de menor custo.
 - [x] Unidade: duplicados e anúncios antigos não alteram incorretamente a tabela.
 - [x] Unidade: inundação não envia anúncio de volta ao vizinho de entrada.
-- [ ] Integração CORE: servidor → nó intermédio → cliente.
-- [ ] Integração CORE: dois clientes partilham o troço comum sem encaminhamento duplicado nesse troço.
-- [ ] Integração CORE: caminhos alternativos escolhem o custo menor.
+- [x] Integração CORE: servidor → nó intermédio → cliente (cenário 1, 2026-11-09).
+- [x] Integração CORE: dois clientes partilham o troço comum sem encaminhamento duplicado nesse troço
+  (cenário 1, 2026-11-09; confirmado pelos contadores, `tcpdump` não registado).
+- [x] Integração CORE: caminhos alternativos escolhem o custo menor (cenário 2, 2026-11-09).
 - [x] Unidade: queda do vizinho de montante invalida a rota e anúncio alternativo reativa subscrições.
 - [x] Unidade: queda de um destino remove o ramo e desativa a subscrição a montante.
 - [x] Unidade: caminho melhor troca o montante e move o ramo ativo.
@@ -277,6 +279,20 @@ Ensaios no CORE necessários para dar a etapa como validada:
 7. Cenário 3 com 2 servidores, 2 fluxos cada e clientes em ramos partilhados.
 8. `tc netem` em O3–O5 (cenário 3): O5 troca para O7 uma só vez, sem oscilar (passo 5).
 9. Matar e reiniciar o servidor: o `WITHDRAW` chega aos clientes e o fluxo regressa com a época 1.
+
+### Resultados no CORE
+
+| Ensaio | Data | Resultado |
+|---|---|---|
+| 1 e 2 (cenário 1, S1 – O2 – {C1, C2}, 20 imagens/s) | 2026-11-09 | **Passou.** Janela de 23:34:02 a 23:34:28. S1: `encaminhados` +520 em 26 s (20/s, uma cópia por pacote no troço S1–O2). O2: `recebidos` 531 → 1051 (+520) e `encaminhados` 1057 → 2097 (+1040, exatamente 2×). C1 e C2: +240 recebidos em 12 s cada (20/s), `perdidos` constantes nessa janela (434 e 439), jitter 0,06–0,12 ms, `descartados=0` e `RPF=0` em todos os nós (sem sinais da limitação L7). RTT entre vizinhos 0,3–0,6 ms. |
+
+| 4 (cenário 2, S1–O1, S1–O2, O1–O2, O1–C2, O2–C1; C1 e C2 subscritos) | 2026-11-09 | **Passou.** Janela de 23:40:24 a 23:40:46. Cada cliente usa o caminho de 2 saltos e não o de 3 pela ligação O1–O2: O2 tem `recebidos` = `encaminhados` (+40 a cada 2 s, só para C1) e O1 tem `recebidos` = `encaminhados` (+40 a cada 2 s, só para C2), ou seja, nenhum dos dois reencaminha para o outro. S1 envia 2 cópias por pacote (+80 a cada 2 s depois de C2 entrar às 23:40:22), uma por ramo, como esperado porque os ramos divergem logo no servidor. C1 e C2: 20/s, `perdidos=0`, jitter 0,06–0,13 ms. `descartados=0` e `RPF=0` em todos os nós, incluindo O1 e O2 com 3 interfaces cada (sem sinais da limitação L7). RTT entre vizinhos 0,3–0,7 ms. |
+
+Nota sobre os `perdidos` do ensaio 1/2: os 434/439 acumularam-se **antes** da janela medida (não
+cresceram durante ela) e os dois clientes mostram `reinicios=1`. O emissor numera todas as imagens,
+mesmo quando não há destinos, por isso um período sem caminho (por exemplo, um nó reiniciado) conta
+como perdas no cliente quando o fluxo regressa. Esses valores não medem perdas na rede; para medir
+perdas, usar a diferença de `perdidos` entre duas linhas de `--stats`.
 
 Comandos:
 
