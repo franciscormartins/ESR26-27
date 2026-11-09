@@ -94,6 +94,19 @@ a métrica não é negativa. Depois guarda ou substitui a entrada com a mesma ch
 
 Remove e devolve a rota indicada. Se não existir, devolve `None`.
 
+### `active_destinations(origin, flow, exclude=())`
+
+Devolve os vizinhos a jusante de uma rota ativa, excluindo os IDs indicados.
+O encaminhador UDP usa isto para não devolver um pacote à ligação de entrada;
+como o resultado é por vizinho, vários clientes no mesmo ramo recebem uma só
+cópia nesse troço.
+
+### `publish_local(origin, flow, epoch)` e `has_local_subscription(origin, flow)`
+
+O publicador atualiza a rota local de origem com o bloqueio da tabela. O
+encaminhador usa `has_local_subscription` para entregar o RTP ao recetor local
+quando o fluxo está ativo.
+
 ### `attach(node)`
 
 Liga uma tabela a um `OverlayNode`:
@@ -293,12 +306,17 @@ ativado.
 Ativa o evento de paragem e aguarda a thread terminar. Pode ser chamada durante
 o encerramento do servidor.
 
-## Limites atuais
+## Encaminhamento de dados e limites atuais
 
-- `ACTIVATE` e `DEACTIVATE` atualizam o plano de controlo; ainda não encaminham
-  pacotes de vídeo.
+- `OverlayForwarder` escuta os datagramas RTP/JPEG em UDP e consulta
+  `RoutingTable.active_destinations` para replicar pelos ramos ativos. O vizinho
+  de entrada é excluído e clientes no mesmo ramo partilham uma cópia.
+- A CLI inicia publicadores com `--publish-flow` e subscrições com
+  `--subscribe SERVIDOR:FLUXO`; ao terminar com Ctrl-C, desativa as subscrições.
 - As quedas e recuperações de vizinhos têm testes unitários, mas ainda precisam
-  de ensaios de integração no CORE.
+  de ensaios de integração no CORE, incluindo continuidade do tráfego após falhas.
+- A rota usa o menor número de saltos aprendido pelos anúncios. Não se escolhe
+  intencionalmente um percurso mais longo apenas por já estar ativo.
 - As mensagens de subscrição não têm confirmação de entrega.
 - As épocas do publicador são mantidas em memória e começam novamente quando o
   processo do servidor é reiniciado.

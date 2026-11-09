@@ -14,13 +14,18 @@ Os endereços têm o formato HOST ou HOST:PORTA.
 """
 import argparse
 import logging
+import math
+import os
 import socket
 import time
 
 from .bootstrapper import BootstrapService
+from .forwarding import OverlayForwarder
 from .node import OverlayNode
 from .protocol import DEFAULT_PORT
 from .routing import AnnouncementPublisher, RoutingTable
+from .streaming.client import StreamReceiver
+from .streaming.server import DATA_PORT, StreamSource
 
 
 def parse_addr(text):
@@ -50,14 +55,37 @@ def build_parser():
                    help="anunciar este fluxo periodicamente (opção repetível)")
     p.add_argument("--announce-interval", type=float, default=5.0, metavar="S",
                    help="intervalo entre rondas de anúncios (default: 5 s)")
+    p.add_argument("--subscribe", action="append", default=[], metavar="SERVIDOR:FLUXO",
+                   help="subscrever um fluxo anunciado por um servidor (opção repetível)")
+    p.add_argument("--subscriber-id", help="ID do cliente (por omissão usa o ID deste nó)")
+    p.add_argument("--video", default=os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        "progex", "movie.Mjpeg"), help="vídeo MJPEG publicado (default: progex/movie.Mjpeg)")
+    p.add_argument("--fps", type=float, default=20.0,
+                   help="imagens por segundo para cada fluxo publicado")
+    p.add_argument("--data-port", type=int, default=DATA_PORT,
+                   help="porta UDP do plano de dados (default: 6000)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    if args.publish_flow and args.announce_interval <= 0:
-        raise SystemExit("--announce-interval tem de ser maior que zero")
+    if args.publish_flow and (not math.isfinite(args.announce_interval)
+                              or args.announce_interval <= 0):
+        raise SystemExit("--announce-interval tem de ser finito e maior que zero")
+    if args.publish_flow and (not math.isfinite(args.fps) or args.fps <= 0):
+        raise SystemExit("--fps tem de ser finito e maior que zero")
+    if not 1 <= args.data_port <= 65535:
+        raise SystemExit("--data-port tem de estar entre 1 e 65535")
+    subscriptions = []
+    for value in args.subscribe:
+        server_id, separator, flow = value.partition(":")
+        if not separator or not server_id or not flow:
+            raise SystemExit(f"--subscribe inválido: {value!r}; usa SERVIDOR:FLUXO")
+        subscriptions.append((server_id, flow))
+    if len(set(subscriptions)) != len(subscriptions):
+        raise SystemExit("--subscribe não pode repetir o mesmo servidor e fluxo")
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format=f"%(asctime)s [{args.id}] %(levelname)s %(message)s")
@@ -84,16 +112,52 @@ def main(argv=None):
             node.stop()
             raise SystemExit("não foi possível obter vizinhos do bootstrapper")
 
+    forwarder = OverlayForwarder(node, routing_table, port=args.data_port).start()
+    receivers = {}
+    for origin, flow in subscriptions:
+        receiver = StreamReceiver(origin, flow, port=args.data_port, listen=False)
+        receivers[(origin, flow)] = receiver
+        forwarder.set_local_receiver(origin, flow, receiver)
+
     if publisher:
         publisher.start()
+
+    sources = [StreamSource(node.id, flow, args.video, forwarder.send,
+                            fps=args.fps, loop=True).start()
+               for flow in args.publish_flow]
+    pending_subscriptions = set(subscriptions)
+    active_subscriptions = set()
 
     log = logging.getLogger("ott.cli")
     try:
         while True:
             time.sleep(args.stats or 1)
+            for origin, flow in tuple(pending_subscriptions):
+                if routing_table.get(origin, flow) is not None and routing_table.activate(
+                        node, origin, flow, subscriber_id=args.subscriber_id):
+                    pending_subscriptions.discard((origin, flow))
+                    active_subscriptions.add((origin, flow))
+                    log.info("subscrito a %s:%s", origin, flow)
             if args.stats:
                 log.info("vizinhos: %s", node.describe_neighbors())
+                for key, receiver in receivers.items():
+                    if key in active_subscriptions:
+                        log.info("fluxo %s:%s: %s", key[0], key[1], receiver.stats)
+                log.info("dados UDP: recebidos=%d encaminhados=%d descartados=%d",
+                         forwarder.received, forwarder.forwarded, forwarder.dropped)
     except KeyboardInterrupt:
+        pass
+    finally:
+        for source in sources:
+            source.stop()
+        for source in sources:
+            source.join(timeout=2.0)
+        for origin, flow in active_subscriptions:
+            routing_table.deactivate(node, origin, flow,
+                                     subscriber_id=args.subscriber_id)
         if publisher:
             publisher.stop()
+        forwarder.stop()
+        for receiver in receivers.values():
+            receiver.stop()
         node.stop()

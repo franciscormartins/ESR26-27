@@ -1,9 +1,9 @@
 # Protocolo de controlo do overlay – especificação
 
 Implementação de referência: `src/ott/protocol.py` (formato e validação) e `src/ott/node.py` (comportamento).
-Esta especificação cobre as mensagens do elemento 1 (overlay) e o esquema das mensagens de
-controlo de rotas da Etapa 2. `ANNOUNCE`, `ACTIVATE` e `DEACTIVATE` têm handlers em
-`src/ott/routing.py`; o encaminhamento dos pacotes de vídeo ainda não está implementado.
+Esta especificação cobre as mensagens do elemento 1 (overlay), o controlo de rotas e o
+encaminhamento de dados da Etapa 2. `ANNOUNCE`, `ACTIVATE` e `DEACTIVATE` são tratados por
+`src/ott/routing.py`; o RTP/JPEG segue por UDP através de `src/ott/forwarding.py`.
 
 ## 1. Transporte e formato
 
@@ -138,7 +138,21 @@ caminho inverso. Cada identidade de subscritor é propagada uma vez e removida d
 forma; se um ramo ainda tiver outros subscritores, mantém-se ativo. Mensagens repetidas são
 idempotentes. Se cair o montante, as subscrições ficam pendentes e a rota passa a inativa;
 quando é aprendida uma alternativa, os pedidos são ativados pelo novo montante. Ainda não
-existe confirmação de subscrição nem tráfego de vídeo.
+existe confirmação de subscrição.
+
+### 3.6 Encaminhamento dos dados (Etapa 2)
+
+O controlo continua em TCP. Os pacotes identificados por `(server_id, flow)` são enviados
+por UDP na porta 6000. `OverlayForwarder` obtém os destinos com
+`RoutingTable.active_destinations(...)`, encaminha uma cópia por vizinho a jusante e exclui
+o vizinho de entrada. Vários subscritores no mesmo ramo partilham uma única cópia nesse
+troço. O servidor só emite datagramas quando existem destinos ativos; no cliente, os pacotes
+são entregues ao recetor RTP local. O formato do datagrama está definido em
+`src/ott/streaming/rtp.py`.
+
+Na CLI, `--publish-flow ID` anuncia e publica o MJPEG desse fluxo; `--subscribe
+SERVIDOR:FLUXO` ativa a subscrição. Todos os nós do caminho têm de executar `ott` para
+receber e encaminhar os datagramas. `--stats S` mostra estatísticas de receção e encaminhamento.
 
 ## 4. Interface para os outros módulos (`OverlayNode`)
 
@@ -234,5 +248,6 @@ ativa por `(server_id, flow)`. Repetir `ACTIVATE` não cria uma subscrição adi
 para o mesmo fluxo.
 
 Os validadores de `src/ott/protocol.py` aplicam estes campos tanto no envio como na receção.
-Os testes de esquema estão em `tests/test_protocol.py`. O tratamento e encaminhamento das
-mensagens ainda pertencem às tarefas seguintes do roadmap `docs/ETAPA2.md`.
+Os testes de esquema estão em `tests/test_protocol.py`. O tratamento das mensagens está em
+`src/ott/routing.py`; a integração de dados e os ensaios pendentes estão descritos em
+`docs/ETAPA2.md`.

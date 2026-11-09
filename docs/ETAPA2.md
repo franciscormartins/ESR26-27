@@ -72,8 +72,8 @@ Exemplo para o nó servidor/bootstrapper `S1`:
 ```
 
 O publicador emite a ronda inicial imediatamente e a tabela local fica com a rota do
-servidor. Os nós vizinhos aprendem e propagam as rotas; ainda não há ativação de clientes
-nem encaminhamento dos dados.
+servidor. Os nós vizinhos aprendem e propagam as rotas. A CLI também permite subscrever e
+encaminhar os dados; os ensaios de integração no CORE estão listados abaixo.
 
 ### 4. Ativação e desativação - implementado (controlo)
 
@@ -96,7 +96,8 @@ Assim, vários clientes atrás do mesmo nó partilham o ramo e a remoção de um
 os restantes. O estado `ativa` reflete a existência de pelo menos uma subscrição local ou a
 jusante e um caminho válido para o servidor.
 
-Isto atualiza o estado de controlo; o encaminhamento dos pacotes de vídeo continua pendente.
+Isto atualiza o estado de controlo. A CLI inicia a subscrição com `--subscribe` e o
+encaminhador de dados usa esse estado para abrir/fechar os ramos UDP.
 
 ### 5. Reação a alterações do overlay - implementado (base)
 
@@ -117,29 +118,46 @@ emissor, nem anunciar ao montante recém-ligado) e rejeita um destino a jusante 
 Esta reação é coberta por testes unitários; falta ensaiar quedas, recuperações e caminhos
 alternativos no CORE.
 
-### 6. Integração do encaminhamento dos dados - por fazer
+### 6. Integração do encaminhamento dos dados - implementado; validação pendente
 
-- [ ] Expor uma operação para obter destinos ativos de um fluxo.
-- [ ] No servidor, enviar cada pacote apenas quando o fluxo tem destinos ativos.
-- [ ] Nos nós intermédios, replicar pacotes para os destinos a jusante, excluindo a ligação
-  de entrada.
-- [ ] Manter o encaminhamento de dados separado do transporte TCP de controlo.
-- [ ] Coordenar a interface com a Etapa 4 (streaming UDP) antes de integrar pacotes de vídeo.
+- [x] Expor `RoutingTable.active_destinations(origin, flow, exclude=())`, que devolve uma
+  cópia dos vizinhos a jusante ativos, sem duplicar um vizinho que tenha vários subscritores.
+- [x] No servidor, emitir pacotes do fluxo apenas quando a rota tem destinos ativos.
+- [x] Nos nós intermédios, receber UDP, identificar o vizinho de entrada e replicar cada
+  pacote pelos destinos ativos, excluindo a ligação de entrada.
+- [x] Manter os dados em UDP, separados das mensagens de controlo TCP.
+- [x] Integrar a interface RTP já existente: `--publish-flow` inicia o MJPEG/RTP e
+  `--subscribe SERVIDOR:FLUXO` ativa a subscrição e recolhe estatísticas locais.
+- [ ] Ensaiar a distribuição ponta a ponta no CORE, incluindo falhas e recuperação.
+
+`OverlayForwarder` (`src/ott/forwarding.py`) escuta por omissão na porta UDP 6000. O nó de
+origem envia uma cópia para cada destino a jusante ativo; cada intermédio repete o processo,
+sem devolver o datagrama ao vizinho de entrada. Vários subscritores atrás do mesmo vizinho
+partilham uma cópia nesse ramo. Os nós de destino entregam o RTP ao `StreamReceiver` local.
+
+O encaminhamento reutiliza os troços comuns da árvore construída pelos `upstream` escolhidos
+pelos anúncios (métrica atual: número de saltos). A implementação não escolhe deliberadamente
+um caminho alternativo com custo superior só por esse ramo já estar ativo; essa otimização
+global da árvore não faz parte da métrica de menor caminho implementada.
+
+Exemplo: no servidor, acrescentar `--publish-flow filme_a`; no cliente, usar
+`--subscribe S1:filme_a`. Todos os nós intermédios têm de correr `ott` para encaminhar UDP.
+`--stats 2` mostra os vizinhos, as estatísticas RTP do cliente e os contadores do plano de dados.
 
 ## Plano de testes
 
 - [x] Unidade: atualização da rota quando chega um caminho de menor custo.
 - [x] Unidade: duplicados e anúncios antigos não alteram incorretamente a tabela.
 - [x] Unidade: inundação não envia anúncio de volta ao vizinho de entrada.
-- [ ] Integração: servidor → nó intermédio → cliente.
-- [ ] Integração: dois clientes partilham o troço comum sem encaminhamento duplicado nesse troço.
-- [ ] Integração: caminhos alternativos escolhem o custo menor.
+- [ ] Integração CORE: servidor → nó intermédio → cliente.
+- [ ] Integração CORE: dois clientes partilham o troço comum sem encaminhamento duplicado nesse troço.
+- [ ] Integração CORE: caminhos alternativos escolhem o custo menor.
 - [x] Unidade: queda do vizinho de montante invalida a rota e anúncio alternativo reativa subscrições.
 - [x] Unidade: queda de um destino remove o ramo e desativa a subscrição a montante.
 - [x] Unidade: caminho melhor troca o montante e move subscrições ativas.
-- [ ] Subscrições: ativar dois clientes e desativar um mantém o outro a receber; desativar o
+- [ ] CORE: ativar dois clientes e desativar um mantém o outro a receber; desativar o
   último deixa a rota sem tráfego.
-- [ ] Cenários: exercitar as topologias 1 e 2 antes do cenário 3.
+- [ ] CORE: exercitar as topologias 1 e 2 antes do cenário 3.
 
 Comando atual para os testes do modelo local:
 
@@ -149,8 +167,8 @@ PYTHONPATH=src python3 -m unittest tests.test_routing -v
 
 Os testes atuais cobrem o modelo, o publicador, aprendizagem, ativação/desativação,
 subscrições partilhadas, queda de vizinhos, reaprendizagem por caminho alternativo, mudança
-do montante e anúncios a vizinhos novos. Os ensaios destas alterações no CORE e o
-encaminhamento dos pacotes continuam pendentes.
+do montante e anúncios a vizinhos novos. O encaminhamento dos pacotes está integrado; os
+ensaios destas alterações no CORE continuam pendentes.
 
 ## Critério de conclusão da Etapa 2
 

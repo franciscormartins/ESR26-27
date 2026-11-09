@@ -11,13 +11,13 @@
   opcionalmente, pede vizinhos substitutos ao bootstrapper.
 - O overlay constrói-se de duas formas: **estratégia 2** (`ott -b <bootstrapper>`: o servidor lê um
   ficheiro de topologia e devolve os vizinhos) e **estratégia 1** (`ott viz1 viz2`: vizinhos à mão).
-- **Estado:** a Etapa 2 já origina anúncios periódicos, aprende e propaga rotas por fluxo,
-  e encaminha ativações/desativações idempotentes pelo caminho de montante. Os testes cobrem
-  estes comportamentos; ainda falta validar a reação a falhas no CORE e implementar o plano de dados.
+- **Estado:** a Etapa 2 origina anúncios periódicos, aprende e propaga rotas por fluxo,
+  encaminha ativações/desativações e já tem encaminhamento RTP/JPEG por UDP pelos ramos ativos.
+  Os ensaios de integração do plano de dados e a reação a falhas no CORE continuam pendentes.
   **Elemento 1 concluído:** todas as funcionalidades estão implementadas e foram ensaiadas no CORE (cenário 2 e
   cenário 3 com 11 nós) e medidas com 10 repetições (secção 7). Os ensaios acharam e corrigiram 4 defeitos
   (D17–D19 e o contador de défice); ver secção 7 e o registo de alterações.
-- Falta ainda, fora do E1: validação da adaptação a falhas das rotas no CORE, encaminhamento dos dados (E2) e streaming (E3).
+- Falta ainda, fora do E1: validação ponta a ponta da Etapa 2 no CORE e a interface de streaming/apresentação da Etapa 4.
   Do E1 só dependem de ti a confirmação da atribuição overlay→CORE do cenário 3 e a revisão do texto do relatório.
 
 ## 2. O que está feito (elemento 1)
@@ -70,9 +70,10 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 src/ott/protocol.py     formato, tipos e validação das mensagens
 src/ott/node.py         OverlayNode: ligações, HELLO, PING/PONG, RTT, eventos, substitutos
 src/ott/bootstrapper.py BootstrapService: vizinhos e substitutos a partir do ficheiro JSON
-src/ott/cli.py          comando `ott` (-b, --serve, --min-neighbors, --stats ...)
-src/ott/routing.py      modelo de rotas, publicador e aprendizagem/propagação de ANNOUNCE
-src/ott/streaming/      (vazio) E3
+src/ott/cli.py          comando `ott` (-b, --serve, publish/subscribe, --stats ...)
+src/ott/routing.py      modelo de rotas, anúncios, subscrições e destinos ativos
+src/ott/forwarding.py   encaminhamento dos pacotes RTP/JPEG por UDP
+src/ott/streaming/      empacotamento RTP, emissor MJPEG e estatísticas do recetor
 topologies/             cenarios 1-3: .json (overlay) e .xml (CORE)
 docs/protocolo.md       especificação das mensagens e interações
 docs/ETAPA2.md          roadmap e checklist da implementação das rotas
@@ -94,8 +95,8 @@ node.rtt(id) ; node.rtts()                            # segundos (média móvel)
 
 Definidos e validados os campos de `ANNOUNCE`, `ACTIVATE` e `DEACTIVATE` (ver
 `docs/protocolo.md` §7.1). `RoutingTable.attach(node)` regista os três handlers.
-Continuam pendentes o formato de `ROUTE_TEST`, a validação no CORE da adaptação a falhas e o
-encaminhamento dos dados.
+Continuam pendentes o formato de `ROUTE_TEST` e os ensaios de integração e falhas da Etapa 2
+no CORE. O encaminhamento UDP está implementado em `src/ott/forwarding.py` e integrado na CLI.
 
 ## 6. Como testar
 
@@ -134,8 +135,8 @@ Cobrem: validação do protocolo, overlay por bootstrapper e recuperação, even
 duplicada, vizinho calado (timeout), mensagem inválida, substituto, alvos expirados e tentativas em paralelo.
 `tests/test_routing.py` cobre o modelo, publicação, aprendizagem por saltos, supressão de
 duplicados/anúncios antigos, melhoria de caminho, subscrições partilhadas e reação local a
-falhas e vizinhos novos. A integração ponta a ponta no overlay e o encaminhamento dos dados
-continuam por testar.
+falhas e vizinhos novos. O encaminhamento RTP/JPEG por UDP está integrado; falta ensaiar a
+distribuição ponta a ponta no overlay e a recuperação de falhas no CORE.
 
 **No CORE:** `docs/testes-core.md` tem os comandos de cada nó para os cenários 1, 2 e 3 e a lista de testes
 (arranque, saída limpa, queda abrupta, nó congelado `kill -STOP`, link em baixo, RTT com atraso, substituto).
@@ -233,8 +234,8 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 **Outros elementos (para saber o que depende de nós)**
 - [x] E2 (controlo): tabela de rotas, anúncios, ativação/desativação e reação local a alterações de vizinhos.
-- [ ] E2: ensaios de falhas/recuperação no CORE e encaminhamento dos dados.
-- [ ] E3: servidor/cliente de vídeo, plano de dados, cenários e medições.
+- [ ] E2: ensaios ponta a ponta de distribuição e falhas/recuperação no CORE.
+- [ ] E3: interface de apresentação do vídeo, cenários e medições de streaming.
 
 ## 10. Perguntas para os docentes
 
@@ -250,6 +251,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-03 | Etapa 2: integrado o plano de dados UDP à CLI. `--publish-flow` emite MJPEG/RTP só quando há destinos ativos; `--subscribe SERVIDOR:FLUXO` ativa a rota e recolhe estatísticas; nós intermédios replicam uma cópia por vizinho a jusante. Atualizados README, protocolo e roadmap. Ensaios de integração no CORE ainda por fazer; não foram executados testes nesta alteração. |
 | 2026-11-03 | **Cenário 3 redesenhado no CORE** (routers `r1`–`r10`, `S1`, switches com 2 hosts, como na Figura 1): o XML tinha perdido os serviços FRR e a config própria. Novo `topologies/aplicar_frr.py` (+ `frrboot.sh.tmpl`) repõe-os a partir das interfaces do XML. Corrigido o `frrboot.sh` (stdio dos daemons para `/dev/null`; sem isso o CORE ficava em `INSTANTIATION`). `cenario3.json` com nova atribuição overlay→CORE e IPs novos; `docs/testes-core.md` e `CHECKPOINT1.md` atualizados (`-b 10.0.18.20`). Validado no CORE: OSPF completo, 9/9 clientes fazem ping ao S1, 11 nós overlay com os vizinhos do JSON. |
 | 2026-11-02 | Novo `docs/CHECKPOINT1.md`: guia para o checkpoint 1 (o que se pede, demonstração, como funciona o código, decisões, resultados, defeitos achados, limitações, perguntas prováveis e checklist). |
 | 2026-11-02 | **Elemento 1 concluído.** Ensaios no CORE (cenários 2 e 3, abertos por `core-cli`, ações por `vcmd`) e medições em localhost com 10 repetições (`tests/medicoes.py`, novo). Corrigidos 4 defeitos achados nos ensaios: `down`/`up` falsos com ligação duplicada (`BYE reason=duplicate`, D17), RTT inflacionado por Nagle (`TCP_NODELAY`, D18), ligação imediata a substitutos e reposição do contador de défice (D19). 60 testes automáticos (+9). Relatório: nova secção `docs/relatorio/e1_overlay.tex`. `docs/protocolo.md` atualizado. |

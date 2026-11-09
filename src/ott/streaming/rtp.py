@@ -94,7 +94,10 @@ def unpack_data(data):
         end = pos + 1 + size
         if size == 0 or end > len(data):
             raise PacketError("cabeçalho truncado")
-        names.append(data[pos + 1:end].decode())
+        try:
+            names.append(data[pos + 1:end].decode())
+        except UnicodeDecodeError as exc:
+            raise PacketError("identificador não é UTF-8 válido") from exc
         pos = end
     return names[0], names[1], data[pos:]
 

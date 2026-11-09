@@ -301,6 +301,29 @@ class OverlayNode:
         with self._lock:
             return sorted(self.neighbors)
 
+    def neighbor_address(self, node_id):
+        """IP remoto usado pela ligação TCP ativa com um vizinho, ou None."""
+        with self._lock:
+            nb = self.neighbors.get(node_id)
+        if nb is None:
+            return None
+        try:
+            return nb.sock.getpeername()[0]
+        except OSError:
+            return None
+
+    def neighbor_for_address(self, host):
+        """ID do vizinho cuja ligação usa ``host`` como endereço remoto."""
+        with self._lock:
+            neighbors = list(self.neighbors.items())
+        for node_id, nb in neighbors:
+            try:
+                if nb.sock.getpeername()[0] == host:
+                    return node_id
+            except OSError:
+                continue
+        return None
+
     # -- ligações ------------------------------------------------------
 
     def _accept_loop(self):

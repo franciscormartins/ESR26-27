@@ -85,6 +85,39 @@ class RoutingTable:
         with self._lock:
             return self.routes.pop((origin, flow), None)
 
+    def active_destinations(self, origin, flow, exclude=()):
+        """Devolve uma cópia dos vizinhos a jusante que recebem o fluxo.
+
+        O conjunto é deduplicado por vizinho: vários clientes no mesmo ramo
+        provocam apenas uma cópia do pacote nesse troço. ``exclude`` permite
+        ao encaminhador retirar a ligação de entrada.
+        """
+        with self._lock:
+            route = self.routes.get((origin, flow))
+            if route is None or route.state != ACTIVE:
+                return ()
+            return tuple(sorted(route.destinations.difference(exclude)))
+
+    def has_local_subscription(self, origin, flow):
+        """Indica se este nó tem um cliente local subscrito ao fluxo."""
+        with self._lock:
+            route = self.routes.get((origin, flow))
+            return bool(route and route.state == ACTIVE and route.local_subscribers)
+
+    def publish_local(self, origin, flow, epoch):
+        """Instala/atualiza a rota de origem sob o bloqueio da tabela."""
+        with self._lock:
+            route = self.routes.get((origin, flow))
+            if route is None:
+                route = RouteEntry(flow=flow, origin=origin, metric=0)
+                self.routes[route.key] = route
+            route.metric = 0
+            route.upstream = None
+            route.epoch = epoch
+            route.seen_announcements.add(f"{origin}:{flow}:{epoch}")
+            self._refresh_state(route, origin)
+            return route
+
     def attach(self, node):
         """Regista handlers e callbacks de vizinhança sem os bloquear."""
         node_key = id(node)
@@ -373,13 +406,7 @@ class AnnouncementPublisher:
             self._epochs[flow] += 1
             epoch = self._epochs[flow]
             if self.routing_table is not None:
-                identity = f"{self.node.id}:{flow}:{epoch}"
-                route = self.routing_table.get(self.node.id, flow)
-                if route is None:
-                    route = RouteEntry(flow=flow, origin=self.node.id, metric=0)
-                    self.routing_table.put(route)
-                route.metric, route.upstream, route.epoch = 0, None, epoch
-                route.seen_announcements.add(identity)
+                self.routing_table.publish_local(self.node.id, flow, epoch)
             msg = make_msg(MsgType.ANNOUNCE, self.node.id,
                            server_id=self.node.id, flow=flow,
                            epoch=epoch, metric=0)

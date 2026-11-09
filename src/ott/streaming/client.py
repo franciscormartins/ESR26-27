@@ -79,26 +79,35 @@ class StreamStats:
 class StreamReceiver:
     """Escuta numa porta UDP e entrega as imagens do fluxo a ``on_frame``."""
 
-    def __init__(self, origin, flow, port=DATA_PORT, bind="0.0.0.0", on_frame=None):
+    def __init__(self, origin, flow, port=DATA_PORT, bind="0.0.0.0", on_frame=None,
+                 listen=True):
         self.origin = origin
         self.flow = flow
         self.on_frame = on_frame or (lambda frame, rtp: None)
         self.stats = StreamStats()
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind((bind, port))
-        self.sock.settimeout(1.0)
-        self.port = self.sock.getsockname()[1]
+        self.sock = None
+        if listen:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.bind((bind, port))
+            self.sock.settimeout(1.0)
+            self.port = self.sock.getsockname()[1]
+        else:
+            # O OverlayForwarder owns the shared UDP socket and calls handle().
+            self.port = port
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True, name="stream-rx")
 
     def start(self):
-        self._thread.start()
+        if self.sock is not None:
+            self._thread.start()
         return self
 
     def stop(self):
         self._stop.set()
-        self._thread.join(2)
-        self.sock.close()
+        if self._thread.is_alive():
+            self._thread.join(2)
+        if self.sock is not None:
+            self.sock.close()
 
     def _run(self):
         while not self._stop.is_set():

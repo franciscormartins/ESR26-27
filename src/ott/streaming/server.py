@@ -96,8 +96,11 @@ class StreamSource:
             self.seq = (self.seq + 1) & 0xFFFF
             rtp = RtpPacket(self.seq, rtp_timestamp(), frame, ssrc=self.ssrc).encode()
             try:
-                self.send(pack_data(self.origin, self.flow, rtp))
-                self.sent += 1
+                delivered = self.send(pack_data(self.origin, self.flow, rtp))
+                # Callbacks antigos (modo isolado) devolvem None; o plano de
+                # dados overlay devolve zero quando não há destinos ativos.
+                if delivered is None or delivered:
+                    self.sent += 1
             except OSError as e:           # destino inalcançável não pára o fluxo
                 log.debug("falha a enviar: %s", e)
             # ritmo constante: agenda pelo relógio, não por sleep fixo, para
