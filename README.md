@@ -11,7 +11,7 @@ relatório em `docs/relatorio/`.
 | `src/ott/node.py` | `OverlayNode`: ligações aos vizinhos, HELLO, keepalive, RTT, eventos up/down, substitutos, handlers | 1 |
 | `src/ott/bootstrapper.py` | serviço que devolve os vizinhos (e substitutos) de cada nó a partir de um ficheiro | 1 |
 | `src/ott/cli.py` | comando `ott` | 1 |
-| `src/ott/routing.py` | tabela de rotas: anúncios, escolha do montante (saltos + RTT), subscrições agregadas, `WITHDRAW`, tempo de vida | 2 |
+| `src/ott/routing.py` | tabela de rotas: anúncios, escolha do montante (latência acumulada, D30), subscrições agregadas, `WITHDRAW`, tempo de vida | 2 |
 | `src/ott/forwarding.py` | encaminhamento UDP pelos ramos ativos da árvore overlay (RPF estrito) | 2 |
 | `src/ott/streaming/` | pacotes de vídeo (cabeçalho origem/fluxo/salto + RTP), emissor MJPEG e recetor UDP | 2/4 |
 | `progex/` | código de apoio do livro (Kurose) e `movie.Mjpeg`, só como referência | 4 |

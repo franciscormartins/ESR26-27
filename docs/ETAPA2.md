@@ -56,8 +56,11 @@ Implementação: `src/ott/routing.py`. Testes: `tests/test_routing.py`.
 - [x] Ao receber um anúncio, rejeitar mensagens inválidas (validadas pelo protocolo) e detetar duplicados/ciclos.
 - [x] Calcular o custo via cada vizinho (saltos e atraso) e escolher o montante entre os candidatos.
 - [x] Reenviar anúncios aos restantes vizinhos sem os devolver ao emissor nem ao montante.
-- [x] Métrica: número de saltos; em empate, atraso acumulado (RTT/2 por ligação, campo `delay`)
-  com histerese; sem RTT, menor ID (D21, 2026-11-09).
+- [x] ~~Métrica: número de saltos; em empate, atraso acumulado com histerese; sem RTT, menor
+  ID (D21, 2026-11-09)~~ — substituída pela D30.
+- [x] Métrica: **latência acumulada** (campo `delay`, RTT/2 por ligação, mínimo 0,1 ms, 1 s
+  sem RTT medido) com histerese; latências praticamente iguais desempatam por saltos e depois
+  pelo ID; condição de viabilidade `(época, atraso, saltos)` contra ciclos (D30, 2026-11-10).
 - [x] Tabela de candidatos por vizinho: a primeira cópia de uma época nova já não derruba o
   montante atual (resolve L4).
 - [x] Evitar que um anúncio mais antigo substitua uma rota com caminho. Desde 2026-11-10
@@ -74,11 +77,17 @@ O teste unitário cobre múltiplos fluxos, épocas, periodicidade, paragem e con
 
 `RoutingTable.attach(node)` instala o handler de `ANNOUNCE`. Desde 2026-11-09, cada anúncio
 atualiza o **candidato** do vizinho emissor (época, saltos e atraso anunciados) e o montante
-é reavaliado: menos saltos ganha; com os mesmos saltos, só se troca se o atraso melhorar mais
-de 20 % e 1 ms; sem RTT medido, ganha o menor ID. O montante atual continua válido com a
-época anterior até enviar a nova, por isso a ordem de chegada das cópias não provoca trocas.
-O nó propaga o anúncio quando a época avança, o montante muda ou os saltos mudam (normalmente
-uma vez por ronda), a todos menos o emissor e o montante. Cópias antigas, repetidas e
+é reavaliado. Desde 2026-11-10 (D30) ganha a **menor latência acumulada**: só se troca se a
+latência melhorar mais de 20 % e 1 ms; latências a menos de metade disso contam como empate
+e aí ganha quem tem menos saltos e, em empate total, o menor ID. Só servem candidatos viáveis:
+de uma época mais recente do que a última anunciada pelo nó, ou da mesma época com
+`(atraso, saltos)` anunciados menores do que o melhor que o nó anunciou nela (como no Babel;
+impede ciclos quando o RTT muda sem chegar nenhum anúncio). O montante atual continua válido
+com a época anterior até enviar a nova, por isso a ordem de chegada das cópias não provoca
+trocas; enquanto isso, o nó continua a anunciar a época do montante e só propaga a nova quando
+a cópia do montante chegar. O nó propaga o anúncio quando o montante escolhido traz uma época
+ainda não anunciada, o montante muda ou os saltos mudam (normalmente uma vez por ronda), a
+todos menos o emissor e o montante. Cópias antigas, repetidas e
 anúncios que regressam ao servidor de origem não são propagados. A validação dos campos é
 feita pelo protocolo antes do handler. O `AnnouncementPublisher` cria também a rota local
 (métrica 0, atraso 0, sem montante) a cada ronda. A CLI liga a tabela ao nó mesmo quando não
@@ -132,9 +141,9 @@ encaminhador de dados usa esse estado para abrir/fechar os ramos UDP.
 
 `RoutingTable.attach(node)` liga os eventos de vizinhança a uma fila processada por uma thread
 de fundo, para os callbacks do overlay apenas enfileirarem o evento. Quando cai o montante
-(ou ele envia `WITHDRAW`), o nó tenta primeiro uma **reparação rápida**: um candidato que
-tenha anunciado menos saltos do que a rota perdida (condição de viabilidade; um vizinho que
-use este nó como caminho nunca a cumpre). Se existir, o ramo passa para ele sem esperar pela
+(ou ele envia `WITHDRAW`, ou passa a anunciar um caminho não viável), o nó tenta primeiro
+uma **reparação rápida**: o candidato viável de menor latência (condição de viabilidade da
+D30; um vizinho que use este nó como caminho nunca a cumpre). Se existir, o ramo passa para ele sem esperar pela
 ronda seguinte. Se não existir, a rota fica sem caminho, os candidatos e os destinos a jusante
 são apagados (os subscritores locais ficam pendentes) e o nó envia `WITHDRAW` aos vizinhos;
 cada vizinho que o tinha como montante repete o procedimento. Quando o caminho volta a ser
@@ -179,7 +188,7 @@ contados em `rpf_dropped`, visível em `--stats`. Ao trocar de montante perde-se
 do antigo até o novo começar a enviar.
 
 O encaminhamento reutiliza os troços comuns da árvore construída pelos `upstream` escolhidos
-pelos anúncios (métrica: número de saltos, com o atraso como desempate). A implementação não escolhe deliberadamente
+pelos anúncios (métrica: latência acumulada, com os saltos como desempate, D30). A implementação não escolhe deliberadamente
 um caminho alternativo com custo superior só por esse ramo já estar ativo; essa otimização
 global da árvore não faz parte da métrica de menor caminho implementada.
 
@@ -207,10 +216,10 @@ seguintes. Estado atual de cada uma:
 
 | Tema | Decisão |
 |---|---|
-| Métrica | Número de saltos; em empate, RTT acumulado (`delay` no `ANNOUNCE`), com histerese (> 20 % e > 1 ms); empate final pelo ID do vizinho. RTT desconhecido conta como infinito |
+| Métrica | Desde 2026-11-10 (D30, substitui a D21): latência acumulada (`delay` no `ANNOUNCE`, RTT/2 por ligação, mínimo 0,1 ms; ligação sem RTT medido = 1 s), com histerese (> 20 % e > 1 ms); diferenças abaixo de metade disso são empate, decidido por menos saltos e depois pelo ID do vizinho. Anúncio sem `delay` conta como infinito. Condição de viabilidade `(época, atraso, saltos)` contra ciclos |
 | Escolha da rota | Tabela de candidatos por vizinho (última época, saltos, atraso), em vez de "a primeira cópia ganha" |
 | Identidade dos anúncios | `(server_id, flow, epoch)`; épocas a partir da hora do arranque do servidor (ms); uma rota retirada só aceita épocas maiores durante `route_ttl` (D27) |
-| Falhas | `WITHDRAW(server_id, flow, epoch)` explícito, só processado se vier do montante; antes de retirar, reparação rápida com condição de viabilidade (só candidatos com saltos anunciados < saltos da rota perdida). Quem envia `WITHDRAW` limpa os destinos; a jusante volta a pedir quando reaprende caminho |
+| Falhas | `WITHDRAW(server_id, flow, epoch)` explícito, só processado se vier do montante; antes de retirar, reparação rápida com condição de viabilidade (desde a D30: só candidatos com `(atraso, saltos)` anunciados menores do que o melhor anúncio deste nó na época; antes, saltos anunciados < saltos da rota perdida). Quem envia `WITHDRAW` limpa os destinos; a jusante volta a pedir quando reaprende caminho |
 | Rede de segurança | Tempo de vida de rotas e candidatos: 6 × o intervalo de anúncio (30 s), configurável (`--route-ttl`) |
 | Plano de dados | RPF estrito: só se aceitam (e entregam) datagramas vindos do montante atual; aceita-se a falha curta ao trocar de montante |
 | Subscrições | Agregadas por ramo: `ACTIVATE` só na transição 0→1, `DEACTIVATE` na 1→0; `subscriber_id` passa a opcional e informativo |
@@ -230,6 +239,10 @@ seguintes. Estado atual de cada uma:
 - [x] 8. Retirar `seen_announcements`.
 - [x] 9. Atualizar `protocolo.md`, este ficheiro e `ESTADO.md` com o comportamento final.
 - [ ] 10. Segundo servidor (`S2`, 2 fluxos cada) em `cenario2.json` e `cenario3.json`.
+- [x] 12. Latência acumulada como métrica principal, com condição de viabilidade (D30,
+  2026-11-10). Validado só em localhost; os ensaios 4, 6 e 8 no CORE foram feitos com a D21 e
+  têm de ser repetidos, mais um ensaio em que o `netem` torne mais rápido um caminho com mais
+  saltos (o nó deve passar para ele).
 - [ ] 11. Ensaios no CORE (lista abaixo).
 
 ## Plano de testes
@@ -258,8 +271,25 @@ seguintes. Estado atual de cada uma:
   gera um só par `DEACTIVATE`/`ACTIVATE`).
 - [x] Unidade, seleção (passo 5): época nova pelo caminho pior não causa trocas; empate sem
   RTT decidido pelo menor ID em qualquer ordem; empate decidido pelo atraso em qualquer ordem;
-  ganho abaixo da histerese não troca, ganho grande troca e fica estável; menos saltos ganha
-  mesmo com pior atraso; `delay` acumulado e só anunciado quando conhecido.
+  ganho abaixo da histerese não troca, ganho grande troca e fica estável; `delay` acumulado.
+  O teste "menos saltos ganha mesmo com pior atraso" deixou de valer com a D30 e foi
+  substituído pelo seguinte.
+- [x] Unidade, latência como métrica (D30, 2026-11-10): menor latência ganha mesmo com mais
+  saltos, em qualquer ordem; empate de latência (igual ou dentro da banda) decidido por menos
+  saltos; empate total pelo menor ID; diferença entre a banda de empate e a histerese mantém o
+  montante em qualquer ordem; RTT a oscilar à volta da histerese troca no máximo uma vez;
+  latência conhecida ganha a desconhecida; ligação sem RTT custa `unknown_link_delay`; custo
+  mínimo da ligação; primeira amostra de RTT troca uma só vez; configuração inválida.
+- [x] Unidade, viabilidade (D30): referência é o melhor anúncio da época e recomeça na época
+  seguinte; vizinho que pode estar a usar-nos nunca é escolhido, mesmo depois de o RTT para o
+  montante subir; época nova do montante aceite mesmo pior; época nova só anunciada quando o
+  montante a trouxer (e vizinho novo recebe a época usada); anúncio não viável do montante
+  repara pela alternativa ou retira; reparação escolhe a menor latência viável e recusa uma
+  alternativa rápida mas não viável; rota retirada reaprende qualquer época maior.
+- [x] Unidade, ausência de ciclos (D30): rede de 7 nós simulada em memória, entregas por ordem
+  aleatória, RTT a mudar sem anúncios, ligações a cair e voltar, 40 sementes × 600 passos; o
+  grafo de montantes nunca tem ciclos. Com a condição de viabilidade desligada o teste
+  encontra um ciclo (E ↔ F, semente 1).
 - [x] Unidade, falhas (passo 6): reparação rápida sem `WITHDRAW`; alternativa não viável leva a
   `WITHDRAW`; `WITHDRAW` de outro vizinho só remove o candidato; `WITHDRAW` do montante move o
   ramo para a alternativa; retirada em cascata limpa os destinos; rota sem caminho aceita a

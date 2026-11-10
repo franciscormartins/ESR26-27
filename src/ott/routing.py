@@ -7,13 +7,19 @@ import math
 import queue
 import threading
 import time
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, NamedTuple, Optional, Set, Tuple
 
 from .protocol import MsgType, make_msg
 
 INACTIVE = "inativa"
 ACTIVE = "ativa"
 log = logging.getLogger("ott.routing")
+
+
+class Cost(NamedTuple):
+    """Custo de um caminho até ao servidor: saltos e atraso acumulado (s)."""
+    hops: float
+    delay: float
 
 
 @dataclass(frozen=True)
@@ -38,8 +44,9 @@ class RouteEntry:
     Attributes:
         flow: Identificador estável do conteúdo ou stream.
         origin: ID overlay do servidor que origina o fluxo.
-        metric: Custo acumulado desde o servidor; ``math.inf`` indica que não
-            existe atualmente um caminho válido conhecido.
+        metric: Número de saltos até ao servidor (desempate e condição de
+            viabilidade; a métrica principal é ``delay``); ``math.inf`` indica
+            que não existe atualmente um caminho válido conhecido.
         upstream: Vizinho no melhor caminho conhecido em direção ao servidor;
             ``None`` no próprio servidor ou quando a rota está invalidada.
         destinations: IDs dos vizinhos a jusante que pediram o fluxo. As
@@ -49,14 +56,20 @@ class RouteEntry:
         state: ``ativa`` quando há procura (subscritores locais ou destinos) e
             um caminho válido para a origem; caso contrário, ``inativa``.
         epoch: Época mais recente conhecida para esta rota.
-        delay: Atraso acumulado estimado até ao servidor (s), pela soma de
-            metade do RTT de cada ligação; ``math.inf`` se desconhecido.
+        delay: Atraso acumulado estimado até ao servidor (s), pela soma do
+            custo de cada ligação (metade do RTT); métrica principal da
+            escolha do montante. ``math.inf`` se desconhecido.
         candidates: Mapa ``vizinho -> Candidate`` com o último anúncio de cada
             vizinho; o montante é escolhido entre eles.
         withdrawn_at: Hora (relógio monotónico) do último ``WITHDRAW`` deste nó
             para a rota, ou ``None``. Enquanto a rota está retirada, só aceita
             épocas mais recentes do que ``epoch``; ao fim de ``route_ttl``
             volta a aceitar qualquer época.
+        feasibility: Melhor anúncio feito por este nó na época mais recente
+            que anunciou, ``(época, atraso, saltos)``, ou ``None`` se ainda não
+            anunciou (ou se retirou a rota). É a referência da condição de
+            viabilidade (D30): só servem candidatos de uma época mais recente
+            ou da mesma época com ``(atraso, saltos)`` estritamente menor.
     """
     flow: str
     origin: str
@@ -69,6 +82,7 @@ class RouteEntry:
     delay: float = math.inf
     candidates: Dict[str, Candidate] = field(default_factory=dict)
     withdrawn_at: Optional[float] = None
+    feasibility: Optional[Tuple[int, float, float]] = None
 
     @property
     def key(self):
@@ -87,9 +101,16 @@ class RoutingTable:
     a procura passa de zero para um (primeiro subscritor local ou primeiro ramo
     a jusante) e ``DEACTIVATE`` quando volta a zero.
 
-    O montante é escolhido entre os candidatos (último anúncio de cada vizinho):
-    menos saltos; em empate, menor atraso acumulado, mas só se a melhoria passar
-    a histerese (``delay_hysteresis`` relativo e ``delay_min_gain`` absoluto, em s).
+    O montante é escolhido entre os candidatos viáveis (último anúncio de cada
+    vizinho) pela menor latência acumulada (D30); latências praticamente iguais
+    desempatam por menos saltos e depois pelo ID do vizinho. Só se troca de
+    montante por latência se a melhoria passar a histerese (``delay_hysteresis``
+    relativo e ``delay_min_gain`` absoluto, em s); ver ``_select``.
+
+    O custo de uma ligação é metade do RTT medido, com o mínimo
+    ``min_link_delay`` (s); sem RTT medido vale ``unknown_link_delay`` (s), um
+    valor alto mas finito, para que caminhos com ligações por medir continuem
+    comparáveis (no arranque a escolha comporta-se como a contagem de saltos).
 
     ``route_ttl`` (s) é a rede de segurança: um candidato sem anúncios há mais
     do que esse tempo é esquecido e, se era o montante, a rota é reparada ou
@@ -101,14 +122,23 @@ class RoutingTable:
     ``ACTIVATE`` e o ``DEACTIVATE`` de uma troca de montante logo a seguir)
     chegam ao vizinho pela ordem em que foram tomadas.
     """
-    def __init__(self, delay_hysteresis=0.2, delay_min_gain=0.001, route_ttl=None):
-        if route_ttl is not None and (not isinstance(route_ttl, (int, float))
-                                      or isinstance(route_ttl, bool)
-                                      or not math.isfinite(route_ttl) or route_ttl <= 0):
+    def __init__(self, delay_hysteresis=0.2, delay_min_gain=0.001, route_ttl=None,
+                 unknown_link_delay=1.0, min_link_delay=0.0001):
+        def positive(value):
+            return (isinstance(value, (int, float)) and not isinstance(value, bool)
+                    and math.isfinite(value) and value > 0)
+
+        if route_ttl is not None and not positive(route_ttl):
             raise ValueError("route_ttl tem de ser um número finito maior que zero")
+        for name, value in (("unknown_link_delay", unknown_link_delay),
+                            ("min_link_delay", min_link_delay)):
+            if not positive(value):
+                raise ValueError(f"{name} tem de ser um número finito maior que zero")
         self.delay_hysteresis = delay_hysteresis
         self.delay_min_gain = delay_min_gain
         self.route_ttl = route_ttl
+        self.unknown_link_delay = float(unknown_link_delay)
+        self.min_link_delay = float(min_link_delay)
         self._expiry_stop = threading.Event()
         self._expiry_thread = None
         self.routes: dict[Tuple[str, str], RouteEntry] = {}
@@ -372,19 +402,28 @@ class RoutingTable:
                     node, MsgType.DEACTIVATE, route, data.get("subscriber_id"))))
         return True
 
-    # -- seleção do montante (métrica: saltos, depois atraso) ----------------
+    # -- seleção do montante (métrica: latência; desempate: saltos, ID) -------
 
-    @staticmethod
-    def _link_delay(node, neighbor):
-        """Metade do RTT medido para o vizinho, ou infinito se ainda não há amostra."""
+    def _link_delay(self, node, neighbor):
+        """Custo da ligação ao vizinho (s): metade do RTT medido, nunca abaixo de
+        ``min_link_delay``; sem amostra de RTT, ``unknown_link_delay``.
+
+        É o único sítio que traduz medições da ligação em custo: outra métrica
+        de ligação (por exemplo, com perdas) muda só esta função.
+        """
         rtt = getattr(node, "rtt", None)
         sample = rtt(neighbor) if callable(rtt) else None
-        return math.inf if sample is None else sample / 2
+        if sample is None:
+            return self.unknown_link_delay
+        return max(sample / 2, self.min_link_delay)
 
     def _cost(self, node, neighbor, candidate):
-        """Custo do caminho via ``neighbor``: (saltos, atraso acumulado em s)."""
-        return (candidate.metric + 1,
-                candidate.delay + self._link_delay(node, neighbor))
+        """Custo do caminho via ``neighbor``: ``Cost(saltos, atraso acumulado)``.
+
+        Um anúncio sem ``delay`` (vizinho que não o conhece) dá atraso infinito.
+        """
+        return Cost(candidate.metric + 1,
+                    candidate.delay + self._link_delay(node, neighbor))
 
     def _hold_down_over(self, route, now=None):
         """A retenção depois de um ``WITHDRAW`` dura ``route_ttl`` (sem fim se ``None``)."""
@@ -406,6 +445,24 @@ class RoutingTable:
             return True
         return neighbor == route.upstream and candidate.epoch == route.epoch - 1
 
+    @staticmethod
+    def _feasible(route, candidate):
+        """Condição de viabilidade (D30), como no Babel.
+
+        Serve um candidato de uma época mais recente do que a última anunciada
+        por este nó, ou da mesma época com ``(atraso, saltos)`` anunciados
+        estritamente menores do que o melhor que este nó anunciou nela. Ao
+        longo de um caminho ``(atraso, saltos)`` cresce sempre (cada ligação
+        soma pelo menos um salto), por isso um vizinho cujo caminho passa por
+        este nó nunca é viável: não se formam ciclos, mesmo que o RTT mude sem
+        chegar nenhum anúncio. Usa os valores anunciados, não o custo local.
+        """
+        reference = route.feasibility
+        if reference is None or candidate.epoch > reference[0]:
+            return True
+        return (candidate.epoch == reference[0]
+                and (candidate.delay, candidate.metric) < reference[1:])
+
     def _delay_better(self, new, current):
         """Atraso ``new`` melhor do que ``current`` acima da histerese."""
         if math.isinf(new):
@@ -415,39 +472,86 @@ class RoutingTable:
         gain = current - new
         return gain > max(self.delay_min_gain, self.delay_hysteresis * current)
 
-    def _select(self, node, route, feasible_below=None):
-        """Escolhe o montante: menos saltos; empate pelo atraso (com histerese);
-        empate final (atrasos desconhecidos) pelo ID do vizinho.
+    def _tie_band(self, delay):
+        """Diferença de atraso que conta como empate: metade da histerese.
 
-        ``feasible_below`` aplica a condição de viabilidade da reparação rápida:
-        só servem candidatos que anunciaram menos saltos do que esse valor.
-        Devolve ``(vizinho, (saltos, atraso))`` ou ``(None, None)``.
+        Entre metade e a histerese completa nenhum dos lados troca; sem esta
+        folga, um RTT a oscilar no limiar alternava o montante.
         """
-        options = []
+        return max(self.delay_min_gain, self.delay_hysteresis * delay) / 2
+
+    def _select(self, node, route):
+        """Escolhe o montante entre os candidatos válidos e viáveis (D30).
+
+        1. ``D*`` é o menor atraso; contam como empatados os candidatos a menos
+           de ``_tie_band(D*)`` dele (com ``D*`` infinito, todos). Entre estes,
+           o preferido é o de menos saltos, depois menor atraso, depois menor ID.
+        2. Sem montante atual (ou se ele deixou de servir), fica o preferido.
+        3. Com montante atual, troca-se para o preferido só se ``D*`` for melhor
+           do que o atraso atual acima da histerese, se o preferido tiver menos
+           saltos (latência praticamente igual), ou em empate total (mesmos
+           saltos e o mesmo atraso, por exemplo ambos desconhecidos) se tiver
+           menor ID. Caso contrário mantém-se o atual.
+
+        Devolve ``(vizinho, Cost)`` ou ``(None, None)``.
+        """
+        options = {}
         for neighbor, candidate in route.candidates.items():
-            if not self._valid_candidate(route, neighbor, candidate):
-                continue
-            if feasible_below is not None and not candidate.metric < feasible_below:
-                continue
-            options.append((self._cost(node, neighbor, candidate), neighbor))
+            if self._valid_candidate(route, neighbor, candidate) \
+                    and self._feasible(route, candidate):
+                options[neighbor] = self._cost(node, neighbor, candidate)
         if not options:
             return None, None
-        best_cost, best = min(options, key=lambda o: (o[0][0], o[0][1], o[1]))
+        best_delay = min(cost.delay for cost in options.values())
+        if math.isinf(best_delay):
+            tied = options
+        else:
+            band = self._tie_band(best_delay)
+            tied = {nb: cost for nb, cost in options.items()
+                    if cost.delay - best_delay <= band}
+        best = min(tied, key=lambda nb: (tied[nb].hops, tied[nb].delay, nb))
+        best_cost = options[best]
         current = route.upstream
-        current_cost = next((cost for cost, nb in options if nb == current), None)
+        current_cost = options.get(current)
         if current_cost is None or best == current:
             return best, best_cost
-        if best_cost[0] < current_cost[0]:
-            return best, best_cost              # menos saltos: troca sempre
-        if self._delay_better(best_cost[1], current_cost[1]):
-            return best, best_cost              # mesmo nº de saltos, atraso bem melhor
-        if math.isinf(best_cost[1]) and math.isinf(current_cost[1]) and best < current:
-            return best, best_cost              # sem RTT: desempate determinista pelo ID
+        if self._delay_better(best_delay, current_cost.delay):
+            return best, best_cost      # latência claramente melhor
+        if best_cost.hops < current_cost.hops:
+            return best, best_cost      # latência praticamente igual, menos saltos
+        if best_cost == current_cost and best < current:
+            return best, best_cost      # empate total: desempate determinista pelo ID
         return current, current_cost
 
+    @staticmethod
+    def _advertised_epoch(route):
+        """Época que este nó anuncia: a do anúncio do montante escolhido.
+
+        Enquanto o montante atual só tem o anúncio da época anterior, o nó
+        continua a anunciar essa época e só propaga a nova quando o caminho
+        escolhido a trouxer (D30). Anunciar a época nova com o caminho antigo
+        tornava esse montante inviável (``_feasible``) e obrigava a trocar
+        para a primeira cópia a chegar, a oscilação que a D21 eliminou.
+        """
+        candidate = route.candidates.get(route.upstream) if route.upstream else None
+        return route.epoch if candidate is None else candidate.epoch
+
+    def _advertises_new_epoch(self, route):
+        """O montante escolhido traz uma época que este nó ainda não anunciou."""
+        return (route.feasibility is None
+                or self._advertised_epoch(route) > route.feasibility[0])
+
     def _announce_msg(self, node, route):
+        """Anúncio da rota; atualiza a referência da condição de viabilidade."""
+        epoch = self._advertised_epoch(route)
+        if route.origin != node.id:
+            key = (route.delay, route.metric)
+            reference = route.feasibility
+            if reference is None or epoch > reference[0] \
+                    or (epoch == reference[0] and key < reference[1:]):
+                route.feasibility = (epoch, *key)
         fields = {"server_id": route.origin, "flow": route.flow,
-                  "epoch": route.epoch, "metric": route.metric}
+                  "epoch": epoch, "metric": route.metric}
         if math.isfinite(route.delay):
             fields["delay"] = route.delay
         return make_msg(MsgType.ANNOUNCE, node.id, **fields)
@@ -498,8 +602,11 @@ class RoutingTable:
     def handle_announce(self, node, neighbor, msg):
         """Regista o candidato, reavalia o montante e propaga se algo mudou.
 
-        Propaga quando a época avança (uma vez por ronda), quando o montante
-        muda ou quando muda o número de saltos. Devolve ``True`` se propagou.
+        Propaga quando o montante escolhido traz uma época que este nó ainda
+        não anunciou (uma vez por ronda), quando o montante muda ou quando muda
+        o número de saltos. Uma atualização do próprio montante que deixe de
+        ser viável é tratada como perda do montante. Devolve ``True`` se
+        enviou um anúncio ou um ``WITHDRAW``.
         """
         data = msg["data"]  # OverlayNode já validou a mensagem recebida.
         origin, flow, epoch = data["server_id"], data["flow"], data["epoch"]
@@ -529,11 +636,17 @@ class RoutingTable:
                 route.candidates[neighbor] = candidate  # renova o tempo de vida
                 return False  # cópia repetida
             route.candidates[neighbor] = candidate
-            epoch_advanced = epoch > route.epoch
-            if epoch_advanced:
+            if epoch > route.epoch:
                 route.epoch = epoch
                 route.candidates = {nb: c for nb, c in route.candidates.items()
                                     if c.epoch >= epoch - 1}
+            if neighbor == route.upstream and not self._feasible(route, candidate):
+                # O montante anuncia agora um caminho que pode passar por este
+                # nó (não melhor do que o que já anunciámos nesta época).
+                log.info("rota %s:%s: anúncio do montante %s deixou de ser viável",
+                         route.origin, route.flow, neighbor)
+                actions += self._lose_upstream(node, route, still_connected=True)
+                return True
             old_upstream, old_metric = route.upstream, route.metric
             new_upstream, cost = self._select(node, route)
             if new_upstream is None:
@@ -550,7 +663,8 @@ class RoutingTable:
                         node, MsgType.DEACTIVATE, route)))
                 actions.append(("send", new_upstream, self._route_message(
                     node, MsgType.ACTIVATE, route)))
-            propagate = epoch_advanced or moved or route.metric != old_metric
+            propagate = (self._advertises_new_epoch(route) or moved
+                         or route.metric != old_metric)
             if propagate:
                 actions.append(("broadcast", self._announce_msg(node, route),
                                 {neighbor, new_upstream}))
@@ -561,13 +675,15 @@ class RoutingTable:
     def _lose_upstream(self, node, route, still_connected):
         """Trata a perda do montante (sob o bloqueio); devolve os envios a fazer.
 
-        Tenta primeiro uma alternativa viável: um candidato que anunciou menos
-        saltos do que a rota perdida não pode estar a usar este nó como caminho.
-        Sem alternativa, a rota fica sem caminho, os ramos a jusante são
-        desfeitos e envia-se ``WITHDRAW`` a todos os vizinhos.
+        Tenta primeiro uma alternativa viável (``_feasible``): um candidato que
+        anunciou ``(atraso, saltos)`` menores do que o melhor anúncio deste nó
+        na época não pode estar a usar este nó como caminho; entre as viáveis
+        escolhe-se como em ``_select`` (menor latência). Sem alternativa, a rota
+        fica sem caminho, os ramos a jusante são desfeitos e envia-se
+        ``WITHDRAW`` a todos os vizinhos.
         """
         actions = []
-        lost, lost_metric = route.upstream, route.metric
+        lost = route.upstream
         route.candidates.pop(lost, None)
         route.upstream = None
         had_demand = self._has_demand(route)
@@ -575,7 +691,7 @@ class RoutingTable:
             # o antigo montante já limpou os destinos; isto só evita restos
             actions.append(("send", lost, self._route_message(
                 node, MsgType.DEACTIVATE, route)))
-        new_upstream, cost = self._select(node, route, feasible_below=lost_metric)
+        new_upstream, cost = self._select(node, route)
         if new_upstream is not None:
             route.upstream = new_upstream
             route.metric, route.delay = cost
@@ -589,6 +705,9 @@ class RoutingTable:
             return actions
         route.metric = route.delay = math.inf
         route.candidates.clear()
+        # A retenção (só épocas > route.epoch) substitui a referência de
+        # viabilidade: qualquer época aceite é mais recente do que a anunciada.
+        route.feasibility = None
         route.withdrawn_at = time.monotonic()  # retenção: só épocas > route.epoch
         route.destinations.clear()  # a jusante volta a pedir quando reaprender
         self._refresh_state(route, node.id)

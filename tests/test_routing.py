@@ -230,10 +230,14 @@ class AnnouncementLearningTest(unittest.TestCase):
         self.assertTrue(table.handle_announce(node, "O3", self.announce(1, 0)))
         self.assertEqual(table.get("S1", "filme_a").upstream, "O3")
         # Época nova vinda primeiro por um caminho pior: o montante atual (O3)
-        # mantém-se, mas a época nova é propagada uma vez.
-        self.assertTrue(table.handle_announce(node, "O4", self.announce(2, 4)))
+        # mantém-se e a época nova só é propagada quando chegar a cópia do O3
+        # (não se anuncia uma época com o caminho da anterior, D30).
+        self.assertFalse(table.handle_announce(node, "O4", self.announce(2, 4)))
         route = table.get("S1", "filme_a")
         self.assertEqual((route.epoch, route.metric, route.upstream), (2, 1, "O3"))
+        self.assertEqual(len(node.received_broadcasts), 2)
+        self.assertTrue(table.handle_announce(node, "O3", self.announce(2, 0)))
+        self.assertEqual(node.received_broadcasts[-1][0]["data"]["epoch"], 2)
         self.assertEqual(len(node.received_broadcasts), 3)
 
     def test_own_announcement_is_ignored(self):
@@ -451,7 +455,8 @@ class RouteActivationTest(unittest.TestCase):
 
 
 class RouteSelectionTest(unittest.TestCase):
-    """Passo 5: tabela de candidatos, desempate por RTT e histerese."""
+    """Tabela de candidatos; métrica principal: latência acumulada, com
+    histerese; desempate por saltos e pelo ID do vizinho (D30)."""
 
     class Node(AnnouncementLearningTest.Node):
         def __init__(self):
@@ -479,13 +484,16 @@ class RouteSelectionTest(unittest.TestCase):
         node.sent.clear()
         node.received_broadcasts.clear()
 
-        self.assertTrue(table.handle_announce(node, "O5", self.announce("O5", 2, 2)))
-        self.assertFalse(table.handle_announce(node, "O1", self.announce("O1", 2, 1)))
+        # A cópia do O5 chega primeiro: fica o O1 e a época 2 ainda não é
+        # anunciada; é anunciada uma vez, quando chega a cópia do O1 (D30).
+        self.assertFalse(table.handle_announce(node, "O5", self.announce("O5", 2, 2)))
+        self.assertTrue(table.handle_announce(node, "O1", self.announce("O1", 2, 1)))
 
         route = table.get("S1", "filme_a")
         self.assertEqual((route.upstream, route.metric, route.epoch), ("O1", 2, 2))
         self.assertEqual(node.sent, [])                    # sem DEACTIVATE/ACTIVATE
         self.assertEqual(len(node.received_broadcasts), 1)  # época propagada uma vez
+        self.assertEqual(node.received_broadcasts[0][0]["data"]["epoch"], 2)
 
     def test_equal_hops_without_rtt_prefer_lowest_id_whatever_the_order(self):
         for order in (("O7", "O3"), ("O3", "O7")):
@@ -516,13 +524,77 @@ class RouteSelectionTest(unittest.TestCase):
         self.feed(table, node, ("O7", 3, 1, 0.0), ("O3", 3, 1, 0.0))
         self.assertEqual(route.upstream, "O7")              # estável nas rondas seguintes
 
-    def test_fewer_hops_win_even_with_worse_delay(self):
-        table, node = RoutingTable(), self.Node()
-        node.rtts = {"O3": 0.002, "O7": 0.200}
-        route = self.feed(table, node, ("O3", 1, 2, 0.0), ("O7", 1, 1, 0.0))
-        self.assertEqual((route.upstream, route.metric), ("O7", 2))
+    def test_lower_delay_wins_even_with_more_hops_whatever_the_order(self):
+        # Substitui o contrato da D21 ("menos saltos ganha sempre"): D30.
+        for order in (("O3", "O7"), ("O7", "O3")):
+            with self.subTest(order=order):
+                table, node = RoutingTable(), self.Node()
+                node.rtts = {"O3": 0.002, "O7": 0.200}
+                hops = {"O3": 2, "O7": 1}
+                route = self.feed(table, node,
+                                  *((src, 1, hops[src], 0.0) for src in order))
+                self.assertEqual((route.upstream, route.metric), ("O3", 3))
+                self.assertAlmostEqual(route.delay, 0.001)
 
-    def test_delay_is_accumulated_and_announced_only_when_known(self):
+    def test_delay_tie_is_broken_by_fewer_hops(self):
+        cases = {"atrasos iguais": {"O3": 0.004, "O7": 0.004},
+                 "dentro da banda de empate": {"O3": 0.0038, "O7": 0.004}}
+        for label, rtts in cases.items():
+            for order in (("O3", "O7"), ("O7", "O3")):
+                with self.subTest(label, order=order):
+                    table, node = RoutingTable(), self.Node()
+                    node.rtts = dict(rtts)
+                    hops = {"O3": 2, "O7": 1}
+                    route = self.feed(table, node,
+                                      *((src, 1, hops[src], 0.0) for src in order))
+                    self.assertEqual((route.upstream, route.metric), ("O7", 2))
+
+    def test_total_tie_is_broken_by_lowest_id_whatever_the_order(self):
+        for order in (("O7", "O3"), ("O3", "O7")):
+            with self.subTest(order=order):
+                table, node = RoutingTable(), self.Node()
+                node.rtts = {"O3": 0.004, "O7": 0.004}
+                route = self.feed(table, node, *((src, 1, 1, 0.001) for src in order))
+                self.assertEqual(route.upstream, "O3")
+
+    def test_gain_between_tie_and_hysteresis_keeps_current_upstream(self):
+        # O7: 3 saltos, 10 ms; O3: 2 saltos, 11,6 ms. A diferença (1,6 ms) é
+        # maior do que o empate (1 ms) e menor do que a histerese (2 ms): o
+        # primeiro a ser escolhido mantém-se, seja qual for a ordem.
+        for first, second in (("O7", "O3"), ("O3", "O7")):
+            with self.subTest(first=first):
+                table, node = RoutingTable(), self.Node()
+                node.rtts = {"O7": 0.020, "O3": 0.0232}
+                hops = {"O3": 1, "O7": 2}
+                route = self.feed(table, node, (first, 1, hops[first], 0.0),
+                                  (second, 1, hops[second], 0.0))
+                self.assertEqual(route.upstream, first)
+
+    def test_rtt_oscillating_around_hysteresis_switches_at_most_once(self):
+        table, node = RoutingTable(), self.Node()
+        node.rtts = {"O3": 0.010, "O7": 0.0082}   # 5 ms vs 4,1 ms: ganho 0,9 ms
+        route = self.feed(table, node, ("O3", 1, 1, 0.0), ("O7", 1, 1, 0.0))
+        self.assertEqual(route.upstream, "O3")
+        upstreams = []
+        for epoch in range(2, 12):
+            # ganho a oscilar entre 0,9 e 1,1 ms à volta da histerese (1 ms)
+            node.rtts["O7"] = 0.0078 if epoch % 2 else 0.0082
+            self.feed(table, node, ("O3", epoch, 1, 0.0), ("O7", epoch, 1, 0.0))
+            upstreams.append(route.upstream)
+        changes = sum(1 for a, b in zip(["O3"] + upstreams, upstreams) if a != b)
+        self.assertEqual(changes, 1)
+        self.assertEqual(upstreams[-1], "O7")
+
+    def test_known_delay_beats_unknown_even_with_more_hops(self):
+        for order in (("O3", "O7"), ("O7", "O3")):
+            with self.subTest(order=order):
+                table, node = RoutingTable(), self.Node()
+                node.rtts = {"O3": 0.010, "O7": 0.010}
+                announced = {"O3": ("O3", 1, 3, 0.0), "O7": ("O7", 1, 0)}  # O7 sem delay
+                route = self.feed(table, node, *(announced[src] for src in order))
+                self.assertEqual((route.upstream, route.metric), ("O3", 4))
+
+    def test_delay_is_accumulated_and_announced(self):
         table, node = RoutingTable(), self.Node()
         node.rtts = {"O1": 0.010}
         route = self.feed(table, node, ("O1", 1, 1, 0.003))
@@ -530,9 +602,257 @@ class RouteSelectionTest(unittest.TestCase):
         forwarded, _ = node.received_broadcasts[-1]
         self.assertAlmostEqual(forwarded["data"]["delay"], 0.008)
 
-        other, other_node = RoutingTable(), self.Node()      # sem RTT medido
-        self.feed(other, other_node, ("O1", 1, 1, 0.003))
-        self.assertNotIn("delay", other_node.received_broadcasts[-1][0]["data"])
+    def test_link_without_rtt_costs_unknown_link_delay(self):
+        table, node = RoutingTable(unknown_link_delay=0.5), self.Node()  # sem RTT
+        route = self.feed(table, node, ("O1", 1, 1, 0.003))
+        self.assertAlmostEqual(route.delay, 0.503)
+        self.assertAlmostEqual(node.received_broadcasts[-1][0]["data"]["delay"], 0.503)
+
+    def test_announcement_without_delay_is_learned_and_forwarded_without_it(self):
+        table, node = RoutingTable(), self.Node()
+        node.rtts = {"O1": 0.010}
+        route = self.feed(table, node, ("O1", 1, 1))
+        self.assertEqual((route.upstream, route.delay), ("O1", float("inf")))
+        self.assertNotIn("delay", node.received_broadcasts[-1][0]["data"])
+
+    def test_link_cost_has_a_floor(self):
+        table, node = RoutingTable(min_link_delay=0.0005), self.Node()
+        node.rtts = {"O1": 0.0}
+        route = self.feed(table, node, ("O1", 1, 1, 0.0))
+        self.assertAlmostEqual(route.delay, 0.0005)
+
+    def test_first_rtt_sample_moves_route_once(self):
+        table, node = RoutingTable(), self.Node()
+        route = self.feed(table, node, ("O7", 1, 1, 0.0), ("O3", 1, 1, 0.0))
+        self.assertEqual(route.upstream, "O3")    # sem RTT: empate total, menor ID
+        node.rtts = {"O7": 0.004}                 # primeira amostra só do O7
+        for epoch in (2, 3, 4):
+            self.feed(table, node, ("O3", epoch, 1, 0.0), ("O7", epoch, 1, 0.0))
+            self.assertEqual(route.upstream, "O7")
+
+    def test_invalid_link_cost_configuration(self):
+        for kwargs in ({"unknown_link_delay": 0}, {"unknown_link_delay": float("inf")},
+                       {"min_link_delay": -1}, {"min_link_delay": True},
+                       {"min_link_delay": "0.1"}):
+            with self.subTest(**kwargs), self.assertRaises(ValueError):
+                RoutingTable(**kwargs)
+
+
+class FeasibilityTest(unittest.TestCase):
+    """D30: condição de viabilidade (época, atraso, saltos) e épocas anunciadas."""
+
+    Node = RouteSelectionTest.Node
+    announce = RouteSelectionTest.announce
+    feed = RouteSelectionTest.feed
+
+    def assert_reference(self, route, epoch, delay, hops):
+        self.assertEqual((route.feasibility[0], route.feasibility[2]), (epoch, hops))
+        self.assertAlmostEqual(route.feasibility[1], delay)
+
+    def test_reference_is_best_announced_in_the_epoch_and_resets_with_new_epoch(self):
+        table, node = RoutingTable(), self.Node()
+        node.rtts = {"O1": 0.010, "O5": 0.002}
+        route = self.feed(table, node, ("O1", 1, 2, 0.004))
+        self.assert_reference(route, 1, 0.009, 3)
+        self.feed(table, node, ("O5", 1, 1, 0.001))         # melhor: 2 ms, 2 saltos
+        self.assertEqual(route.upstream, "O5")
+        self.assert_reference(route, 1, 0.002, 2)
+        # Época nova pior do que a anterior: aceite, e a referência recomeça.
+        self.feed(table, node, ("O5", 2, 4, 0.050))
+        self.assert_reference(route, 2, 0.051, 5)
+
+    def test_neighbor_possibly_routing_through_us_is_never_chosen(self):
+        # Ciclo que a troca simples da ordem permitia: o RTT para o montante
+        # sobe sem chegar anúncio nenhum, e o O5 (que anunciou mais do que nós,
+        # logo pode estar a usar-nos) parece muito melhor.
+        table, node = RoutingTable(), self.Node()
+        node.rtts = {"O1": 0.010, "O5": 0.0002}
+        route = self.feed(table, node, ("O1", 1, 1, 0.004))   # anunciamos 9 ms
+        node.rtts["O1"] = 0.040                                 # via O1: 24 ms
+        self.assertFalse(table.handle_announce(
+            node, "O5", self.announce("O5", 1, 2, 0.0095)))    # via O5: 9,6 ms
+        self.assertEqual(route.upstream, "O1")
+
+    def test_new_epoch_from_current_upstream_is_accepted_even_if_worse(self):
+        table, node = RoutingTable(), self.Node()
+        route = self.feed(table, node, ("O1", 1, 1))
+        node.received_broadcasts.clear()
+        self.assertFalse(table.handle_announce(node, "O5", self.announce("O5", 2, 5)))
+        self.assertEqual(node.received_broadcasts, [])     # época 2 ainda por anunciar
+        self.assertTrue(table.handle_announce(node, "O1", self.announce("O1", 2, 3)))
+        self.assertEqual((route.upstream, route.metric), ("O1", 4))
+        sent = node.received_broadcasts[-1][0]["data"]
+        self.assertEqual((sent["epoch"], sent["metric"]), (2, 4))
+
+    def test_new_neighbor_gets_the_epoch_actually_used(self):
+        table, node = RoutingTable(), self.Node()
+        self.feed(table, node, ("O1", 1, 1), ("O5", 2, 5))   # ainda no O1, época 1
+        table.handle_neighbor_up(node, "O9")
+        peer, msg = node.sent[-1]
+        self.assertEqual((peer, msg["data"]["epoch"], msg["data"]["metric"]), ("O9", 1, 2))
+
+    def test_unfeasible_update_from_upstream_repairs_via_feasible_alternative(self):
+        table, node = RoutingTable(), self.Node()
+        node.rtts = {"O1": 0.010, "O5": 0.012}
+        route = self.feed(table, node, ("O1", 1, 1, 0.0), ("O5", 1, 1, 0.0))
+        table.activate(node, "S1", "filme_a")
+        node.sent.clear()
+        self.assertEqual(route.upstream, "O1")
+        # O1 passa a anunciar, na mesma época, mais do que nós (5 ms, 2 saltos).
+        self.assertTrue(table.handle_announce(node, "O1", self.announce("O1", 1, 3, 0.020)))
+        self.assertEqual(route.upstream, "O5")
+        self.assertNotIn("O1", route.candidates)
+        self.assertEqual([(p, m["type"]) for p, m in node.sent],
+                         [("O1", "DEACTIVATE"), ("O5", "ACTIVATE")])
+
+    def test_unfeasible_update_from_upstream_without_alternative_withdraws(self):
+        table, node = RoutingTable(), self.Node()
+        node.rtts = {"O1": 0.010}
+        route = self.feed(table, node, ("O1", 1, 1, 0.0))
+        node.received_broadcasts.clear()
+        self.assertTrue(table.handle_announce(node, "O1", self.announce("O1", 1, 3, 0.020)))
+        self.assertIsNone(route.upstream)
+        self.assertIsNone(route.feasibility)
+        self.assertEqual([m["type"] for m, _ in node.received_broadcasts], ["WITHDRAW"])
+
+    def test_repair_prefers_lowest_delay_among_feasible(self):
+        table, node = RoutingTable(), self.Node()
+        node.rtts = {"O1": 0.002, "O5": 0.040, "O6": 0.004}
+        route = self.feed(table, node, ("O1", 1, 1, 0.0),       # nós: 1 ms, 2 saltos
+                          ("O5", 1, 1, 0.0), ("O6", 1, 1, 0.0005))
+        self.assertEqual(route.upstream, "O1")
+        table.handle_neighbor_down(node, "O1")
+        self.assertEqual(route.upstream, "O6")
+        self.assertAlmostEqual(route.delay, 0.0025)
+
+    def test_repair_rejects_fast_but_unfeasible_alternative(self):
+        table, node = RoutingTable(), self.Node()
+        node.rtts = {"O1": 0.002, "O5": 0.0002}
+        route = self.feed(table, node, ("O1", 1, 1, 0.0),       # nós: 1 ms, 2 saltos
+                          ("O5", 1, 2, 0.0012))                  # pode passar por nós
+        node.received_broadcasts.clear()
+        table.handle_neighbor_down(node, "O1")
+        self.assertIsNone(route.upstream)
+        self.assertEqual([m["type"] for m, _ in node.received_broadcasts], ["WITHDRAW"])
+
+    def test_withdrawn_route_relearns_any_newer_epoch(self):
+        table, node = RoutingTable(), self.Node()
+        node.rtts = {"O1": 0.002, "O5": 0.002}
+        route = self.feed(table, node, ("O1", 1, 1, 0.0))
+        table.handle_neighbor_down(node, "O1")
+        self.assertIsNone(route.feasibility)
+        self.feed(table, node, ("O5", 2, 6, 0.300))
+        self.assertEqual((route.upstream, route.metric), ("O5", 7))
+
+
+class LoopFreedomTest(unittest.TestCase):
+    """D30: rede simulada em memória, entregas por ordem aleatória, RTT a mudar,
+    ligações a cair e a voltar; o grafo de montantes nunca pode ter ciclos."""
+
+    LINKS = [("S1", "A"), ("S1", "B"), ("A", "B"), ("A", "C"), ("B", "D"),
+             ("C", "D"), ("C", "E"), ("D", "F"), ("E", "F"), ("B", "E")]
+
+    class Net:
+        def __init__(self, rng):
+            self.rng = rng
+            self.adj = {}
+            self.rtt = {}
+            self.queue = []
+            self.tables = {}
+            self.nodes = {}
+
+    class SimNode:
+        def __init__(self, nid, net):
+            self.id, self.net = nid, net
+
+        def rtt(self, neighbor):
+            return self.net.rtt.get(frozenset((self.id, neighbor)))
+
+        def send(self, neighbor, msg):
+            if neighbor not in self.net.adj[self.id]:
+                return False
+            self.net.queue.append((self.id, neighbor, msg))
+            return True
+
+        def broadcast(self, msg, exclude=()):
+            for neighbor in sorted(self.net.adj[self.id]):
+                if neighbor not in exclude:
+                    self.net.queue.append((self.id, neighbor, msg))
+
+    def build(self, seed):
+        import random
+        net = self.Net(random.Random(seed))
+        for a, b in self.LINKS:
+            for x in (a, b):
+                net.adj.setdefault(x, set())
+                if x not in net.nodes:
+                    net.nodes[x] = self.SimNode(x, net)
+                    net.tables[x] = RoutingTable()
+            net.adj[a].add(b)
+            net.adj[b].add(a)
+            if net.rng.random() < 0.7:          # algumas ligações sem RTT medido
+                net.rtt[frozenset((a, b))] = net.rng.uniform(0.001, 0.050)
+        return net
+
+    def deliver(self, net):
+        src, dst, msg = net.queue.pop(net.rng.randrange(len(net.queue)))
+        if src not in net.adj[dst]:
+            return                              # ligação caiu com a mensagem em trânsito
+        table, node = net.tables[dst], net.nodes[dst]
+        handler = {"ANNOUNCE": table.handle_announce, "WITHDRAW": table.handle_withdraw,
+                   "ACTIVATE": table.handle_activate,
+                   "DEACTIVATE": table.handle_deactivate}[msg["type"]]
+        handler(node, src, msg)
+
+    def publish(self, net, epoch):
+        net.tables["S1"].publish_local("S1", "filme_a", epoch)
+        net.nodes["S1"].broadcast(make_msg(MsgType.ANNOUNCE, "S1", server_id="S1",
+                                           flow="filme_a", epoch=epoch, metric=0,
+                                           delay=0.0))
+
+    def assert_acyclic(self, net, context):
+        upstream = {nid: table.upstream_of("S1", "filme_a")
+                    for nid, table in net.tables.items()}
+        for start in upstream:
+            seen, current = set(), start
+            while current is not None:
+                self.assertNotIn(current, seen, f"ciclo a partir de {start}: {context}")
+                seen.add(current)
+                current = upstream.get(current)
+
+    def test_upstream_graph_never_has_cycles(self):
+        for seed in range(40):
+            net = self.build(seed)
+            epoch = 1
+            self.publish(net, epoch)
+            down = []
+            for step in range(600):
+                r = net.rng.random()
+                if r < 0.04:
+                    epoch += 1
+                    self.publish(net, epoch)
+                elif r < 0.12:                  # RTT muda sem anúncio nenhum
+                    a, b = net.rng.choice(self.LINKS)
+                    net.rtt[frozenset((a, b))] = net.rng.uniform(0.0005, 0.080)
+                elif r < 0.14 and len(down) < 2:
+                    a, b = net.rng.choice([l for l in self.LINKS if l not in down])
+                    down.append((a, b))
+                    net.adj[a].discard(b)
+                    net.adj[b].discard(a)
+                    net.tables[a].handle_neighbor_down(net.nodes[a], b)
+                    net.tables[b].handle_neighbor_down(net.nodes[b], a)
+                elif r < 0.16 and down:
+                    a, b = down.pop(net.rng.randrange(len(down)))
+                    net.adj[a].add(b)
+                    net.adj[b].add(a)
+                    net.tables[a].handle_neighbor_up(net.nodes[a], b)
+                    net.tables[b].handle_neighbor_up(net.nodes[b], a)
+                elif r < 0.18:
+                    nid = net.rng.choice(["C", "D", "E", "F"])
+                    net.tables[nid].activate(net.nodes[nid], "S1", "filme_a")
+                elif net.queue:
+                    self.deliver(net)
+                self.assert_acyclic(net, f"semente {seed}, passo {step}")
 
 
 class WithdrawRepairTest(unittest.TestCase):

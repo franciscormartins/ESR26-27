@@ -195,31 +195,59 @@ receber e encaminhar os datagramas. `--stats S` mostra estatísticas de receçã
 
 ### 3.7 Escolha do caminho e reação a falhas (Etapa 2)
 
-**Candidatos.** Cada nó guarda, por rota, o último `ANNOUNCE` de cada vizinho (época,
-saltos e atraso anunciados). O custo via um vizinho é `(metric + 1, delay + RTT/2)`, em que
-o RTT é a média móvel medida pelo PING/PONG; sem RTT medido, o atraso é infinito. São
-candidatos válidos os vizinhos com a época atual e, para o montante atual, também a época
-anterior: numa ronda nova, a primeira cópia a chegar não derruba o montante antes de este
-enviar a sua. Um vizinho que está nos destinos a jusante nunca é candidato.
+**Métrica (D30).** A rota escolhe-se pela **menor latência acumulada** até ao servidor; o
+número de saltos só desempata. Cada nó guarda, por rota, o último `ANNOUNCE` de cada vizinho
+(época, saltos e atraso anunciados). O custo via um vizinho é
+`(delay + custo da ligação, metric + 1)`. O custo da ligação é metade do RTT medido pelo
+PING/PONG (média móvel), nunca abaixo de 0,1 ms (`min_link_delay`); numa ligação ainda sem
+RTT medido vale 1 s (`unknown_link_delay`), um valor alto mas finito: no arranque, com todas
+as ligações por medir, a escolha comporta-se como a contagem de saltos. Um anúncio sem
+`delay` (vizinho que não o conhece) dá atraso infinito, que perde para qualquer atraso
+conhecido. O custo da ligação está numa só função (`RoutingTable._link_delay`), para poder
+juntar outras medições (por exemplo, perdas) sem mexer na seleção.
 
-**Seleção** (sempre que chega um anúncio):
+São candidatos válidos os vizinhos com a época atual e, para o montante atual, também a
+época anterior: numa ronda nova, a primeira cópia a chegar não derruba o montante antes de
+este enviar a sua. Um vizinho que está nos destinos a jusante nunca é candidato.
 
-1. menos saltos ganha sempre;
-2. com os mesmos saltos, troca-se de montante só se o atraso melhorar mais de 20 % e mais de
-   1 ms (histerese, parâmetros de `RoutingTable`);
-3. se ambos os atrasos forem desconhecidos, ganha o vizinho de menor ID (desempate
-   determinista, independente da ordem de chegada).
+**Condição de viabilidade (D30, contra ciclos).** Cada nó guarda o melhor
+`(atraso, saltos)` que anunciou na época mais recente que anunciou. Só servem candidatos
+de uma época mais recente, ou da mesma época com `(atraso, saltos)` anunciados
+**estritamente menores**. Ao longo de um caminho `(atraso, saltos)` cresce sempre (cada
+ligação soma atraso e um salto), por isso um vizinho cujo caminho passe por este nó nunca é
+viável, mesmo que o RTT mude sem chegar nenhum anúncio. É a condição do Babel (RFC 8966).
+Sem ela, trocar só a ordem da seleção formava ciclos: o RTT para o montante sobe e um vizinho
+que nos usa parece de repente mais rápido. Se o próprio montante passar a anunciar, na mesma
+época, um caminho não viável, trata-se como perda do montante (ver abaixo).
 
-O nó propaga o anúncio (a todos menos o emissor e o seu montante) quando a época avança,
-quando o montante muda ou quando muda o número de saltos; ou seja, normalmente uma vez por
-ronda. O campo `delay` só é incluído quando é conhecido.
+**Seleção** (sempre que chega um anúncio), entre os candidatos válidos e viáveis:
 
-**Perda do montante** (queda da ligação ou `WITHDRAW` vindo do montante):
+1. seja `D*` o menor atraso; contam como **empatados** os candidatos a menos de metade da
+   histerese de `D*` (metade de `max(1 ms, 20 % de D*)`); com `D*` desconhecido, todos;
+2. entre os empatados, o preferido é o de menos saltos, depois menor atraso, depois menor ID;
+3. sem montante atual, fica o preferido; com montante atual, troca-se para o preferido só se
+   `D*` melhorar o atraso atual mais de 20 % e mais de 1 ms (histerese), se o preferido tiver
+   menos saltos (latência praticamente igual), ou em empate total (mesmos saltos e o mesmo
+   atraso, por exemplo ambos desconhecidos) se tiver menor ID. Caso contrário, mantém-se.
 
-1. *Reparação rápida.* Procura-se um candidato válido que tenha anunciado **menos saltos do
-   que a rota perdida** (condição de viabilidade). Um vizinho cujo caminho passe por este nó
-   anunciaria pelo menos os nossos saltos + 1, por isso nunca é escolhido. Se houver, o ramo
-   passa para ele (`ACTIVATE`) e o novo anúncio é propagado, sem `WITHDRAW`.
+Entre metade da histerese e a histerese completa nenhum dos lados troca: um RTT a oscilar à
+volta de um limiar não faz o montante alternar. Em redes com RTT abaixo de 1 ms (CORE sem
+`netem`) os caminhos ficam empatados e decidem os saltos.
+
+O nó propaga o anúncio (a todos menos o emissor e o seu montante) quando o montante escolhido
+traz uma época que o nó ainda não anunciou, quando o montante muda ou quando muda o número de
+saltos; ou seja, normalmente uma vez por ronda. **O nó anuncia a época do anúncio do montante
+que usa:** se uma época nova chega primeiro por outro vizinho e o montante atual se mantém, a
+época nova só é propagada quando chegar a cópia do montante. Anunciá-la com o caminho antigo
+tornaria esse montante inviável e obrigaria a trocar para a primeira cópia. O campo `delay`
+só é incluído quando é conhecido (finito).
+
+**Perda do montante** (queda da ligação, `WITHDRAW` vindo do montante ou anúncio do montante
+que deixou de ser viável):
+
+1. *Reparação rápida.* Escolhe-se, como na seleção, entre os candidatos válidos e **viáveis**
+   (condição acima): o de menor latência. Se houver, o ramo passa para ele (`ACTIVATE`) e o
+   novo anúncio é propagado, sem `WITHDRAW`.
 2. *Retirada.* Sem alternativa viável, a rota fica sem caminho: os candidatos e os destinos a
    jusante são apagados (os subscritores locais ficam pendentes) e o nó envia `WITHDRAW` a
    todos os vizinhos. Quem o recebe retira esse vizinho dos candidatos; só se o emissor for o
@@ -279,7 +307,9 @@ clientes ──ACTIVATE──> ... ──> S1                                   
 | `DUPLICATE_GRACE` | 3 s | tempo para a ligação vencedora chegar depois de o vizinho fechar uma duplicada |
 | `--announce-interval` | 5 s | intervalo entre rondas de `ANNOUNCE`; igual em todos os nós |
 | `--route-ttl` (`route_ttl`) | 6 × intervalo (30 s) | tempo sem anúncios ao fim do qual um candidato é esquecido; tem de ser maior que o intervalo |
-| `delay_hysteresis` / `delay_min_gain` | 20 % / 1 ms | melhoria mínima de atraso para trocar de montante com os mesmos saltos |
+| `delay_hysteresis` / `delay_min_gain` | 20 % / 1 ms | melhoria mínima de latência para trocar de montante; metade disto conta como empate (decidem os saltos) |
+| `min_link_delay` | 0,1 ms | custo mínimo de uma ligação (RTT/2 abaixo disto conta como 0,1 ms) |
+| `unknown_link_delay` | 1 s | custo de uma ligação ainda sem RTT medido |
 
 ## 6. Limitações conhecidas
 
@@ -288,8 +318,10 @@ clientes ──ACTIVATE──> ... ──> S1                                   
 - O bootstrapper só sabe que um nó está vivo porque se registou ou pediu substitutos; não o expira.
 - O ficheiro de topologia é estático: um nó novo tem de existir no ficheiro.
 - Não há autenticação nem cifra no controlo.
-- Rotas (Etapa 2): o RTT só desempata caminhos com o mesmo número de saltos; uma troca de
-  montante provoca uma falha curta no vídeo (RPF estrito); depois de um `WITHDRAW` sem
+- Rotas (Etapa 2): a métrica é só a latência (RTT/2 por ligação, medida por TCP): perdas,
+  jitter e largura de banda não contam; depois de anunciar uma época, um caminho mais rápido
+  mas que anunciou mais do que este nó nessa época só é adotado na época seguinte (condição de
+  viabilidade, D30); uma troca de montante provoca uma falha curta no vídeo (RPF estrito); depois de um `WITHDRAW` sem
   alternativa, os ramos só reabrem quando o caminho é reaprendido (até um intervalo de
   anúncio); todos os nós têm de usar o mesmo `--announce-interval`; `ACTIVATE`/`DEACTIVATE`
   não têm confirmação; o servidor não conhece os clientes individuais (subscrições agregadas).
@@ -308,8 +340,9 @@ Cada entrada é identificada por `(servidor, fluxo)` e contém:
 |---|---|
 | `origin` | identificador do servidor que origina o fluxo |
 | `flow` | identificador do conteúdo/stream multimédia transmitido (por exemplo, `filme_a` ou `camera_sala`) |
-| `metric` | número de saltos até ao servidor; `inf` quando a rota está sem caminho |
-| `delay` | atraso acumulado estimado (s), soma de RTT/2 por ligação; `inf` se desconhecido |
+| `metric` | número de saltos até ao servidor (desempate); `inf` quando a rota está sem caminho |
+| `delay` | latência acumulada estimada (s), soma do custo de cada ligação (RTT/2); métrica principal; `inf` se desconhecida |
+| `feasibility` | melhor `(época, atraso, saltos)` anunciado por este nó na última época que anunciou; referência da condição de viabilidade (D30) |
 | `upstream` | vizinho escolhido em direção ao servidor; `None` no servidor ou sem caminho |
 | `epoch` | ronda de anúncio mais recente conhecida para esta rota |
 | `candidates` | último anúncio (época, saltos, atraso) de cada vizinho; o montante é escolhido entre eles |
@@ -342,7 +375,8 @@ campos de `data`.
 |  | `flow` | identificador estável do conteúdo/stream anunciado |
 |  | `epoch` | inteiro positivo, crescente por servidor e fluxo a cada ronda de anúncio |
 |  | `metric` | número finito ≥ 0; o servidor anuncia 0 e cada salto acrescenta 1 |
-|  | `delay` (opcional) | número finito ≥ 0, em segundos; o servidor anuncia 0 e cada nó soma RTT/2 da ligação por onde recebeu; ausente = desconhecido |
+|  | `delay` (opcional) | número finito ≥ 0, em segundos; o servidor anuncia 0 e cada nó soma o custo da ligação por onde recebeu (RTT/2, mínimo 0,1 ms, 1 s sem RTT medido); ausente = desconhecido. É a métrica principal (D30) |
+|  | `epoch` (no reencaminhamento) | a época do anúncio do montante usado, que pode ser anterior à mais recente que o nó já viu (D30) |
 | `WITHDRAW` | `server_id`, `flow` | identificam a rota que o emissor deixou de conseguir alcançar |
 |  | `epoch` | inteiro positivo; última época conhecida pelo emissor (informativo) |
 | `ACTIVATE` | `server_id`, `flow` | identificam a rota pedida; o ramo é o do vizinho emissor |

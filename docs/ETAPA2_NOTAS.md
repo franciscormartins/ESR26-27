@@ -43,8 +43,9 @@ Cada nó mantém a sua própria entrada; as entradas não são partilhadas entre
 
 - `flow`: nome estável do conteúdo ou stream, por exemplo `"filme_a"`.
 - `origin`: ID overlay do servidor que origina o fluxo, por exemplo `"S1"`.
-- `metric`: custo conhecido desde o servidor, inicialmente contado em saltos.
-  `math.inf` indica que o nó perdeu o caminho e ainda não aprendeu uma alternativa.
+- `metric`: número de saltos até ao servidor (desempate e condição de
+  viabilidade; a métrica principal é `delay`, D30). `math.inf` indica que o nó
+  perdeu o caminho e ainda não aprendeu uma alternativa.
 - `upstream`: vizinho que leva na direção do servidor. É `None` no servidor ou
   enquanto a rota estiver invalidada.
 - `destinations`: vizinhos a jusante que pediram o fluxo (cada um conta uma vez).
@@ -52,11 +53,15 @@ Cada nó mantém a sua própria entrada; as entradas não são partilhadas entre
 - `state`: fica `"ativa"` quando há procura (subscritores locais ou destinos) e
   um caminho válido até ao servidor; caso contrário, fica `"inativa"`.
 - `epoch`: época mais recente conhecida para a rota.
-- `delay`: atraso acumulado estimado até ao servidor, em segundos (soma de
-  metade do RTT de cada ligação); `math.inf` se desconhecido.
+- `delay`: latência acumulada estimada até ao servidor, em segundos (soma do
+  custo de cada ligação, metade do RTT); é a métrica principal (D30).
+  `math.inf` se desconhecida (anúncio sem `delay`).
 - `candidates`: mapa `vizinho -> Candidate(epoch, metric, delay)` com o último
   anúncio de cada vizinho. `metric` e `delay` são os valores anunciados, antes
   de somar o salto e a ligação até ao vizinho. O montante é escolhido entre eles.
+- `feasibility`: melhor `(época, atraso, saltos)` que este nó anunciou na última
+  época que anunciou, ou `None` (ainda não anunciou, ou retirou a rota). É a
+  referência da condição de viabilidade (D30).
 
 ### `RouteEntry.key`
 
@@ -232,29 +237,42 @@ Regista o anúncio como candidato do vizinho emissor e reavalia o montante.
    recebida desse vizinho.
 4. Guarda `candidates[vizinho]`. Se a época avançou, atualiza `epoch` e apaga
    candidatos com mais de uma ronda de atraso.
-5. Chama `_select` e aplica o resultado (`upstream`, `metric`, `delay`).
-6. Se o montante mudou e há procura, envia um só `DEACTIVATE` ao antigo e um só
+5. Se o anúncio é do montante atual e deixou de ser viável (`_feasible`), trata-o
+   como perda do montante (`_lose_upstream`, reparação ou retirada) e termina.
+6. Chama `_select` e aplica o resultado (`upstream`, `metric`, `delay`).
+7. Se o montante mudou e há procura, envia um só `DEACTIVATE` ao antigo e um só
    `ACTIVATE` ao novo.
-7. Propaga o anúncio (a todos menos o emissor e o montante) se a época avançou,
-   o montante mudou ou o número de saltos mudou. Devolve `True` se propagou.
+8. Propaga o anúncio (a todos menos o emissor e o montante) se o montante
+   escolhido traz uma época que o nó ainda não anunciou, se o montante mudou ou
+   se o número de saltos mudou. Devolve `True` se enviou alguma coisa.
 
-Exemplo: `O4` usa `O3` com 3 saltos. Na ronda 8 chega primeiro a cópia de `O5`
-com 4 saltos: `O3` continua válido (época 7, é o montante atual) e mantém-se;
-`O4` propaga a época 8 com 3 saltos. Quando chegar a cópia de `O3` da época 8,
-nada muda e nada é propagado.
+Exemplo: `O4` usa `O3`. Na ronda 8 chega primeiro a cópia de `O5`, mais lenta:
+`O3` continua válido (época 7, é o montante atual) e mantém-se; `O4` **não**
+propaga ainda a época 8 (continuaria a anunciar a 7). Quando chegar a cópia de
+`O3` da época 8, `O4` propaga a época 8 com os valores do `O3` (D30).
 
-### `_select(node, route, feasible_below=None)` e auxiliares
+### `_select(node, route)` e auxiliares (D30)
 
-- `_link_delay(node, vizinho)`: metade de `node.rtt(vizinho)`, ou infinito.
-- `_cost(...)`: custo via um vizinho, `(metric + 1, delay + ligação)`.
+- `_link_delay(node, vizinho)`: custo da ligação, metade de `node.rtt(vizinho)`
+  com o mínimo `min_link_delay` (0,1 ms); sem RTT, `unknown_link_delay` (1 s).
+  É o único sítio que traduz medições da ligação em custo.
+- `_cost(...)`: `Cost(hops=metric + 1, delay=delay anunciado + ligação)`.
 - `_valid_candidate(...)`: candidato da época atual; o montante atual vale
   também com a época anterior. Destinos a jusante nunca são válidos.
-- `_delay_better(novo, atual)`: melhoria de atraso acima da histerese
+- `_feasible(route, candidato)`: condição de viabilidade (como no Babel). Serve
+  se a época do candidato for maior do que `feasibility[0]`, ou igual com
+  `(delay, metric)` anunciados menores do que `feasibility[1:]`.
+- `_delay_better(novo, atual)`: melhoria de latência acima da histerese
   (`delay_hysteresis`, 20 %, e `delay_min_gain`, 1 ms).
-- `_select`: entre os candidatos válidos, menos saltos ganha sempre; com os
-  mesmos saltos, só troca de montante se `_delay_better`; com ambos os atrasos
-  desconhecidos, ganha o menor ID. Com `feasible_below`, só servem candidatos
-  que anunciaram menos saltos do que esse valor (condição de viabilidade).
+- `_tie_band(d)`: metade da histerese; diferenças menores são empate.
+- `_select`: entre os candidatos válidos e viáveis, `D*` é a menor latência;
+  os empatados com ela (dentro de `_tie_band(D*)`) ordenam-se por saltos,
+  latência e ID. Troca-se para o primeiro se `D*` for melhor do que a latência
+  atual acima da histerese, se tiver menos saltos, ou em empate total se tiver
+  menor ID; caso contrário mantém-se o montante.
+- `_advertised_epoch(route)`: época do anúncio do montante usado (a anunciada).
+- `_announce_msg(node, route)`: constrói o `ANNOUNCE` com essa época e atualiza
+  `feasibility`. Usado na propagação, na reparação e no vizinho novo.
 
 ### `handle_withdraw(node, neighbor, msg)`
 
@@ -280,12 +298,12 @@ Chamada sob o bloqueio quando o montante cai ou envia `WITHDRAW`.
 
 1. Remove o candidato perdido e, se o antigo montante ainda está ligado e havia
    procura, envia-lhe `DEACTIVATE`.
-2. Tenta a reparação rápida: `_select` com `feasible_below` igual aos saltos da
-   rota perdida. Se houver alternativa, abre o ramo nela (`ACTIVATE`) e propaga
-   o anúncio.
+2. Tenta a reparação rápida: `_select` entre os candidatos viáveis (a mesma
+   condição de viabilidade de sempre, D30). Se houver alternativa, abre o ramo
+   nela (`ACTIVATE`) e propaga o anúncio.
 3. Sem alternativa: rota sem caminho (`metric` e `delay` infinitos), apaga
-   candidatos e destinos (os subscritores locais ficam pendentes) e envia
-   `WITHDRAW` a todos os vizinhos.
+   candidatos, destinos e `feasibility` (a retenção da D27 garante que só se
+   aceitam épocas mais recentes) e envia `WITHDRAW` a todos os vizinhos.
 
 Devolve a lista de envios; a transação de quem a chamou mete-os na fila e
 envia-os por ordem fora do bloqueio (D28).
@@ -356,11 +374,14 @@ o encerramento do servidor.
 - As quedas e recuperações de vizinhos têm testes unitários e de integração em
   localhost (`tests/test_integration.py`), mas ainda precisam de ensaios no CORE,
   incluindo continuidade do tráfego após falhas.
-- A rota usa o menor número de saltos; o RTT só desempata caminhos com os mesmos
-  saltos. Não se escolhe intencionalmente um percurso mais longo apenas por já
-  estar ativo.
-- Sem RTT medido (primeiros segundos de uma ligação), o desempate é pelo ID; quando
-  o RTT aparece pode haver uma troca única de montante.
+- A rota usa a menor latência acumulada (D30); os saltos só desempatam latências
+  praticamente iguais. Não se escolhe intencionalmente um percurso mais lento
+  apenas por já estar ativo.
+- Depois de anunciar uma época, um caminho mais rápido que anunciou mais do que
+  este nó nessa época só é adotado na época seguinte (condição de viabilidade).
+- Sem RTT medido (primeiros segundos de uma ligação), a ligação custa 1 s e a
+  escolha comporta-se como a contagem de saltos; quando o RTT aparece pode haver
+  uma troca única de montante.
 - As mensagens de subscrição não têm confirmação de entrega.
 - As épocas do publicador começam na hora do arranque em milissegundos (D27): um
   servidor reiniciado anuncia épocas maiores do que as retiradas. Se o relógio do

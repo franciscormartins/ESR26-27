@@ -2,7 +2,7 @@
 
 > Ficheiro vivo: é atualizado sempre que algo é feito. Serve para saber o ponto da situação,
 > relembrar as decisões e preparar as conversas com os docentes.
-> **Última atualização: 2026-11-09.**
+> **Última atualização: 2026-11-10.**
 
 ## 1. Resumo em 30 segundos
 
@@ -11,8 +11,9 @@
   opcionalmente, pede vizinhos substitutos ao bootstrapper.
 - O overlay constrói-se de duas formas: **estratégia 2** (`ott -b <bootstrapper>`: o servidor lê um
   ficheiro de topologia e devolve os vizinhos) e **estratégia 1** (`ott viz1 viz2`: vizinhos à mão).
-- **Etapa 2 (estado em 2026-11-09):** anúncios periódicos por fluxo; montante escolhido por
-  saltos com desempate pelo RTT (com histerese); subscrições agregadas por ramo; dados RTP/JPEG
+- **Etapa 2 (estado em 2026-11-09):** anúncios periódicos por fluxo; montante escolhido pela
+  menor latência acumulada (RTT/2 por ligação, com histerese e condição de viabilidade contra
+  ciclos; saltos só desempatam, D30, 2026-11-10); subscrições agregadas por ramo; dados RTP/JPEG
   por UDP pelos ramos ativos com RPF estrito; reparação rápida, `WITHDRAW` e tempo de vida das
   rotas para falhas e reinício do servidor. Tudo coberto por 118 testes automáticos, incluindo
   nós reais em localhost. Até 2026-11-09 a Etapa 2 só funcionava com nós falsos (handlers
@@ -68,7 +69,7 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 | D18 | `TCP_NODELAY` em todas as ligações entre vizinhos | O algoritmo de Nagle retinha as mensagens pequenas (PING/PONG cruzados) à espera do ACK: RTT de 37 ms inicial nos clientes e 60–80 ms com atraso de 20 ms/lado (esperado 41 ms). Com NODELAY: 41,1–41,6 ms. O RTT é a métrica do E2, por isso tem de ser fiável. |
 | D19 | Ligar a um substituto logo que é proposto, e repor o contador de défice ao atingir X vizinhos | Poupava-se o ciclo de 2 s; e o contador antigo podia contar défice já resolvido (artefacto visto nas medições). |
 | D20 | Os handlers registados com `register_handler` recebem o **ID** do vizinho (`fn(node, neighbor_id, msg)`) | Era o contrato documentado e o que `routing.py` usa; o `_dispatch` passava o objeto `Neighbor` e partia a Etapa 2 com nós reais. |
-| D21 | Métrica: saltos; em empate, RTT acumulado com histerese (> 20 % e > 1 ms), depois o ID do vizinho. Escolha a partir de uma tabela de candidatos por vizinho; o montante atual vale também com a época anterior (**implementado** em 2026-11-09) | Cumpre "métricas da rede" sem oscilações; a regra antiga "primeira cópia da época ganha" alternava entre caminhos de custo igual. |
+| D21 | **Substituída pela D30 em 2026-11-10.** Métrica: saltos; em empate, RTT acumulado com histerese (> 20 % e > 1 ms), depois o ID do vizinho. Escolha a partir de uma tabela de candidatos por vizinho; o montante atual vale também com a época anterior (**implementado** em 2026-11-09) | Cumpre "métricas da rede" sem oscilações; a regra antiga "primeira cópia da época ganha" alternava entre caminhos de custo igual. |
 | D22 | Falhas: `WITHDRAW` explícito com reparação rápida (condição de viabilidade), rota sem caminho aceita qualquer época (**implementado** em 2026-11-09; **a aceitação de qualquer época foi substituída pela D27 em 2026-11-10**); tempo de vida de 6 × o intervalo como rede de segurança (`--route-ttl`, **implementado** em 2026-11-09) | Um servidor reiniciado (época 1) deixa de ficar bloqueado; um servidor morto deixa de manter rotas ativas para sempre. |
 | D23 | Plano de dados com RPF estrito: só se aceitam datagramas do montante (**implementado** em 2026-11-09) | Elimina duplicados e ciclos de dados; aceita-se uma falha curta ao trocar de montante. |
 | D24 | Subscrições agregadas por ramo: `ACTIVATE` na transição 0→1, `DEACTIVATE` na 1→0; `subscriber_id` opcional e informativo (**implementado** em 2026-11-09) | Fiel à tabela do enunciado ("Destinos: O7, O3") e escala com o número de clientes; o servidor deixa de conhecer cada cliente. |
@@ -77,6 +78,7 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 | D27 | Épocas e retirada: o servidor começa as épocas na hora do arranque em ms (+1 por ronda); uma rota retirada por este nó só aceita épocas maiores do que a retirada durante `route_ttl` (retenção), e depois qualquer época (**implementado** em 2026-11-10) | Substitui a regra da D22 "rota sem caminho aceita qualquer época", que no CORE (ensaio 9) deixou anúncios antigos em trânsito formar um ciclo fantasma O6 ↔ O7 que só o tempo de vida desfez (L9). Épocas a partir do relógio mantêm o reinício do servidor imediato sem essa regra. Impacto: formato das mensagens inalterado (só o valor de `epoch` muda), por isso não há problema de compatibilidade; uma retirada só é reaprendida na ronda seguinte; um servidor com o relógio atrasado só é aceite ao fim de `--route-ttl`. |
 | D28 | Envios da tabela de rotas por ordem: as mensagens decididas sob o bloqueio entram nessa altura numa fila única e são enviadas fora do bloqueio, por ordem, uma thread de cada vez (**implementado** em 2026-11-10) | Antes, cada handler enviava depois de libertar o bloqueio, e duas threads podiam trocar a ordem: no CORE (ensaio 9 repetido), um `ACTIVATE` saiu depois do `DEACTIVATE` da troca de montante seguinte e deixou um ramo órfão (L10). Formato das mensagens inalterado. Custo: um envio lento a um vizinho atrasa os envios seguintes de outras threads (já atrasava os da própria thread). |
 | D29 | Uma exceção num handler (rotas, streaming) é registada no log e **não fecha a ligação** ao vizinho; um nó que não é bootstrapper responde `ERROR "este nó não é bootstrapper"` | Um erro de outro módulo não pode derrubar a ligação nem fazer o vizinho dar-nos como caídos; o texto antigo (`nó desconhecido`) enganava quem apontava `-b` a um nó errado. Cobertos por `RobustnessTest`. |
+| D30 | **Métrica: latência acumulada** (substitui a D21). O custo de uma ligação é RTT/2 (média móvel do PING/PONG), no mínimo 0,1 ms, e 1 s sem RTT medido (`RoutingTable._link_delay`, o único sítio a mudar para juntar perdas ou jitter); o montante é o de menor latência, com histerese (> 20 % e > 1 ms); diferenças abaixo de metade disso são empate, decidido por menos saltos e depois pelo ID. **Condição de viabilidade** como no Babel: só servem candidatos de uma época mais recente do que a última anunciada, ou da mesma época com `(atraso, saltos)` anunciados menores do que o melhor anunciado nela (`RouteEntry.feasibility`); um anúncio não viável do montante conta como perda do montante. O nó anuncia a época do montante que usa (só propaga uma época nova quando o montante a traz) (**implementado** em 2026-11-10) | Os saltos não são uma métrica da rede; os docentes sugeriram-nos só para começar. Trocar apenas a ordem da seleção formava ciclos (o RTT para o montante sobe sem chegar anúncio e um vizinho que nos usa parece mais rápido); o teste de rede simulada encontra um ciclo sem a condição de viabilidade. Alternativa rejeitada para a viabilidade: só saltos (impedia adotar a meio da época um caminho mais longo e mais rápido). Impacto: formato das mensagens inalterado (`delay` já era opcional; passa a ir sempre que é finito e o `epoch` reencaminhado pode ser o da ronda anterior); todos os nós devem ser atualizados juntos (um nó antigo escolhe por saltos e anuncia épocas novas com o caminho antigo). Custo: mais trocas de montante possíveis, cada uma com uma falha curta no vídeo (RPF); um caminho mais rápido mas não viável só é adotado na época seguinte. Ensaios 4, 6 e 8 no CORE foram feitos com a D21 e têm de ser repetidos. |
 
 ## 4. Arquitetura (resumo)
 
@@ -151,7 +153,8 @@ PYTHONPATH=src python3 -m unittest tests.test_forwarding -v
 
 Cobrem: validação do protocolo, overlay por bootstrapper e recuperação, eventos up/down, RTT, ligação
 duplicada, vizinho calado (timeout), mensagem inválida, substituto, alvos expirados e tentativas em paralelo.
-`tests/test_routing.py` cobre o modelo, publicação, aprendizagem por saltos, supressão de
+`tests/test_routing.py` cobre o modelo, publicação, aprendizagem e escolha pela latência (com
+a condição de viabilidade e uma rede simulada sem ciclos), supressão de
 duplicados/anúncios antigos, melhoria de caminho, subscrições partilhadas e reação local a
 falhas e vizinhos novos, mas com nós falsos. `tests/test_integration.py` usa `OverlayNode`
 reais: anúncios, ativação/desativação, quedas do cliente e do montante (S1–A–C) e o plano de
@@ -243,7 +246,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - Sem autenticação nem cifra no controlo.
 - O cenário 2 desenhado tem 2 nós intermédios; o enunciado mostra 3 (S1 liga a um só, que se liga aos outros dois).
 - Etapa 2: uma retirada pode perder-se se a ligação cair a meio; o tempo de vida (`--route-ttl`, 30 s por omissão) cobre esse caso, mas só ao fim desse tempo. Todos os nós têm de usar o mesmo `--announce-interval`, senão o tempo de vida pode esquecer caminhos válidos.
-- O RTT só desempata caminhos com o mesmo número de saltos. Nos primeiros segundos de uma ligação ainda não há RTT: o desempate é pelo ID e, quando o RTT aparece, pode haver uma troca única de montante.
+- A métrica é só a latência (RTT/2 medido sobre TCP): perdas, jitter e largura de banda não contam; a perda no UDP exigiria sondas UDP próprias (o TCP retransmite e a perda só aparece como RTT maior). Nos primeiros segundos de uma ligação ainda não há RTT: a ligação custa 1 s (comporta-se como saltos) e, quando o RTT aparece, pode haver uma troca única de montante. Depois de anunciar uma época, um caminho mais rápido mas não viável só é adotado na época seguinte (D30).
 - Depois de um `WITHDRAW`, os ramos a jusante são desfeitos e só voltam a abrir quando o caminho é reaprendido (até um intervalo de anúncio, 5 s por omissão); a reparação rápida evita isto quando há alternativa viável.
 - Com RPF estrito, uma troca de montante provoca uma falha curta no vídeo (até o novo montante começar a enviar); por medir no CORE.
 - Com subscrições agregadas, o servidor não sabe quantos clientes tem: só vê os ramos que lhe pedem o fluxo.
@@ -281,6 +284,8 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] E2: correção do L10 (D28) confirmada no CORE: três reinícios do servidor, clientes de volta em ≈ 1–2 s, `RPF=0` e sem cópias a mais no O5 (2026-11-10).
 - [x] E2: ensaios 3 (cenário 1, desativação dos clientes) e 5 (cenário 2, queda do link O2–S1: C1 sem vídeo ≈ 6,9 s, regresso ao caminho direto sem perdas) no CORE, 2026-11-10.
 - [ ] E2: ensaio 7 no CORE (dois servidores; depende do `S2` nas topologias).
+- [ ] E2: repetir no CORE os ensaios 4, 6 e 8 com a D30 (latência como métrica) e acrescentar um ensaio em que o `netem` torne mais rápido um caminho com mais saltos (o nó deve passar para ele uma só vez, sem ciclos).
+- [ ] E2: perdas na métrica (sondas UDP por vizinho, custo estilo ETX em `_link_delay`); opcional.
 - [ ] E3: interface de apresentação do vídeo, cenários e medições de streaming.
 
 ## 10. Perguntas para os docentes
@@ -297,6 +302,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-10 | **Latência acumulada como métrica principal (D30, substitui a D21).** `routing.py`: custo da ligação isolado em `_link_delay` (RTT/2, mínimo 0,1 ms, 1 s sem RTT; parâmetros `min_link_delay` e `unknown_link_delay`, validados); `_select` escolhe a menor latência com histerese e banda de empate (saltos e ID só desempatam); condição de viabilidade `(época, atraso, saltos)` em todas as seleções e na reparação (`RouteEntry.feasibility`, substitui `feasible_below`); anúncio não viável do montante conta como perda; o nó anuncia a época do montante usado. Testes: 4 testes do contrato antigo atualizados ("menos saltos ganha" passa a "menor latência ganha"; a época nova só é propagada com a cópia do montante) e 20 novos, incluindo uma rede simulada de 7 nós (40 sementes × 600 passos) sem ciclos, que encontra um ciclo se a condição de viabilidade for desligada. Suite: 138 testes, todos passam. Atualizados `protocolo.md` §3.7, §5, §6 e §7, `ETAPA2.md`, `ETAPA2_NOTAS.md`, README. Validado só em localhost; ensaios no CORE por repetir. |
 | 2026-11-10 | **Verificação do E1 depois das alterações do E2.** 118 testes OK; `ott` ensaiado de ponta a ponta com o CLI novo (registo no bootstrapper, `--stats`, `Ctrl+C` em 0,3 s com código 0 e `desligado` imediato no vizinho); `cenario3.json` validado contra o XML (todos os IPs pertencem ao nó do CORE indicado, 12 arestas = Figura 1). Reposta a proteção contra exceções em handlers e o `ERROR` próprio de nós que não são bootstrapper, com 7 testes de robustez (D29), que tinham ficado só num `git stash`. Novo `docs/REVISAO_E2.md` com a revisão cruzada fechada. |
 | 2026-11-10 | **Ensaios 3 e 5 da Etapa 2 no CORE.** Ensaio 3 (cenário 1): sair o C1 deixa o C2 a 20/s sem perdas e o O2 a enviar uma só cópia; sair o C2 faz o S1 deixar de emitir. Ensaio 5 (cenário 2): com o link O2–S1 em baixo, o O2 deteta por timeout em ≈ 5,5 s, retira e reaprende pelo O1; o C1 fica ≈ 6,9 s sem vídeo (138 imagens); ao repor o link, o O2 volta ao caminho direto sem nenhuma imagem perdida. `RPF=0` em todos os nós. Falta só o ensaio 7. Logs em `~/uni/esr/ott-logs/2026-11-10-7` e `-8`. |
 | 2026-11-10 | **Ensaio 9 no CORE repetido com a topologia completa (D26–D28).** Os 11 nós com os vizinhos certos; três reinícios do servidor, com os 5 clientes de volta em 1,2–2,9 s e uma cópia por ligação depois de cada um. `descartados=0` e `RPF=0` em todos os nós e `perdidos=0` em todos os clientes. Substitui, para o ramo O6/O8/O9, a sessão anterior em que o C2 arrancou como O9. Logs em `~/uni/esr/ott-logs/2026-11-10-6`. |
