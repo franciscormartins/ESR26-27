@@ -15,10 +15,12 @@ Esta escolha é compatível com as primitivas de overlay existentes (`send` e `b
 
 **Ponto da situação (2026-11-09).** Os passos 0 a 9 do plano (ver "Revisão de 2026-11-09")
 estão feitos e cobertos por testes automáticos, incluindo ensaios com nós reais em localhost
-(105 testes na suite). Falta o segundo servidor nas topologias (passo 10) e a maior parte dos
+(111 testes na suite). Falta o segundo servidor nas topologias (passo 10) e a maior parte dos
 ensaios no CORE (passo 11): em 2026-11-09 passaram os ensaios 1 e 2 (cenário 1) e 4 (cenário 2);
-em 2026-11-10 passou o ensaio 6 (cenário 3, reparação rápida, depois da correção D26); os
-ensaios 3, 5 e 7 a 9 continuam por fazer.
+em 2026-11-10 passaram os ensaios 6, 8 e 9 (cenário 3; o 9 depois da correção D27 do L9). O
+ensaio 9 repetido mostrou um defeito novo (L10, ramo órfão por reordenação de
+`ACTIVATE`/`DEACTIVATE`), corrigido pela D28 e confirmado com três reinícios do servidor;
+os ensaios 3, 5 e 7 continuam por fazer.
 
 ## Estado e tarefas
 
@@ -57,8 +59,10 @@ Implementação: `src/ott/routing.py`. Testes: `tests/test_routing.py`.
   com histerese; sem RTT, menor ID (D21, 2026-11-09).
 - [x] Tabela de candidatos por vizinho: a primeira cópia de uma época nova já não derruba o
   montante atual (resolve L4).
-- [x] Evitar que um anúncio mais antigo substitua uma rota com caminho; uma rota sem caminho
-  aceita qualquer época (servidor reiniciado, resolve L2).
+- [x] Evitar que um anúncio mais antigo substitua uma rota com caminho. Desde 2026-11-10
+  (D27): uma rota retirada só aceita épocas maiores durante a retenção (`route_ttl`), e o
+  servidor começa as épocas na hora do arranque, por isso um servidor reiniciado é aceite
+  logo (resolve L2 e L9).
 
 A publicação está implementada em `AnnouncementPublisher` (`src/ott/routing.py`) e ligada à
 CLI. `--publish-flow ID` pode repetir-se para vários fluxos; `--announce-interval S` define
@@ -133,7 +137,7 @@ use este nó como caminho nunca a cumpre). Se existir, o ramo passa para ele sem
 ronda seguinte. Se não existir, a rota fica sem caminho, os candidatos e os destinos a jusante
 são apagados (os subscritores locais ficam pendentes) e o nó envia `WITHDRAW` aos vizinhos;
 cada vizinho que o tinha como montante repete o procedimento. Quando o caminho volta a ser
-aprendido (mesmo com uma época inferior, se o servidor reiniciou), os nós a jusante voltam a
+aprendido (numa época maior do que a retirada, D27), os nós a jusante voltam a
 pedir o fluxo. Se cair um destino, esse ramo é removido e, se ficar sem procura, sobe
 `DEACTIVATE`. A proteção contra ciclos usa a condição de viabilidade, split horizon (não
 reenviar ao emissor nem ao montante) e rejeita um destino a jusante como montante.
@@ -195,6 +199,8 @@ seguintes. Estado atual de cada uma:
 | L5 | ~~O forwarder aceita datagramas de qualquer vizinho~~ — **resolvido** pelo RPF estrito (passo 4) | Duplicados ao trocar de montante; ciclos de dados transitórios |
 | L7 | A origem UDP era identificada pelo IP do *peer* TCP — confirmada no CORE em 2026-11-10 (cenário 3, O7→O5 depois da reparação rápida; ver "Resultados no CORE"). **Corrigida em 2026-11-10 (D26):** o datagrama leva o id do nó que o envia (campo `salto`); teste de regressão em `tests/test_forwarding.py`; validada no CORE no ensaio 6 (2026-11-10) | Nós com várias interfaces viam datagramas descartados como "origem não vizinha" (`descartados` sobe, `RPF` não) |
 | L8 | ~~`protocolo.md` §7 diz que só a transição 0→1 propaga `ACTIVATE`; o código propaga cada subscritor; `seen_announcements` só é escrito e cresce sem limite~~ — **resolvido** (passos 3, 8 e 9) | Documentação incoerente |
+| L9 | ~~Rota fantasma em ciclo depois da queda do servidor~~ — **resolvido em 2026-11-10 (D27)** e validado no CORE (ensaio 9 repetido). (CORE, cenário 3, ensaio 9, 2026-11-10). Depois do `WITHDRAW`, anúncios da época antiga ainda em trânsito (incluindo o da reparação rápida transitória do O5 via O3, que logo a seguir também retirou) são aceites por nós sem caminho, porque uma rota sem caminho aceita qualquer época (D22). Formou-se o ciclo O6 ↔ O7 para o `filme_a`, com O2, O3 e O5 pendurados nele, que só desapareceu quando o tempo de vida expirou (30 s). Enquanto existiu, estes nós julgavam ter caminho e rejeitaram a época 1 do servidor reiniciado. Correção: uma rota retirada só aceita épocas maiores durante `route_ttl`, e o servidor começa as épocas na hora do arranque. | Depois de uma queda do servidor, um fluxo pode demorar até `--route-ttl` (30 s) a voltar, mesmo com o servidor de volta. |
+| L10 | ~~Ramo órfão por reordenação de `ACTIVATE`/`DEACTIVATE`~~ — **resolvido em 2026-11-10 (D28)**; no CORE, três reinícios do servidor sem cópias a mais nem `RPF`. (CORE, cenário 3, ensaio 9 repetido, 2026-11-10). A tabela decide os envios sob o bloqueio mas envia-os depois de o libertar; quando dois anúncios chegam quase juntos por threads diferentes, o `DEACTIVATE` ao montante antigo pode sair antes do `ACTIVATE` que lhe tinha sido decidido antes. O montante antigo fica com o nó como destino e continua a enviar-lhe o fluxo, que é descartado por RPF. Reproduzido com duas threads e um envio atrasado. Correção: os envios entram numa fila única ainda sob o bloqueio e saem por ordem, uma thread de cada vez; teste de regressão em `tests/test_routing.py` (`SendOrderTest`). | Cópias a mais numa ligação, descartadas por RPF, até a rota mudar (no ensaio, ≈ 20 imagens/s durante 1,5 min). |
 
 **Decisões tomadas pelo grupo:**
 
@@ -202,7 +208,7 @@ seguintes. Estado atual de cada uma:
 |---|---|
 | Métrica | Número de saltos; em empate, RTT acumulado (`delay` no `ANNOUNCE`), com histerese (> 20 % e > 1 ms); empate final pelo ID do vizinho. RTT desconhecido conta como infinito |
 | Escolha da rota | Tabela de candidatos por vizinho (última época, saltos, atraso), em vez de "a primeira cópia ganha" |
-| Identidade dos anúncios | `(server_id, flow, epoch)`; uma rota sem caminho aceita qualquer época (resolve o reinício do servidor) |
+| Identidade dos anúncios | `(server_id, flow, epoch)`; épocas a partir da hora do arranque do servidor (ms); uma rota retirada só aceita épocas maiores durante `route_ttl` (D27) |
 | Falhas | `WITHDRAW(server_id, flow, epoch)` explícito, só processado se vier do montante; antes de retirar, reparação rápida com condição de viabilidade (só candidatos com saltos anunciados < saltos da rota perdida). Quem envia `WITHDRAW` limpa os destinos; a jusante volta a pedir quando reaprende caminho |
 | Rede de segurança | Tempo de vida de rotas e candidatos: 6 × o intervalo de anúncio (30 s), configurável (`--route-ttl`) |
 | Plano de dados | RPF estrito: só se aceitam (e entregam) datagramas vindos do montante atual; aceita-se a falha curta ao trocar de montante |
@@ -217,7 +223,8 @@ seguintes. Estado atual de cada uma:
 - [x] 3. Subscrições agregadas por ramo (`routing.py`, `protocol.py`).
 - [x] 4. RPF estrito no `OverlayForwarder` (`RoutingTable.upstream_of`).
 - [x] 5. Tabela de candidatos e desempate por RTT (campo `delay`).
-- [x] 6. `WITHDRAW`, reparação rápida e aceitação de qualquer época numa rota sem caminho.
+- [x] 6. `WITHDRAW`, reparação rápida e aceitação de qualquer época numa rota sem caminho
+  (substituída em 2026-11-10 pela retenção da D27).
 - [x] 7. Tempo de vida de rotas e candidatos.
 - [x] 8. Retirar `seen_announcements`.
 - [x] 9. Atualizar `protocolo.md`, este ficheiro e `ESTADO.md` com o comportamento final.
@@ -255,8 +262,10 @@ seguintes. Estado atual de cada uma:
 - [x] Unidade, falhas (passo 6): reparação rápida sem `WITHDRAW`; alternativa não viável leva a
   `WITHDRAW`; `WITHDRAW` de outro vizinho só remove o candidato; `WITHDRAW` do montante move o
   ramo para a alternativa; retirada em cascata limpa os destinos; rota sem caminho aceita a
-  época 1 de um servidor reiniciado; rota com caminho rejeita épocas antigas.
-- [x] Integração localhost: servidor morto e reiniciado (época 1) é reaprendido e o ramo
+  época 1 de um servidor reiniciado; rota com caminho rejeita épocas antigas. Desde 2026-11-10
+  (D27, regressão L9): rota retirada rejeita a época retirada e anteriores, aceita épocas
+  maiores e, ao fim da retenção, qualquer época; o publicador começa na hora do arranque.
+- [x] Integração localhost: servidor morto e reiniciado (épocas novas maiores) é reaprendido e o ramo
   S1–A–C volta a abrir.
 - [x] Unidade, tempo de vida (passo 7): sem `route_ttl` nada expira; valores inválidos são
   recusados; candidatos recentes ficam; uma alternativa expirada é esquecida sem mensagens; o
@@ -295,7 +304,8 @@ cada ensaio em `docs/testes-core.md`, local e fora do repositório):
    receber): reparação rápida via O7, sem `WITHDRAW`; medir a falha no vídeo (RPF).
 7. Cenário 3 com 2 servidores, 2 fluxos cada e clientes em ramos partilhados.
 8. `tc netem` em O3–O5 (cenário 3): O5 troca para O7 uma só vez, sem oscilar (passo 5).
-9. Matar e reiniciar o servidor: o `WITHDRAW` chega aos clientes e o fluxo regressa com a época 1.
+9. Matar e reiniciar o servidor: o `WITHDRAW` chega aos clientes e o fluxo regressa com as
+   épocas novas (D27: maiores do que as retiradas).
 
 ### Resultados no CORE
 
@@ -312,6 +322,16 @@ cada ensaio em `docs/testes-core.md`, local e fora do repositório):
 
 | 6 (cenário 3, queda do O3 com o O5 a receber; código com a correção D26) | 2026-11-10 | **Passou.** Logs em `~/uni/esr/ott-logs/2026-11-10-2`. Antes (10:03:40–10:04:44): a mesma árvore do ensaio anterior (O2 40 → 60, O5 40 → 40 via O3, O7 20 → 40). Ctrl-C no O3 às 10:04:46,125: O2, O4 e O5 detetam no mesmo milissegundo; o O5 regista `reparada via O7` para os dois fluxos, **sem `WITHDRAW`**. Sem O3 (10:04:50–10:05:42): O2 40 → 40 (só para O7), O7 40 → 80 (`filme_a` para O8, O6 e O5; `filme_b` para O5), O5 40 → 40, `descartados=0` e `RPF=0` em todos os nós. **Falha no vídeo:** O10 sem nenhuma imagem perdida (+40 a cada 2 s sem interrupção); O11 com 1 imagem perdida. O O4, cujo único vizinho é o O3, fica sem vídeo, como esperado. O3 reiniciado às 10:05:44: religa-se a O2, O4 e O5 em ≤ 1,3 s e o O4 volta a receber em ≈ 2 s (os 1188 `perdidos` do O4 são as imagens do período sem O3, ≈ 59 s × 20/s). O O5 **mantém o montante O7** (mesmo número de saltos; sem ganho de atraso acima da histerese, D21), por isso o O3 passa a levar só o `filme_a` para o O4 (20 → 20). |
 
+| 8 (cenário 3, `tc netem delay 20ms` no r9 `eth2`, o caminho do O5 para o O3, montante ativo) | 2026-11-10 | **Passou.** Logs em `~/uni/esr/ott-logs/2026-11-10-3`. Atraso aplicado entre 10:58:32 e 10:58:34; o RTT do O5 para o O3 sobe pela média móvel (0,5 → 6,6 → 10,9 → 17,4 ms em 8 s) e o do O7 fica em 0,6–0,8 ms. O O5 troca para o O7 **uma só vez** na janela que termina às 10:58:33–35: O3 passa de 40 → 60 para 20 → 20/s e O7 de 40 → 80 para 80 → 160 por 2 s. Sem oscilação durante cerca de 4 min com o atraso. **Nenhuma imagem perdida** em nenhum cliente e `RPF=0` em todos os nós. Removido o atraso (por volta das 11:02:3x, RTT de volta a 1,4 ms às 11:02:50), o O5 **mantém o O7** até ao fim do ensaio (histerese, D21). |
+| 9 (cenário 3, Ctrl-C no servidor O1 e novo arranque) | 2026-11-10 | **Passou com um defeito (L9).** Ctrl-C por volta das 11:04:15,5: o O2 deteta às 11:04:15,515 e o `WITHDRAW` chega aos 5 clientes em 3 ms (11:04:15,518). O1 reiniciado às 11:04:40,205; o O2 religa-se em 0,7 s. O `filme_b` volta logo: O11 a receber às 11:04:41 (≈ 1 s). O `filme_a` só volta às 11:04:50–51 (≈ 10 s) nos O4, O8, O9 e O10: ficou presa uma rota fantasma em ciclo (O6 ↔ O7, com O2, O3 e O5 pendurados nela) que rejeitou a época 1 do novo servidor até o tempo de vida expirar às 11:04:45,9 (`montante O7 sem anúncios há mais de 30.0 s` no O2 e no O6); o fluxo regressou na ronda de anúncio seguinte (11:04:50,2). Pelos logs (só INFO), o ciclo começa no O5: o `WITHDRAW` do O7 chega antes do do O3, o O5 repara via O3 e anuncia; esse anúncio e outros da época antiga ainda em trânsito são aceites por nós que já tinham retirado (D22). |
+
+| 9, repetido com a correção D27 (cenário 3) | 2026-11-10 | **Passou (L9 corrigido).** Logs em `~/uni/esr/ott-logs/2026-11-10-4`. Ctrl-C no O1 às 11:32:06,4; o `WITHDRAW` chega aos 5 clientes em 3 ms. O1 reiniciado às 11:32:26,6; o O2 religa-se em 0,7 s e **os dois fluxos voltam em ≈ 1–2 s** em todos os clientes (O4 às 11:32:27,6, O8–O11 até às 11:32:29,4; o O1 já encaminhou 51 imagens às 11:32:28,6). Nenhum `montante ... sem anúncios há mais de 30.0 s` em nenhum nó: sem rota fantasma. O O5 voltou a repetir a reparação transitória via O7 antes de retirar (a ordem dos `WITHDRAW` é a mesma), agora sem efeito. **Defeito novo (L10):** depois do reinício, o O7 ficou com o O5 como destino do `filme_a` quando o montante do O5 era o O3; o O5 recebeu ≈ 20 imagens/s a mais, descartadas por RPF (1920 até à queda do O3), durante ≈ 1,5 min. |
+| 6, repetido com as correções D26 e D27 (cenário 3) | 2026-11-10 | **Passou.** Ctrl-C no O3 às 11:34:03,3: o O5 repara o `filme_a` via O7 no mesmo milissegundo, sem `WITHDRAW` (o `filme_b` já vinha pelo O7). O10 e O11 **sem nenhuma imagem perdida**; O8 e O9 sem efeito. O O4 retira (o O3 é o seu único vizinho). O3 reiniciado às 11:34:33,1: religa-se a O2, O4 e O5 em ≤ 1,2 s e o **O4 volta a receber em ≤ 2,5 s** (época nova maior do que a retirada, D27); os 606 `perdidos` do O4 são as imagens dos 30 s sem O3. O O5 mantém o montante O7. |
+
+| 9, três reinícios do servidor com a correção D28 (cenário 3) | 2026-11-10 | **Passou (L10 não se repetiu).** Logs em `~/uni/esr/ott-logs/2026-11-10-5`. O1 reiniciado às 11:48:28,7, 11:49:38,1 e 11:50:45,9; em cada um, O4, O10 e O11 voltam a receber em ≈ 1–2 s. Em todo o período, O2, O3, O5 e O7 com `descartados=0` e `RPF=0`; o O5 recebe 40 imagens/s (sem cópias a mais). No 3.º reinício o O5 trocou o montante do `filme_b` do O3 para o O7 ≈ 6 s depois do arranque e o O3 deixou logo de lhe enviar esse fluxo (40 → 80 só com o `filme_a`), sem ramo órfão. **Erro de configuração nesta sessão:** o nó C2 arrancou com `-i O9` em vez de `-i O8` (dois nós O9; o O7 vê `O9` como vizinho e o O9 verdadeiro, no C4, perde e recupera a ligação ao O6 continuamente). Os resultados de O6, O8 e O9 não são válidos; os de O2, O3, O5, O7, O4, O10 e O11 não dependem desse ramo. |
+
+| 9, três reinícios do servidor com D26–D28 e a topologia completa (cenário 3) | 2026-11-10 | **Passou.** Logs em `~/uni/esr/ott-logs/2026-11-10-6`. Os 11 nós com os vizinhos do JSON (O7: O2, O5, O6, O8; O6: O5, O7, O9), sem quedas inesperadas nem expirações. O1 reiniciado às 12:02:04, 12:02:56 e 12:03:57; os 5 clientes voltam a receber em **1,2–2,9 s** (limite superior: primeira linha de `--stats`, de 2 em 2 s), o O8 sempre primeiro e o O11 sempre último. Entre reinícios, a árvore volta a ter uma cópia por ligação: O1 0 → 40, O2 40 → 60, O3 40 → 60, O5 40 → 40, O6 20 → 20, O7 20 → 40 imagens/s; depois do 3.º reinício o O5 recebe o `filme_b` pelo O7 e o `filme_a` pelo O3 (O3 20 → 40, O7 40 → 60), também sem duplicados. No fim, `descartados=0` e `RPF=0` em todos os nós e `perdidos=0` em todos os clientes. |
+
 Nota sobre os `perdidos` do ensaio 1/2: os 434/439 acumularam-se **antes** da janela medida (não
 cresceram durante ela) e os dois clientes mostram `reinicios=1`. O emissor numera todas as imagens,
 mesmo quando não há destinos, por isso um período sem caminho (por exemplo, um nó reiniciado) conta
@@ -325,7 +345,7 @@ PYTHONPATH=src python3 -m unittest tests.test_routing -v        # modelo (nós f
 PYTHONPATH=src python3 -m unittest tests.test_integration -v    # nós reais em localhost
 PYTHONPATH=src python3 -m unittest tests.test_forwarding -v     # RPF no plano de dados
 PYTHONPATH=src python3 -m unittest tests.test_cli -v            # opções da CLI
-PYTHONPATH=src python3 -m unittest discover -s tests -t .       # tudo (105 testes)
+PYTHONPATH=src python3 -m unittest discover -s tests -t .       # tudo (111 testes)
 ```
 
 `tests/test_integration.py` dá a cada nó um IP de loopback (127.0.0.1–4), porque todos os

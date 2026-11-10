@@ -105,7 +105,7 @@ class RoutingTableTest(unittest.TestCase):
 class AnnouncementPublisherTest(unittest.TestCase):
     def test_publish_once_announces_each_flow_with_independent_epoch(self):
         node = FakeNode()
-        publisher = AnnouncementPublisher(node, ["filme_a", "filme_b"])
+        publisher = AnnouncementPublisher(node, ["filme_a", "filme_b"], first_epoch=1)
 
         first_round = publisher.publish_once()
         second_round = publisher.publish_once()
@@ -118,6 +118,23 @@ class AnnouncementPublisherTest(unittest.TestCase):
             self.assertEqual(msg["src"], "S1")
             self.assertEqual(msg["data"]["server_id"], "S1")
             self.assertEqual(msg["data"]["metric"], 0)
+
+    def test_default_epochs_start_from_clock_so_restart_is_newer(self):
+        # Um servidor reiniciado tem de anunciar épocas maiores do que as que
+        # deixou na rede (L9): por omissão começam na hora do arranque, em ms.
+        before = int(time.time() * 1000)
+        old = AnnouncementPublisher(FakeNode(), ["filme_a"])
+        rounds = [old.publish_once()[0]["data"]["epoch"] for _ in range(50)]
+        self.assertGreaterEqual(rounds[0], before)
+        self.assertEqual(rounds, list(range(rounds[0], rounds[0] + 50)))
+        time.sleep(0.06)
+        restarted = AnnouncementPublisher(FakeNode(), ["filme_a"])
+        self.assertGreater(restarted.publish_once()[0]["data"]["epoch"], rounds[-1])
+
+    def test_invalid_first_epoch(self):
+        for first in (0, -1, 1.5, True):
+            with self.subTest(first=first), self.assertRaises(ValueError):
+                AnnouncementPublisher(FakeNode(), ["filme_a"], first_epoch=first)
 
     def test_start_publishes_periodically_and_stop_stops_it(self):
         node = FakeNode()
@@ -145,7 +162,8 @@ class AnnouncementPublisherTest(unittest.TestCase):
 
     def test_publish_installs_local_zero_cost_route(self):
         table = RoutingTable()
-        publisher = AnnouncementPublisher(FakeNode(), ["filme_a"], routing_table=table)
+        publisher = AnnouncementPublisher(FakeNode(), ["filme_a"], routing_table=table,
+                                          first_epoch=1)
 
         publisher.publish_once()
 
@@ -593,11 +611,40 @@ class WithdrawRepairTest(unittest.TestCase):
         self.assertEqual(table.active_destinations("S1", "filme_a"), ())
         self.assertEqual([m["type"] for m, _ in node.received_broadcasts], ["WITHDRAW"])
 
-    def test_pathless_route_accepts_restarted_server_epoch(self):
-        table, node = RoutingTable(), self.Node()
+    def test_withdrawn_route_rejects_stale_announcements(self):
+        # Regressão L9 (CORE, cenário 3, ensaio 9): depois do WITHDRAW, anúncios
+        # da época retirada ainda em trânsito formavam um ciclo fantasma.
+        table, node = RoutingTable(route_ttl=30), self.Node()
+        route = self.feed(table, node, ("O1", 50, 1))
+        table.activate(node, "S1", "filme_a")
+        table.handle_withdraw(node, "O1", self.withdraw("O1", epoch=50))
+        node.sent.clear()
+        node.received_broadcasts.clear()
+
+        for epoch in (50, 49):
+            self.assertFalse(table.handle_announce(node, "O5", self.announce("O5", epoch, 2)))
+        self.assertIsNone(route.upstream)
+        self.assertEqual((route.candidates, node.sent, node.received_broadcasts), ({}, [], []))
+
+    def test_withdrawn_route_accepts_newer_epoch(self):
+        table, node = RoutingTable(route_ttl=30), self.Node()
         route = self.feed(table, node, ("O1", 50, 1))
         table.activate(node, "S1", "filme_a")
         table.handle_neighbor_down(node, "O1")
+        node.sent.clear()
+
+        self.assertTrue(table.handle_announce(node, "O5", self.announce("O5", 51, 1)))
+
+        self.assertEqual((route.upstream, route.epoch, route.state), ("O5", 51, ACTIVE))
+        self.assertEqual(self.types_sent(node), [("O5", "ACTIVATE")])
+
+    def test_withdrawn_route_accepts_older_epoch_after_hold_down(self):
+        # Servidor reiniciado com o relógio atrasado: aceite ao fim do tempo de vida.
+        table, node = RoutingTable(route_ttl=30), self.Node()
+        route = self.feed(table, node, ("O1", 50, 1))
+        table.activate(node, "S1", "filme_a")
+        table.handle_neighbor_down(node, "O1")
+        route.withdrawn_at -= 31
         node.sent.clear()
 
         self.assertTrue(table.handle_announce(node, "O5", self.announce("O5", 1, 1)))
@@ -605,11 +652,74 @@ class WithdrawRepairTest(unittest.TestCase):
         self.assertEqual((route.upstream, route.epoch, route.state), ("O5", 1, ACTIVE))
         self.assertEqual(self.types_sent(node), [("O5", "ACTIVATE")])
 
+    def test_route_never_withdrawn_accepts_any_first_epoch(self):
+        table, node = RoutingTable(route_ttl=30), self.Node()
+        route = self.feed(table, node, ("O1", 7, 1))
+        self.assertEqual((route.upstream, route.epoch), ("O1", 7))
+
     def test_route_with_path_rejects_older_epoch(self):
         table, node = RoutingTable(), self.Node()
         route = self.feed(table, node, ("O1", 50, 2))
         self.assertFalse(table.handle_announce(node, "O5", self.announce("O5", 1, 0)))
         self.assertEqual((route.upstream, route.epoch), ("O1", 50))
+
+
+class SendOrderTest(unittest.TestCase):
+    """Regressão L10 (CORE, cenário 3): os envios saem pela ordem em que foram decididos."""
+
+    class SlowNode:
+        """O primeiro ACTIVATE para O7 demora: dá tempo a outra thread de decidir e enviar."""
+        id = "O5"
+
+        def __init__(self):
+            self.sent = []
+            self.slow_armed = False
+            self.slow_started = threading.Event()
+
+        def rtt(self, neighbor):
+            return None
+
+        def broadcast(self, msg, exclude=()):
+            pass
+
+        def send(self, peer, msg):
+            if self.slow_armed and peer == "O7" and msg["type"] == "ACTIVATE":
+                self.slow_armed = False
+                self.slow_started.set()
+                time.sleep(0.2)
+            self.sent.append((peer, msg["type"]))
+            return True
+
+    @staticmethod
+    def announce(src, epoch, metric):
+        return make_msg(MsgType.ANNOUNCE, src, server_id="S1", flow="filme_a",
+                        epoch=epoch, metric=metric)
+
+    def test_concurrent_upstream_change_keeps_activate_before_deactivate(self):
+        table, node = RoutingTable(), self.SlowNode()
+        table.handle_announce(node, "O7", self.announce("O7", 1, 5))
+        table.activate(node, "S1", "filme_a")
+        table.handle_withdraw(node, "O7", make_msg(
+            MsgType.WITHDRAW, "O7", server_id="S1", flow="filme_a", epoch=1))
+        node.sent.clear()
+        node.slow_armed = True
+
+        # A: anúncio pelo O7 -> ACTIVATE ao O7 (envio lento).
+        first = threading.Thread(target=table.handle_announce,
+                                 args=(node, "O7", self.announce("O7", 2, 2)))
+        first.start()
+        self.assertTrue(node.slow_started.wait(2))
+        # B: anúncio melhor pelo O3 -> DEACTIVATE ao O7 e ACTIVATE ao O3.
+        second = threading.Thread(target=table.handle_announce,
+                                  args=(node, "O3", self.announce("O3", 2, 1)))
+        second.start()
+        first.join(2)
+        second.join(2)
+
+        self.assertEqual(table.upstream_of("S1", "filme_a"), "O3")
+        self.assertEqual([t for peer, t in node.sent if peer == "O7"],
+                         ["ACTIVATE", "DEACTIVATE"])
+        self.assertEqual(node.sent[-1], ("O3", "ACTIVATE"))
 
 
 class RouteTtlTest(unittest.TestCase):

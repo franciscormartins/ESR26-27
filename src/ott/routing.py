@@ -1,4 +1,6 @@
 """Modelo e aprendizagem de rotas por anúncios (Etapa 2)."""
+from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import logging
 import math
@@ -51,6 +53,10 @@ class RouteEntry:
             metade do RTT de cada ligação; ``math.inf`` se desconhecido.
         candidates: Mapa ``vizinho -> Candidate`` com o último anúncio de cada
             vizinho; o montante é escolhido entre eles.
+        withdrawn_at: Hora (relógio monotónico) do último ``WITHDRAW`` deste nó
+            para a rota, ou ``None``. Enquanto a rota está retirada, só aceita
+            épocas mais recentes do que ``epoch``; ao fim de ``route_ttl``
+            volta a aceitar qualquer época.
     """
     flow: str
     origin: str
@@ -62,6 +68,7 @@ class RouteEntry:
     epoch: int = 0
     delay: float = math.inf
     candidates: Dict[str, Candidate] = field(default_factory=dict)
+    withdrawn_at: Optional[float] = None
 
     @property
     def key(self):
@@ -87,6 +94,12 @@ class RoutingTable:
     ``route_ttl`` (s) é a rede de segurança: um candidato sem anúncios há mais
     do que esse tempo é esquecido e, se era o montante, a rota é reparada ou
     retirada como numa queda. ``None`` desliga a expiração.
+
+    Envios (D28): as mensagens são decididas sob o bloqueio e entram nessa
+    altura numa fila única; são enviadas fora do bloqueio, por ordem, por uma
+    thread de cada vez. Assim, decisões de threads diferentes (por exemplo, um
+    ``ACTIVATE`` e o ``DEACTIVATE`` de uma troca de montante logo a seguir)
+    chegam ao vizinho pela ordem em que foram tomadas.
     """
     def __init__(self, delay_hysteresis=0.2, delay_min_gain=0.001, route_ttl=None):
         if route_ttl is not None and (not isinstance(route_ttl, (int, float))
@@ -104,6 +117,9 @@ class RoutingTable:
         self._events = queue.Queue()
         self._event_thread = None
         self._event_lock = threading.Lock()
+        self._outbox = deque()             # (nó, ação), pela ordem das decisões
+        self._send_lock = threading.Lock()  # um só a enviar de cada vez
+        self._depth = threading.local()     # transações aninhadas na mesma thread
 
     def get(self, origin, flow):
         with self._lock:
@@ -219,8 +235,7 @@ class RoutingTable:
             return 0
         now = time.monotonic() if now is None else now
         expired = 0
-        actions = []
-        with self._lock:
+        with self._transaction(node) as actions:
             for route in self.routes.values():
                 if route.origin == node.id:
                     continue
@@ -239,7 +254,6 @@ class RoutingTable:
                     # o candidato do montante é retirado em _lose_upstream; a
                     # reparação só usa candidatos ainda dentro do tempo de vida
                     actions += self._lose_upstream(node, route, still_connected=True)
-        self._run(node, actions)
         return expired
 
     def _queue_neighbor_event(self, event, node, neighbor):
@@ -293,7 +307,7 @@ class RoutingTable:
         subscriber_id = node.id if subscriber_id is None else subscriber_id
         if not isinstance(subscriber_id, str) or not subscriber_id:
             raise ValueError("subscriber_id tem de ser uma string não vazia")
-        with self._lock:
+        with self._transaction(node) as actions:
             route = self.routes.get((origin, flow))
             if route is None:
                 return False
@@ -302,10 +316,9 @@ class RoutingTable:
             first = not self._has_demand(route)
             route.local_subscribers.add(subscriber_id)
             self._refresh_state(route, node.id)
-            upstream = route.upstream if first else None
-        if upstream is not None:
-            node.send(upstream, self._route_message(
-                node, MsgType.ACTIVATE, route, subscriber_id))
+            if first and route.upstream is not None:
+                actions.append(("send", route.upstream, self._route_message(
+                    node, MsgType.ACTIVATE, route, subscriber_id)))
         return True
 
     def deactivate(self, node, origin, flow, subscriber_id=None):
@@ -313,23 +326,22 @@ class RoutingTable:
         subscriber_id = node.id if subscriber_id is None else subscriber_id
         if not isinstance(subscriber_id, str) or not subscriber_id:
             raise ValueError("subscriber_id tem de ser uma string não vazia")
-        with self._lock:
+        with self._transaction(node) as actions:
             route = self.routes.get((origin, flow))
             if route is None or subscriber_id not in route.local_subscribers:
                 return False
             route.local_subscribers.remove(subscriber_id)
             self._refresh_state(route, node.id)
-            upstream = route.upstream if not self._has_demand(route) else None
-        if upstream is not None:
-            node.send(upstream, self._route_message(
-                node, MsgType.DEACTIVATE, route, subscriber_id))
+            if not self._has_demand(route) and route.upstream is not None:
+                actions.append(("send", route.upstream, self._route_message(
+                    node, MsgType.DEACTIVATE, route, subscriber_id)))
         return True
 
     def handle_activate(self, node, neighbor, msg):
         """Acrescenta o vizinho aos destinos e propaga só a primeira procura."""
         data = msg["data"]
         origin, flow = data["server_id"], data["flow"]
-        with self._lock:
+        with self._transaction(node) as actions:
             route = self.routes.get((origin, flow))
             if route is None or neighbor == route.upstream:
                 return False
@@ -338,17 +350,16 @@ class RoutingTable:
             first = not self._has_demand(route)
             route.destinations.add(neighbor)
             self._refresh_state(route, node.id)
-            upstream = route.upstream if first else None
-        if upstream is not None:
-            node.send(upstream, self._route_message(
-                node, MsgType.ACTIVATE, route, data.get("subscriber_id")))
+            if first and route.upstream is not None:
+                actions.append(("send", route.upstream, self._route_message(
+                    node, MsgType.ACTIVATE, route, data.get("subscriber_id"))))
         return True
 
     def handle_deactivate(self, node, neighbor, msg):
         """Retira o vizinho dos destinos e fecha o ramo a montante se ficar vazio."""
         data = msg["data"]
         origin, flow = data["server_id"], data["flow"]
-        with self._lock:
+        with self._transaction(node) as actions:
             route = self.routes.get((origin, flow))
             if route is None:
                 return False
@@ -356,10 +367,9 @@ class RoutingTable:
                 return True  # pedido repetido: o ramo já está fechado
             route.destinations.discard(neighbor)
             self._refresh_state(route, node.id)
-            upstream = route.upstream if not self._has_demand(route) else None
-        if upstream is not None:
-            node.send(upstream, self._route_message(
-                node, MsgType.DEACTIVATE, route, data.get("subscriber_id")))
+            if not self._has_demand(route) and route.upstream is not None:
+                actions.append(("send", route.upstream, self._route_message(
+                    node, MsgType.DEACTIVATE, route, data.get("subscriber_id"))))
         return True
 
     # -- seleção do montante (métrica: saltos, depois atraso) ----------------
@@ -375,6 +385,13 @@ class RoutingTable:
         """Custo do caminho via ``neighbor``: (saltos, atraso acumulado em s)."""
         return (candidate.metric + 1,
                 candidate.delay + self._link_delay(node, neighbor))
+
+    def _hold_down_over(self, route, now=None):
+        """A retenção depois de um ``WITHDRAW`` dura ``route_ttl`` (sem fim se ``None``)."""
+        if self.route_ttl is None:
+            return False
+        now = time.monotonic() if now is None else now
+        return now - route.withdrawn_at > self.route_ttl
 
     @staticmethod
     def _valid_candidate(route, neighbor, candidate):
@@ -435,14 +452,46 @@ class RoutingTable:
             fields["delay"] = route.delay
         return make_msg(MsgType.ANNOUNCE, node.id, **fields)
 
-    @staticmethod
-    def _run(node, actions):
-        """Executa, fora do bloqueio, os envios decididos sob o bloqueio."""
-        for action in actions:
-            if action[0] == "send":
-                node.send(action[1], action[2])
-            else:
-                node.broadcast(action[1], exclude=action[2])
+    @contextmanager
+    def _transaction(self, node):
+        """Bloqueio da tabela + envios pela ordem das decisões (D28).
+
+        Dá uma lista onde o chamador junta as ações ``("send", vizinho, msg)``
+        e ``("broadcast", msg, excluídos)``. Ainda sob o bloqueio, as ações
+        entram na fila global; depois de o libertar, a fila é esvaziada por
+        ordem. Também corre quando o bloco termina com ``return``.
+        """
+        actions = []
+        depth = getattr(self._depth, "value", 0)
+        self._depth.value = depth + 1
+        try:
+            with self._lock:
+                yield actions
+                self._outbox.extend((node, action) for action in actions)
+        finally:
+            self._depth.value = depth
+        if depth == 0:  # nunca enviar com o bloqueio da tabela na mão
+            self._flush()
+
+    def _flush(self):
+        """Envia a fila por ordem; só uma thread envia de cada vez.
+
+        Uma thread que chega enquanto outra está a enviar espera e encontra a
+        fila já vazia ou com as suas ações atrás das anteriores.
+        """
+        with self._send_lock:
+            while True:
+                with self._lock:
+                    if not self._outbox:
+                        return
+                    node, action = self._outbox.popleft()
+                try:
+                    if action[0] == "send":
+                        node.send(action[1], action[2])
+                    else:
+                        node.broadcast(action[1], exclude=action[2])
+                except Exception:
+                    log.exception("falha ao enviar %s", action[0])
 
     # -- anúncios ------------------------------------------------------------
 
@@ -457,16 +506,21 @@ class RoutingTable:
         if origin == node.id:  # não aprender o próprio anúncio ao fechar um ciclo
             return False
         candidate = Candidate(epoch, data["metric"], data.get("delay", math.inf))
-        actions = []
-        with self._lock:
+        with self._transaction(node) as actions:
             route = self.routes.get((origin, flow))
             if route is not None and neighbor in route.destinations:
                 return False  # não escolher um ramo a jusante como montante
             if route is None:
                 route = RouteEntry(flow=flow, origin=origin, metric=math.inf)
                 self.routes[route.key] = route
-            if route.upstream is None and epoch < route.epoch:
-                # Rota sem caminho aceita qualquer época (ex.: servidor reiniciado).
+            if route.upstream is None and route.withdrawn_at is not None \
+                    and epoch <= route.epoch:
+                if not self._hold_down_over(route):
+                    # Anúncio da época retirada ou anterior, ainda em trânsito:
+                    # aceitá-lo podia formar um ciclo fantasma (L9).
+                    return False
+                # Fim da retenção: aceita qualquer época (ex.: servidor
+                # reiniciado com o relógio atrasado).
                 route.epoch = 0
                 route.candidates.clear()
             if epoch < route.epoch:
@@ -486,6 +540,7 @@ class RoutingTable:
                 return False
             route.upstream = new_upstream
             route.metric, route.delay = cost
+            route.withdrawn_at = None
             self._refresh_state(route, node.id)
             moved = new_upstream != old_upstream
             if moved and self._has_demand(route):
@@ -499,7 +554,6 @@ class RoutingTable:
             if propagate:
                 actions.append(("broadcast", self._announce_msg(node, route),
                                 {neighbor, new_upstream}))
-        self._run(node, actions)
         return propagate
 
     # -- perda do montante: reparação rápida ou retirada ---------------------
@@ -535,6 +589,7 @@ class RoutingTable:
             return actions
         route.metric = route.delay = math.inf
         route.candidates.clear()
+        route.withdrawn_at = time.monotonic()  # retenção: só épocas > route.epoch
         route.destinations.clear()  # a jusante volta a pedir quando reaprender
         self._refresh_state(route, node.id)
         actions.append(("broadcast", make_msg(
@@ -548,22 +603,19 @@ class RoutingTable:
         """O vizinho perdeu o caminho: deixa de ser candidato; se era o montante,
         repara-se a rota ou retira-se também."""
         data = msg["data"]
-        actions = []
-        with self._lock:
+        with self._transaction(node) as actions:
             route = self.routes.get((data["server_id"], data["flow"]))
             if route is None:
                 return False
             route.candidates.pop(neighbor, None)
             if neighbor != route.upstream:
                 return False
-            actions = self._lose_upstream(node, route, still_connected=True)
-        self._run(node, actions)
+            actions += self._lose_upstream(node, route, still_connected=True)
         return True
 
     def handle_neighbor_down(self, node, neighbor):
         """Invalida montantes caídos e remove o ramo e o candidato do vizinho."""
-        actions = []
-        with self._lock:
+        with self._transaction(node) as actions:
             for route in self.routes.values():
                 removed = neighbor in route.destinations
                 route.destinations.discard(neighbor)
@@ -575,19 +627,15 @@ class RoutingTable:
                 if removed and route.upstream is not None and not self._has_demand(route):
                     actions.append(("send", route.upstream, self._route_message(
                         node, MsgType.DEACTIVATE, route)))
-        self._run(node, actions)
 
     def handle_neighbor_up(self, node, neighbor):
         """Envia ao novo vizinho anúncios das rotas válidas já conhecidas."""
-        announcements = []
-        with self._lock:
+        with self._transaction(node) as actions:
             for route in self.routes.values():
                 valid = route.origin == node.id or route.upstream is not None
                 if valid and route.epoch > 0 and math.isfinite(route.metric) \
                         and neighbor != route.upstream:
-                    announcements.append(self._announce_msg(node, route))
-        for announcement in announcements:
-            node.send(neighbor, announcement)
+                    actions.append(("send", neighbor, self._announce_msg(node, route)))
 
 
 class AnnouncementPublisher:
@@ -596,8 +644,12 @@ class AnnouncementPublisher:
     A publicação não depende de os vizinhos já estarem ligados: os anúncios são
     repetidos periodicamente. Os nós recetores aprendem e propagam os anúncios
     através de ``RoutingTable.attach``.
+
+    A época de cada fluxo começa em ``first_epoch`` e avança uma unidade por
+    ronda. Por omissão é a hora do arranque em milissegundos, para que um
+    servidor reiniciado anuncie épocas maiores do que as anteriores (D27).
     """
-    def __init__(self, node, flows, interval=5.0, routing_table=None):
+    def __init__(self, node, flows, interval=5.0, routing_table=None, first_epoch=None):
         self.node = node
         if isinstance(flows, str):
             raise ValueError("flows tem de ser uma coleção de identificadores, não uma string")
@@ -611,7 +663,15 @@ class AnnouncementPublisher:
             raise ValueError("interval tem de ser um número finito maior que zero")
         self.interval = float(interval)
         self.routing_table = routing_table
-        self._epochs = {flow: 0 for flow in self.flows}
+        if first_epoch is None:
+            # Épocas a partir da hora do arranque (ms): um servidor reiniciado
+            # anuncia épocas maiores do que as que deixou na rede (D27).
+            first_epoch = int(time.time() * 1000)
+        if not isinstance(first_epoch, int) or isinstance(first_epoch, bool) \
+                or first_epoch < 1:
+            raise ValueError("first_epoch tem de ser um inteiro maior que zero")
+        self.first_epoch = first_epoch
+        self._epochs = {flow: first_epoch - 1 for flow in self.flows}
         self._stop = threading.Event()
         self._thread = None
 

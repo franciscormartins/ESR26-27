@@ -227,10 +227,17 @@ ronda. O campo `delay` só é incluído quando é conhecido.
 3. Se o `WITHDRAW` veio do montante (ainda ligado) e havia procura, o nó envia-lhe também
    `DEACTIVATE`, para não ficarem destinos órfãos.
 
-**Épocas depois de uma retirada.** Uma rota sem caminho aceita um anúncio de **qualquer**
-época, mesmo inferior à guardada: é assim que um servidor reiniciado (que recomeça em 1)
-volta a ser aprendido. Uma rota com caminho continua a rejeitar épocas antigas. Os nós a
-jusante voltam a pedir o fluxo (`ACTIVATE`) quando reaprendem o caminho.
+**Épocas depois de uma retirada (D27).** Uma rota que este nó retirou (`WITHDRAW`) guarda a
+época em que a retirou e, durante uma retenção de `route_ttl` segundos, só aceita anúncios de
+uma época **maior**. Os anúncios da época retirada ou anteriores que ainda estejam em trânsito
+são ignorados: aceitá-los podia formar um ciclo fantasma entre nós sem caminho, que só o tempo
+de vida desfazia (L9, visto no CORE). O servidor começa as épocas na hora do arranque em
+milissegundos, por isso um servidor reiniciado anuncia épocas maiores do que as retiradas e é
+aceite logo. Ao fim da retenção a rota volta a aceitar qualquer época (cobre um servidor
+reiniciado com o relógio atrasado). Uma rota com caminho continua a rejeitar épocas antigas.
+Depois de uma retirada, o caminho é reaprendido na ronda de anúncio seguinte (até
+`--announce-interval`). Os nós a jusante voltam a pedir o fluxo (`ACTIVATE`) quando
+reaprendem o caminho.
 
 **Tempo de vida (rede de segurança).** Cada candidato guarda a hora da última receção; uma
 cópia repetida também a renova. Um candidato sem anúncios há mais de `route_ttl` segundos
@@ -244,7 +251,7 @@ nunca expiram.
 ```
 servidor S1 morre ──> O2 (vizinho) perde o montante, sem alternativa ──WITHDRAW──> O3, O7
 O3: montante era O2 ──> sem alternativa ──WITHDRAW──> O4, O5 ...   (desce pela árvore)
-S1 reinicia (época 1) ──ANNOUNCE──> O2 (sem caminho: aceita) ──> O3 ... ──> clientes
+S1 reinicia (época = hora do arranque, > retirada) ──ANNOUNCE──> O2 (aceita) ──> O3 ... ──> clientes
 clientes ──ACTIVATE──> ... ──> S1                                     (ramos reabertos)
 ```
 
@@ -346,9 +353,11 @@ campos de `data`.
 Um anúncio é identificado por `(server_id, flow, epoch)`. Vários anúncios com a mesma
 identidade podem chegar por caminhos diferentes; cada um atualiza o candidato do vizinho
 emissor e o montante é reavaliado (§3.7). Numa rota com caminho, uma época inferior à já
-guardada é antiga e é ignorada; numa rota sem caminho (depois de uma retirada) é aceite,
-para recuperar de um servidor reiniciado. `epoch` é iniciado em 1 e incrementado pelo
-servidor por fluxo; os nós não comparam relógios entre si.
+guardada é antiga e é ignorada; numa rota retirada por este nó, também a época retirada é
+ignorada até ao fim da retenção (§3.7). O servidor inicia `epoch` na hora do arranque em
+milissegundos e incrementa-o uma unidade por ronda e por fluxo, para que um servidor
+reiniciado tenha épocas maiores do que as anteriores. Só o relógio do próprio servidor conta:
+os nós não comparam relógios entre si.
 
 Cada vizinho conta no máximo uma vez nos destinos de uma rota. Repetir `ACTIVATE` não cria
 um ramo adicional; repetir `DEACTIVATE` é inofensivo. Localmente, cada `subscriber_id` conta

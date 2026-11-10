@@ -69,6 +69,17 @@ exemplo, para `S1` e `filme_a`, devolve `("S1", "filme_a")`.
 `(origin, flow)`. Um bloqueio protege as alterações concorrentes feitas por
 threads diferentes.
 
+**Envios por ordem (D28).** Os métodos que alteram rotas abrem uma
+`_transaction(node)`: dentro do bloqueio juntam as mensagens a enviar numa lista
+(`("send", vizinho, msg)` ou `("broadcast", msg, excluídos)`), que entra ainda sob
+o bloqueio numa fila única (`_outbox`). Depois de libertar o bloqueio, `_flush`
+envia a fila por ordem, com um segundo bloqueio (`_send_lock`) para que só uma
+thread envie de cada vez. Assim, as mensagens decididas por threads diferentes
+saem pela ordem das decisões: um `ACTIVATE` decidido antes de uma troca de
+montante nunca chega depois do `DEACTIVATE` dessa troca (L10). Nunca se envia com
+o bloqueio da tabela na mão; transações aninhadas na mesma thread só enviam no
+fim da exterior.
+
 ### `__init__`
 
 Cria o dicionário de rotas, o bloqueio, a fila de eventos de vizinhança e o
@@ -213,8 +224,10 @@ Regista o anúncio como candidato do vizinho emissor e reavalia o montante.
 
 1. Ignora anúncios do próprio nó (fecharam um ciclo) e de vizinhos que são
    destinos a jusante (nunca podem ser montante).
-2. Se a rota está **sem caminho** e a época é inferior à guardada, aceita-a na
-   mesma: apaga os candidatos e recomeça a contagem (servidor reiniciado).
+2. Se a rota foi **retirada** por este nó (`withdrawn_at`) e a época não é maior do
+   que a guardada, ignora o anúncio durante a retenção (`route_ttl`): é um anúncio
+   antigo ainda em trânsito (L9, D27). Ao fim da retenção aceita-o na mesma: apaga os
+   candidatos e recomeça a contagem.
 3. Com caminho, ignora épocas antigas; ignora também uma cópia igual à última
    recebida desse vizinho.
 4. Guarda `candidates[vizinho]`. Se a época avançou, atualiza `epoch` e apaga
@@ -274,7 +287,8 @@ Chamada sob o bloqueio quando o montante cai ou envia `WITHDRAW`.
    candidatos e destinos (os subscritores locais ficam pendentes) e envia
    `WITHDRAW` a todos os vizinhos.
 
-Devolve a lista de envios, executados fora do bloqueio por `_run`.
+Devolve a lista de envios; a transação de quem a chamou mete-os na fila e
+envia-os por ordem fora do bloqueio (D28).
 
 ## Reação a alterações de vizinhos
 
@@ -348,8 +362,9 @@ o encerramento do servidor.
 - Sem RTT medido (primeiros segundos de uma ligação), o desempate é pelo ID; quando
   o RTT aparece pode haver uma troca única de montante.
 - As mensagens de subscrição não têm confirmação de entrega.
-- As épocas do publicador são mantidas em memória e recomeçam em 1 quando o
-  servidor é reiniciado; os nós aceitam-nas porque a queda do servidor provoca
-  `WITHDRAW` e deixa as rotas sem caminho.
+- As épocas do publicador começam na hora do arranque em milissegundos (D27): um
+  servidor reiniciado anuncia épocas maiores do que as retiradas. Se o relógio do
+  servidor recuar entre arranques, os nós só o aceitam ao fim da retenção
+  (`--route-ttl`).
 - O tempo de vida (`--route-ttl`, por omissão 6 × o intervalo de anúncio) só
   funciona se todos os nós usarem o mesmo `--announce-interval`.

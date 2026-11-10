@@ -131,7 +131,9 @@ class RoutingIntegrationTest(unittest.TestCase):
         self.assertTrue(self.tables["C"].activate(self.nodes["C"], "S1", FLOW))
         self.assertTrue(wait_for(
             lambda: self.tables["S1"].active_destinations("S1", FLOW) == ("A",)))
-        self.assertTrue(wait_for(lambda: self.tables["C"].get("S1", FLOW).epoch >= 3))
+        self.assertTrue(wait_for(lambda: self.tables["C"].get("S1", FLOW).epoch
+                                 >= self.publisher.first_epoch + 2))
+        old_epoch = self.tables["C"].get("S1", FLOW).epoch
 
         # O servidor morre: A perde o montante, retira a rota e o C fica sem caminho.
         self.publisher.stop()
@@ -139,7 +141,8 @@ class RoutingIntegrationTest(unittest.TestCase):
         route_c = self.tables["C"].get("S1", FLOW)
         self.assertTrue(wait_for(lambda: route_c.upstream is None))
 
-        # Reinício: a época recomeça em 1 e tem de voltar a ser aceite.
+        # Reinício: as épocas novas partem da hora do arranque, por isso são
+        # maiores do que as retiradas e são aceites sem esperar pelo tempo de vida.
         server = self.nodes["S1"] = make_node("S1", BASE)
         self.tables["S1"] = RoutingTable().attach(server)
         server.start()
@@ -149,7 +152,7 @@ class RoutingIntegrationTest(unittest.TestCase):
             lambda: self.tables["S1"].active_destinations("S1", FLOW) == ("A",)))
         self.assertEqual(route_c.upstream, "A")
         self.assertEqual(route_c.state, ACTIVE)
-        self.assertLess(route_c.epoch, 10)
+        self.assertGreater(route_c.epoch, old_epoch)
 
 
 DATA_HOSTS = {"A": "127.0.0.1", "S1": "127.0.0.2", "C1": "127.0.0.3", "C2": "127.0.0.4"}
