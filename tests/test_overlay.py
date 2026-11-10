@@ -354,6 +354,114 @@ class DeficitTimerTest(unittest.TestCase):
             b.close()
 
 
+class RobustnessTest(unittest.TestCase):
+    """O nó tem de sobreviver a entradas más (porta aberta a qualquer cliente) e a handlers com erros."""
+
+    PORT = 47690
+
+    def setUp(self):
+        self.node = OverlayNode("N", "127.0.0.1", self.PORT, keepalive=0.2,
+                                dead_after=1.0, retry_interval=0.2,
+                                bootstrap_service=BootstrapService(
+                                    {"nodes": {"N": {"host": "127.0.0.1", "neighbors": []}}}))
+        self.node.start()
+        self.socks = []
+
+    def tearDown(self):
+        self.node.stop()
+        for s in self.socks:
+            s.close()
+
+    def connect(self):
+        s = socket.create_connection(("127.0.0.1", self.PORT), 2)
+        self.socks.append(s)
+        return s
+
+    def assert_node_still_works(self):
+        """Um vizinho normal continua a conseguir entrar."""
+        peer = OverlayNode("P", "127.0.0.1", self.PORT + 1, keepalive=0.2,
+                           dead_after=1.0, retry_interval=0.2)
+        peer.start()
+        try:
+            peer.add_targets({("127.0.0.1", self.PORT): None})
+            self.assertTrue(wait_for(lambda: "P" in self.node.neighbor_ids()))
+        finally:
+            peer.stop()
+
+    def closed_by_peer(self, sock, timeout=3.0):
+        sock.settimeout(timeout)
+        try:
+            return sock.recv(1) == b""
+        except OSError:
+            return True
+
+    def test_handler_exception_does_not_drop_neighbor(self):
+        calls = []
+
+        def bad_handler(node, nb, msg):
+            calls.append(msg["type"])
+            raise KeyError("erro no handler")
+
+        self.node.register_handler(MsgType.ANNOUNCE, bad_handler)
+        s = self.connect()
+        proto.send_msg(s, make_msg(MsgType.HELLO, "P"))
+        self.assertEqual(proto.recv_msg(s)["type"], MsgType.HELLO)
+        self.assertTrue(wait_for(lambda: self.node.neighbor_ids() == ["P"]))
+        for epoch in (1, 2):
+            proto.send_msg(s, make_msg(MsgType.ANNOUNCE, "P", server_id="P", flow="f",
+                                       epoch=epoch, metric=0))
+        self.assertTrue(wait_for(lambda: len(calls) == 2), "o 2.º anúncio não chegou ao handler")
+        self.assertEqual(self.node.neighbor_ids(), ["P"])
+
+    def test_garbage_bytes_do_not_kill_node(self):
+        s = self.connect()
+        s.sendall(b"\xff\xfe isto nao e json \x00\x01" * 10)
+        self.assertTrue(self.closed_by_peer(s))
+        self.assert_node_still_works()
+
+    def test_oversized_length_header_rejected(self):
+        s = self.connect()
+        s.sendall((0x7FFFFFFF).to_bytes(4, "big") + b"{")
+        self.assertTrue(self.closed_by_peer(s))
+        self.assert_node_still_works()
+
+    def test_silent_connection_is_closed_after_handshake_timeout(self):
+        with mock.patch.object(node_mod, "HANDSHAKE_TIMEOUT", 0.5):
+            s = self.connect()  # liga e não diz nada
+            self.assertTrue(self.closed_by_peer(s, 3.0))
+        self.assert_node_still_works()
+
+    def test_truncated_message_does_not_hang_node(self):
+        s = self.connect()
+        s.sendall((100).to_bytes(4, "big") + b'{"type":"HELLO"')  # prometeu 100 bytes, enviou 15
+        s.shutdown(socket.SHUT_WR)
+        self.assertTrue(self.closed_by_peer(s))
+        self.assert_node_still_works()
+
+    def test_invalid_bootstrap_request_is_dropped(self):
+        s = self.connect()
+        s.sendall(proto._HEADER.pack(len(b"x")) + b"x")  # nem sequer é JSON
+        self.assertTrue(self.closed_by_peer(s))
+        s2 = self.connect()
+        raw = b'{"type":"REPLACE","src":"N","data":{"have":[],"lost":[],"need":0}}'
+        s2.sendall(proto._HEADER.pack(len(raw)) + raw)  # need inválido
+        self.assertTrue(self.closed_by_peer(s2))
+        self.assert_node_still_works()
+
+    def test_register_to_non_bootstrapper_says_so(self):
+        plain = OverlayNode("Q", "127.0.0.1", self.PORT + 2)
+        plain.start()
+        try:
+            s = socket.create_connection(("127.0.0.1", self.PORT + 2), 2)
+            self.socks.append(s)
+            proto.send_msg(s, make_msg(MsgType.REGISTER, "X"))
+            reply = proto.recv_msg(s)
+            self.assertEqual(reply["type"], MsgType.ERROR)
+            self.assertNotIn("desconhecido", reply["data"]["reason"])
+        finally:
+            plain.stop()
+
+
 class BootstrapServiceTest(unittest.TestCase):
     def setUp(self):
         self.svc = BootstrapService({"nodes": {

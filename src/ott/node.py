@@ -356,14 +356,16 @@ class OverlayNode:
             sock.close()
 
     def _serve_bootstrap(self, sock, msg):
-        nbs = None
-        if self.bootstrap_service:
-            if msg["type"] == MsgType.REGISTER:
-                nbs = self.bootstrap_service.register(msg["src"])
-            else:
-                d = msg["data"]
-                nbs = self.bootstrap_service.replacements(
-                    msg["src"], have=d["have"], lost=d["lost"], need=d["need"])
+        if not self.bootstrap_service:
+            proto.send_msg(sock, make_msg(MsgType.ERROR, self.id,
+                                          reason="este nó não é bootstrapper"))
+            return
+        if msg["type"] == MsgType.REGISTER:
+            nbs = self.bootstrap_service.register(msg["src"])
+        else:
+            d = msg["data"]
+            nbs = self.bootstrap_service.replacements(
+                msg["src"], have=d["have"], lost=d["lost"], need=d["need"])
         if nbs is None:
             reply = make_msg(MsgType.ERROR, self.id, reason="nó desconhecido")
         else:
@@ -470,7 +472,11 @@ class OverlayNode:
             pass
         elif mtype in self._handlers:
             # contrato (protocolo.md §4): o handler recebe o ID do vizinho, não o objeto
-            self._handlers[mtype](self, nb.id, msg)
+            try:
+                self._handlers[mtype](self, nb.id, msg)
+            except Exception:
+                # um erro no handler de outro módulo (rotas, streaming) não pode derrubar a ligação
+                log.exception("erro no handler de %s (mensagem de %s)", mtype, nb.id)
         else:
             log.debug("mensagem %s ignorada (de %s)", mtype, nb.id)
 

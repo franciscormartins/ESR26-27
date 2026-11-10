@@ -14,7 +14,7 @@
 - **Etapa 2 (estado em 2026-11-09):** anúncios periódicos por fluxo; montante escolhido por
   saltos com desempate pelo RTT (com histerese); subscrições agregadas por ramo; dados RTP/JPEG
   por UDP pelos ramos ativos com RPF estrito; reparação rápida, `WITHDRAW` e tempo de vida das
-  rotas para falhas e reinício do servidor. Tudo coberto por 111 testes automáticos, incluindo
+  rotas para falhas e reinício do servidor. Tudo coberto por 118 testes automáticos, incluindo
   nós reais em localhost. Até 2026-11-09 a Etapa 2 só funcionava com nós falsos (handlers
   recebiam o objeto `Neighbor`, corrigido em `e83e37b`). **Falta:** segundo servidor nas
   topologias e todos os ensaios no CORE (ver `docs/ETAPA2.md`).
@@ -76,6 +76,7 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 | D26 | Plano de dados: o datagrama leva o id do nó que o envia (campo `salto`, formato versão 2); o vizinho de entrada (RPF) é esse id e não o IP de origem (**implementado** em 2026-11-10) | Substitui a identificação pelo IP da ligação TCP (`neighbor_for_address`, que fica na interface do `OverlayNode` mas deixa de ser usada pelo forwarder). Falhou no CORE (cenário 3): o r5 envia o UDP para o r9 pela `eth1` (10.0.5.1), mas o O5 conhece o O7 pelo IP a que se ligou, 10.0.4.2, e descartou todo o vídeo após a reparação rápida. O id não depende do encaminhamento IP. Impacto: `rtp.py` passa à versão 2 e rejeita a 1, por isso todos os nós têm de ser atualizados juntos; `protocolo.md` §3.6. Sem autenticação do id, como no resto do controlo. |
 | D27 | Épocas e retirada: o servidor começa as épocas na hora do arranque em ms (+1 por ronda); uma rota retirada por este nó só aceita épocas maiores do que a retirada durante `route_ttl` (retenção), e depois qualquer época (**implementado** em 2026-11-10) | Substitui a regra da D22 "rota sem caminho aceita qualquer época", que no CORE (ensaio 9) deixou anúncios antigos em trânsito formar um ciclo fantasma O6 ↔ O7 que só o tempo de vida desfez (L9). Épocas a partir do relógio mantêm o reinício do servidor imediato sem essa regra. Impacto: formato das mensagens inalterado (só o valor de `epoch` muda), por isso não há problema de compatibilidade; uma retirada só é reaprendida na ronda seguinte; um servidor com o relógio atrasado só é aceite ao fim de `--route-ttl`. |
 | D28 | Envios da tabela de rotas por ordem: as mensagens decididas sob o bloqueio entram nessa altura numa fila única e são enviadas fora do bloqueio, por ordem, uma thread de cada vez (**implementado** em 2026-11-10) | Antes, cada handler enviava depois de libertar o bloqueio, e duas threads podiam trocar a ordem: no CORE (ensaio 9 repetido), um `ACTIVATE` saiu depois do `DEACTIVATE` da troca de montante seguinte e deixou um ramo órfão (L10). Formato das mensagens inalterado. Custo: um envio lento a um vizinho atrasa os envios seguintes de outras threads (já atrasava os da própria thread). |
+| D29 | Uma exceção num handler (rotas, streaming) é registada no log e **não fecha a ligação** ao vizinho; um nó que não é bootstrapper responde `ERROR "este nó não é bootstrapper"` | Um erro de outro módulo não pode derrubar a ligação nem fazer o vizinho dar-nos como caídos; o texto antigo (`nó desconhecido`) enganava quem apontava `-b` a um nó errado. Cobertos por `RobustnessTest`. |
 
 ## 4. Arquitetura (resumo)
 
@@ -116,7 +117,7 @@ Os handlers recebem `fn(node, neighbor_id, msg)`, em que `neighbor_id` é uma st
 
 ## 6. Como testar
 
-**Suite completa (111 testes, ~24 s):**
+**Suite completa (118 testes, ~26 s):**
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -t .
@@ -260,6 +261,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] Passar a especificação e os resultados para o relatório (`docs/relatorio/e1_overlay.tex`, incluída em `main.tex`).
 - [x] Atribuição overlay→CORE do cenário 3: decidida em 2026-11-09, fiel à Figura 1 (D13; `cenario3.json` atualizado).
 - [x] Repetir no CORE o overlay completo do cenário 3 com a nova atribuição: os 11 nós com exatamente os vizinhos do JSON (2026-11-10, logs `2026-11-10-6`). Os resultados 3, 4, 8 e 11 da secção 7 continuam a ser os da atribuição anterior.
+- [x] Revisão cruzada do `routing.py` (`docs/REVISAO_E2.md`; achados todos resolvidos pelo E2) e testes de robustez do nó (D29), 2026-11-10.
 - [ ] **Grupo:** rever `docs/protocolo.md` (inclui o `BYE reason=duplicate`) e o texto `e1_overlay.tex`; o `babel` em português do `main.tex` não está instalado nesta máquina (compila noutra com `texlive-babel-portuguese`).
 - [ ] Decidir se refazemos o cenário 2 com 3 intermédios, como no enunciado.
 
@@ -295,6 +297,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-10 | **Verificação do E1 depois das alterações do E2.** 118 testes OK; `ott` ensaiado de ponta a ponta com o CLI novo (registo no bootstrapper, `--stats`, `Ctrl+C` em 0,3 s com código 0 e `desligado` imediato no vizinho); `cenario3.json` validado contra o XML (todos os IPs pertencem ao nó do CORE indicado, 12 arestas = Figura 1). Reposta a proteção contra exceções em handlers e o `ERROR` próprio de nós que não são bootstrapper, com 7 testes de robustez (D29), que tinham ficado só num `git stash`. Novo `docs/REVISAO_E2.md` com a revisão cruzada fechada. |
 | 2026-11-10 | **Ensaios 3 e 5 da Etapa 2 no CORE.** Ensaio 3 (cenário 1): sair o C1 deixa o C2 a 20/s sem perdas e o O2 a enviar uma só cópia; sair o C2 faz o S1 deixar de emitir. Ensaio 5 (cenário 2): com o link O2–S1 em baixo, o O2 deteta por timeout em ≈ 5,5 s, retira e reaprende pelo O1; o C1 fica ≈ 6,9 s sem vídeo (138 imagens); ao repor o link, o O2 volta ao caminho direto sem nenhuma imagem perdida. `RPF=0` em todos os nós. Falta só o ensaio 7. Logs em `~/uni/esr/ott-logs/2026-11-10-7` e `-8`. |
 | 2026-11-10 | **Ensaio 9 no CORE repetido com a topologia completa (D26–D28).** Os 11 nós com os vizinhos certos; três reinícios do servidor, com os 5 clientes de volta em 1,2–2,9 s e uma cópia por ligação depois de cada um. `descartados=0` e `RPF=0` em todos os nós e `perdidos=0` em todos os clientes. Substitui, para o ramo O6/O8/O9, a sessão anterior em que o C2 arrancou como O9. Logs em `~/uni/esr/ott-logs/2026-11-10-6`. |
 | 2026-11-10 | **Ensaio 9 no CORE com a D28: três reinícios do servidor.** Em cada um, O4, O10 e O11 voltam a receber em ≈ 1–2 s; O2, O3, O5 e O7 sempre com `descartados=0` e `RPF=0`, e o O5 a 40 imagens/s, sem cópias a mais (L10 não se repetiu, incluindo uma troca de montante do `filme_b` logo a seguir a um arranque). Nesta sessão o nó C2 arrancou por engano com `-i O9`, por isso os resultados de O6, O8 e O9 não contam. Logs em `~/uni/esr/ott-logs/2026-11-10-5`. |
