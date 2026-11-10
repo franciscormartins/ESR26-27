@@ -1,0 +1,39 @@
+{
+  "_comment": "Cenário 1: S1 - O2 - {C1, C2}. Ligações diretas: C1 e C2 só alcançam o O2 (estratégia 1, com o IP do O2 na ligação deles).",
+  "xml": "cenario1.xml",
+  "overlay": "cenario1.json",
+  "bootstrap": "S1",
+  "nodes": {
+    "S1": {
+      "serve": true,
+      "publish": [
+        "filme_a"
+      ]
+    },
+    "O2": {},
+    "C1": {
+      "subscribe": [
+        "S1:filme_a"
+      ],
+      "bootstrap": null,
+      "neighbors": [
+        "O2"
+      ],
+      "core_neighbors": [
+        "10.0.1.20"
+      ]
+    },
+    "C2": {
+      "subscribe": [
+        "S1:filme_a"
+      ],
+      "bootstrap": null,
+      "neighbors": [
+        "O2"
+      ],
+      "core_neighbors": [
+        "10.0.2.20"
+      ]
+    }
+  }
+}

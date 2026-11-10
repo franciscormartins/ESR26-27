@@ -171,6 +171,18 @@ def overlay_json(ifaces):
     }
 
 
+# o que corre em cada nó: servidores (2 fluxos cada, filme_b é uma réplica), clientes e suplente (ver docs/CENARIO4.md)
+PLAN = {
+    "S1": {"serve": True, "publish": ["filme_a", "filme_b"]},
+    "S2": {"serve": True, "publish": ["filme_c", "filme_b"]},
+    "O1": {}, "O2": {}, "O3": {}, "O4": {}, "O5": {"spare": True},
+    "C1": {"subscribe": ["S1:filme_a", "S2:filme_c"]},
+    "C2": {"subscribe": ["S1:filme_a", "S2:filme_c"]},
+    "C3": {"subscribe": ["S1:filme_b", "S2:filme_b"]},
+    "C4": {"subscribe": ["S1:filme_a", "S2:filme_c"]},
+}
+
+
 def main():
     root, ifaces, _links = build()
     xml_path = os.path.join(HERE, "cenario4.xml")
@@ -182,7 +194,13 @@ def main():
     with open(json_path, "w") as f:
         json.dump(overlay_json(ifaces), f, indent=2, ensure_ascii=False)
         f.write("\n")
-    print(f"escrito {xml_path} e {json_path}")
+    plan_path = os.path.join(HERE, "cenario4.plano.json")
+    with open(plan_path, "w") as f:
+        json.dump({"_comment": "Plano do cenário 4 (gerado por gerar_cenario4.py): o que corre em cada nó.",
+                   "xml": "cenario4.xml", "overlay": "cenario4.json", "bootstrap": "S1", "nodes": PLAN,
+                   "free": ["L1", "L2"]}, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    print(f"escrito {xml_path}, {json_path} e {plan_path}")
 
 
 if __name__ == "__main__":

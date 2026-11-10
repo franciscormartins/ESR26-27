@@ -1,0 +1,51 @@
+{
+  "_comment": "Cenário 3 (Figura 1): O1=S1 publica dois fluxos; 4 clientes veem o filme_a e O11 o filme_b. C1, C3, C5 e C9 ficam livres.",
+  "xml": "cenario3.xml",
+  "overlay": "cenario3.json",
+  "bootstrap": "O1",
+  "nodes": {
+    "O1": {
+      "serve": true,
+      "publish": [
+        "filme_a",
+        "filme_b"
+      ]
+    },
+    "O2": {},
+    "O3": {},
+    "O5": {},
+    "O6": {},
+    "O7": {},
+    "O4": {
+      "subscribe": [
+        "O1:filme_a"
+      ]
+    },
+    "O8": {
+      "subscribe": [
+        "O1:filme_a"
+      ]
+    },
+    "O9": {
+      "subscribe": [
+        "O1:filme_a"
+      ]
+    },
+    "O10": {
+      "subscribe": [
+        "O1:filme_a"
+      ]
+    },
+    "O11": {
+      "subscribe": [
+        "O1:filme_b"
+      ]
+    }
+  },
+  "free": [
+    "C1",
+    "C3",
+    "C5",
+    "C9"
+  ]
+}

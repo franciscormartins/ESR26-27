@@ -1,0 +1,57 @@
+{
+  "_comment": "Plano do cenário 4 (gerado por gerar_cenario4.py): o que corre em cada nó.",
+  "xml": "cenario4.xml",
+  "overlay": "cenario4.json",
+  "bootstrap": "S1",
+  "nodes": {
+    "S1": {
+      "serve": true,
+      "publish": [
+        "filme_a",
+        "filme_b"
+      ]
+    },
+    "S2": {
+      "serve": true,
+      "publish": [
+        "filme_c",
+        "filme_b"
+      ]
+    },
+    "O1": {},
+    "O2": {},
+    "O3": {},
+    "O4": {},
+    "O5": {
+      "spare": true
+    },
+    "C1": {
+      "subscribe": [
+        "S1:filme_a",
+        "S2:filme_c"
+      ]
+    },
+    "C2": {
+      "subscribe": [
+        "S1:filme_a",
+        "S2:filme_c"
+      ]
+    },
+    "C3": {
+      "subscribe": [
+        "S1:filme_b",
+        "S2:filme_b"
+      ]
+    },
+    "C4": {
+      "subscribe": [
+        "S1:filme_a",
+        "S2:filme_c"
+      ]
+    }
+  },
+  "free": [
+    "L1",
+    "L2"
+  ]
+}

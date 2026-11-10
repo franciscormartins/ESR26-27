@@ -14,7 +14,7 @@
 - **Etapa 2 (estado em 2026-11-09):** anúncios periódicos por fluxo; montante escolhido por
   saltos com desempate pelo RTT (com histerese); subscrições agregadas por ramo; dados RTP/JPEG
   por UDP pelos ramos ativos com RPF estrito; reparação rápida, `WITHDRAW` e tempo de vida das
-  rotas para falhas e reinício do servidor. Tudo coberto por 129 testes automáticos, incluindo
+  rotas para falhas e reinício do servidor. Tudo coberto por 161 testes automáticos, incluindo
   nós reais em localhost. Até 2026-11-09 a Etapa 2 só funcionava com nós falsos (handlers
   recebiam o objeto `Neighbor`, corrigido em `e83e37b`). **Falta:** segundo servidor nas
   topologias e todos os ensaios no CORE (ver `docs/ETAPA2.md`).
@@ -78,6 +78,9 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 | D28 | Envios da tabela de rotas por ordem: as mensagens decididas sob o bloqueio entram nessa altura numa fila única e são enviadas fora do bloqueio, por ordem, uma thread de cada vez (**implementado** em 2026-11-10) | Antes, cada handler enviava depois de libertar o bloqueio, e duas threads podiam trocar a ordem: no CORE (ensaio 9 repetido), um `ACTIVATE` saiu depois do `DEACTIVATE` da troca de montante seguinte e deixou um ramo órfão (L10). Formato das mensagens inalterado. Custo: um envio lento a um vizinho atrasa os envios seguintes de outras threads (já atrasava os da própria thread). |
 | D29 | Uma exceção num handler (rotas, streaming) é registada no log e **não fecha a ligação** ao vizinho; um nó que não é bootstrapper responde `ERROR "este nó não é bootstrapper"` | Um erro de outro módulo não pode derrubar a ligação nem fazer o vizinho dar-nos como caídos; o texto antigo (`nó desconhecido`) enganava quem apontava `-b` a um nó errado. Cobertos por `RobustnessTest`. |
 | D30 | Cenário 4 (`docs/CENARIO4.md`): **rede em teia** de 13 routers (centro, anel interior, anel exterior, raios e ligações radiais), 4 clientes e **dois servidores ligados entre si**, de modo que cada um é caminho de passagem dos fluxos do outro; overlay **só em hosts** com o id igual ao nome do nó no CORE; `S1` e `S2` correm ambos `--serve`; `S1` publica `filme_a` e `filme_b`, `S2` publica `filme_c` e `filme_b` (réplica) | Serve para ver como o programa reage à queda de um servidor (rotas do outro redirecionadas, réplica a salvar o cliente) e para avaliar rotas com atraso, jitter e perdas diferentes (empates de saltos em `C3` e `C4`; ligações diretas para `tc netem` ligação a ligação). Atraso base 0 de propósito (o OSPF reparte por caminhos de custo igual). Gerado por `topologies/gerar_cenario4.py`; coerência XML/JSON e canvas em `tests/test_topologias.py`. **Ainda não aberto no CORE.** |
+| D31 | Ferramentas de teste **fora do núcleo**: `ott --status-file` (estado de cada nó em JSON, `src/ott/status.py`), `ottctl` (lançar cenários, falhas e atrasos) e um painel web (`src/ott/ctl/`, ver `docs/OTTCTL.md`). Só biblioteca standard; o painel só lê os ficheiros de estado e chama o orquestrador | Lançar 11 nós à mão e ler logs era lento e propenso a erros; o enunciado pede uma tabela de rotas por nó, que agora se vê. Os nós do CORE partilham o sistema de ficheiros do anfitrião: o estado passa por ficheiros, sem rede. Painel só em `127.0.0.1`, pedidos validados (no CORE as ações correm como root dentro dos nós). **Não faz parte da entrega do enunciado.** |
+| D32 | `ott` trata `SIGTERM` como `Ctrl+C` (BYE aos vizinhos, estado final) e repõe o `SIGINT` | Um `kill` normal deixava os vizinhos à espera do timeout (6 s); um processo lançado em segundo plano por uma shell não interativa herda o `SIGINT` ignorado e o `Ctrl+C` não fazia nada. Alteração em `cli.py` (poucas linhas). |
+| D33 | Um nó com `--bind IP` liga-se aos vizinhos a partir desse IP (`node.py`) e o plano de dados UDP respeita o `--bind` (`cli.py`) | Permite correr vários nós na mesma máquina, cada um num IP de loopback (modo `local` do `ottctl`), com o plano de dados a funcionar; sem `--bind` (0.0.0.0, como no CORE) nada muda. |
 
 ## 4. Arquitetura (resumo)
 
@@ -89,6 +92,8 @@ src/ott/cli.py          comando `ott` (-b, --serve, publish/subscribe, --stats .
 src/ott/routing.py      modelo de rotas, anúncios, subscrições e destinos ativos
 src/ott/forwarding.py   encaminhamento dos pacotes RTP/JPEG por UDP
 src/ott/streaming/      empacotamento RTP, emissor MJPEG e estatísticas do recetor
+src/ott/status.py       estado de um nó em JSON (ott --status-file), para o ottctl e o painel
+src/ott/ctl/            ottctl: orquestração dos cenários e painel web (bin/ottctl); docs/OTTCTL.md
 topologies/             cenarios 1-3: .json (overlay) e .xml (CORE)
 docs/protocolo.md       especificação das mensagens e interações
 docs/ETAPA2.md          roadmap e checklist da implementação das rotas
@@ -118,7 +123,7 @@ Os handlers recebem `fn(node, neighbor_id, msg)`, em que `neighbor_id` é uma st
 
 ## 6. Como testar
 
-**Suite completa (129 testes, ~26 s):**
+**Suite completa (161 testes, ~45 s):**
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -t .
@@ -298,6 +303,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-10 | **`ottctl`, ficheiro de estado e painel web (D31–D33).** Novo `ott --status-file` (`src/ott/status.py`) e o orquestrador `bin/ottctl` (`src/ott/ctl/`): lança um cenário inteiro (`--backend core` em nós de uma sessão do CORE por `vcmd`, ou `--backend local` com todos os nós nesta máquina em IPs de loopback), mata/pára/congela/relança nós, aplica atraso/jitter/perdas/débito e corta ligações (só CORE), e abre um painel web com o grafo do overlay, a árvore de cada fluxo, a **tabela de rotas** de cada nó, os fluxos recebidos e só os eventos relevantes. Planos dos 4 cenários em `topologies/*.plano.json`. Alterações em módulos partilhados: `cli.py` (`--status-file`, `--status-interval`, `SIGTERM`=Ctrl+C, forwarder com `--bind`) e `node.py` (liga a partir do `--bind`). Ensaiado no modo local com o cenário 4 inteiro (10 nós, vídeo a 20/s): ao matar o `S1`, os nós registaram o `WITHDRAW` em 0,1 s e o `filme_c` do `C1` passou de `S2–S1–C1` para `S2–O3–O1–C1` em ≈ 3 s; o `filme_b` do `C3` nunca parou (réplica). 161 testes (+30). **O modo `core` ainda não foi corrido numa sessão real do CORE.** |
 | 2026-11-10 | **Cenário 4 refeito (rede em teia, dois servidores).** A 1.ª versão tinha 6 nós fora do canvas do CORE (1000×750), por isso só se via o `S1`; o gerador passa a verificar que tudo cabe. Nova topologia: 13 routers em teia, 4 clientes, 11 nós overlay (`S1`–`S2` ligados, `O1`–`O4`, `C1`–`C4`, suplente `O5`) e 2 hosts livres; `docs/CENARIO4.md` com nós, IPs, interfaces, ligações overlay diretas/com 2 caminhos, saltos por fluxo e por falha, comandos de cada nó e 22 testes por ensaiar (falha de servidor e réplica, atraso/jitter/perdas/largura de banda, entradas e saídas, bootstrap). `tests/test_topologias.py`: coerência XML/JSON dos 4 cenários, nós dentro do canvas e propriedades do cenário 4 (cada servidor é caminho de passagem do outro, qualquer falha deixa os clientes ligados, empates de saltos). 129 testes. Por abrir no CORE. |
 | 2026-11-10 | **Verificação do E1 depois das alterações do E2.** 118 testes OK; `ott` ensaiado de ponta a ponta com o CLI novo (registo no bootstrapper, `--stats`, `Ctrl+C` em 0,3 s com código 0 e `desligado` imediato no vizinho); `cenario3.json` validado contra o XML (todos os IPs pertencem ao nó do CORE indicado, 12 arestas = Figura 1). Reposta a proteção contra exceções em handlers e o `ERROR` próprio de nós que não são bootstrapper, com 7 testes de robustez (D29), que tinham ficado só num `git stash`. Novo `docs/REVISAO_E2.md` com a revisão cruzada fechada. |
 | 2026-11-10 | **Ensaios 3 e 5 da Etapa 2 no CORE.** Ensaio 3 (cenário 1): sair o C1 deixa o C2 a 20/s sem perdas e o O2 a enviar uma só cópia; sair o C2 faz o S1 deixar de emitir. Ensaio 5 (cenário 2): com o link O2–S1 em baixo, o O2 deteta por timeout em ≈ 5,5 s, retira e reaprende pelo O1; o C1 fica ≈ 6,9 s sem vídeo (138 imagens); ao repor o link, o O2 volta ao caminho direto sem nenhuma imagem perdida. `RPF=0` em todos os nós. Falta só o ensaio 7. Logs em `~/uni/esr/ott-logs/2026-11-10-7` e `-8`. |

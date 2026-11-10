@@ -381,7 +381,10 @@ class OverlayNode:
 
     def _try_connect(self, target):
         try:
-            sock = socket.create_connection(target, CONNECT_TIMEOUT)
+            # com um --bind específico liga-se a partir desse IP: o vizinho vê o endereço certo
+            # (e podem correr vários nós na mesma máquina, cada um no seu IP de loopback)
+            source = (self.host, 0) if self.host not in ("0.0.0.0", "", "::") else None
+            sock = socket.create_connection(target, CONNECT_TIMEOUT, source_address=source)
         except OSError:
             return
         try:

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ottctl</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1d2330; --mute:#6b7385; --line:#d9dde5; --ok:#2e9d57; --off:#9aa1ae;
+          --stop:#5b6272; --dead:#d64545; --frozen:#3b82f6; --stale:#e08a1e; --accent:#2f5bea; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171d; --card:#1d222b; --ink:#e6e9ef; --mute:#97a0b2; --line:#323a48; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; gap:12px; padding:10px 16px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; }
+  .badge { padding:2px 8px; border-radius:10px; background:var(--accent); color:#fff; font-size:12px; }
+  .spacer { flex:1; }
+  button { font:inherit; padding:4px 10px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:6px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.danger { color:var(--dead); } button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  select, input { font:inherit; padding:3px 6px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); }
+  main { display:grid; grid-template-columns: minmax(0,3fr) minmax(320px,2fr); gap:12px; padding:12px 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  #svg { width:100%; height:auto; max-height:68vh; display:block; }
+  .node { cursor:pointer; } .node text { pointer-events:none; }
+  .legend span { margin-right:12px; white-space:nowrap; } .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; }
+  h3 { margin:0 0 6px; font-size:14px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; } th, td { text-align:left; padding:3px 8px 3px 0; border-bottom:1px solid var(--line); }
+  th { color:var(--mute); font-weight:600; } td.num { font-variant-numeric: tabular-nums; }
+  .pill { padding:1px 8px; border-radius:10px; color:#fff; font-size:12px; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; align-items:center; }
+  .events { max-height:260px; overflow:auto; font:12.5px/1.5 ui-monospace, monospace; }
+  .ev-bad { color:var(--dead); } .ev-good { color:var(--ok); } .ev-info { color:var(--accent); } .t { color:var(--mute); }
+  #toast { position:fixed; right:16px; bottom:16px; padding:8px 12px; border-radius:8px; background:var(--ink); color:var(--bg); opacity:0; transition:opacity .2s; }
+  #toast.show { opacity:.95; } .muted { color:var(--mute); } .full { grid-column: 1 / -1; }
+  label { color:var(--mute); font-size:12.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">ottctl</h1><span class="badge" id="backend"></span><span class="muted" id="clock"></span>
+  <span class="spacer"></span>
+  <label>Fluxo <select id="flowsel"></select></label>
+  <button class="primary" id="btn-up">Lançar tudo</button>
+  <button class="danger" id="btn-down">Parar tudo</button>
+</header>
+<main>
+  <section class="card"><svg id="svg" viewBox="0 0 1000 640"></svg><div class="legend muted" id="legend"></div></section>
+  <aside class="card" id="panel"></aside>
+  <section class="card full" id="net"></section>
+  <section class="card full"><h3>Eventos relevantes <label><input type="checkbox" id="onlysel"> só o nó escolhido</label></h3><div class="events" id="events"></div></section>
+</main>
+<div id="toast"></div>
+<script>
+"use strict";
+const COLORS = {up:"var(--ok)", off:"var(--off)", stopped:"var(--stop)", dead:"var(--dead)", frozen:"var(--frozen)", stale:"var(--stale)"};
+const LABELS = {up:"ligado", off:"por lançar", stopped:"parado", dead:"morto", frozen:"congelado", stale:"sem resposta"};
+const PALETTE = ["#2f5bea", "#d9467a", "#16a085", "#e08a1e", "#8e44ad", "#7f8c8d"];
+let S = null, selected = null, underlay = null, flowFilter = "";
+
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const $ = (id) => document.getElementById(id);
+const fmt = (v, d = 1) => v === null || v === undefined ? "–" : Number(v).toFixed(d);
+
+function toast(msg, bad) { const t = $("toast"); t.textContent = msg; t.style.background = bad ? "var(--dead)" : "var(--ink)"; t.className = "show"; clearTimeout(toast.h); toast.h = setTimeout(() => t.className = "", 3500); }
+async function act(body) {
+  try {
+    const r = await fetch("/api/action", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    const j = await r.json(); toast(j.ok ? j.message : (j.error || "erro"), !j.ok); poll();
+  } catch (e) { toast("sem ligação ao painel", true); }
+}
+
+function layout(pos, ids) {
+  const xs = ids.map(i => pos[i][0]), ys = ids.map(i => pos[i][1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const sx = 880 / Math.max(1, x1 - x0), sy = 540 / Math.max(1, y1 - y0), k = Math.min(sx, sy);
+  const ox = 500 - k * (x0 + x1) / 2, oy = 320 - k * (y0 + y1) / 2;
+  return Object.fromEntries(ids.map(i => [i, [ox + k * pos[i][0], oy + k * pos[i][1]]]));
+}
+
+function renderGraph() {
+  const ids = Object.keys(S.nodes), P = layout(S.positions, ids);
+  const flows = flowFilter ? [flowFilter] : S.flows, svg = [];
+  svg.push('<defs>' + PALETTE.map((c, i) => `<marker id="a${i}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`).join("") + '</defs>');
+  for (const [a, b] of S.edges) {
+    if (!P[a] || !P[b]) continue;
+    svg.push(`<line x1="${P[a][0]}" y1="${P[a][1]}" x2="${P[b][0]}" y2="${P[b][1]}" stroke="var(--line)" stroke-width="2"/>`);
+  }
+  flows.forEach((f) => {
+    const ci = S.flows.indexOf(f) % PALETTE.length, off = (flows.indexOf(f) - (flows.length - 1) / 2) * 4;
+    for (const e of (S.tree[f] || [])) {
+      if (!P[e.from] || !P[e.to]) continue;
+      const [x1, y1] = P[e.from], [x2, y2] = P[e.to], dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len * off, ny = dx / len * off, sh = 20 / len;
+      const ax = x1 + dx * sh + nx, ay = y1 + dy * sh + ny, bx = x2 - dx * sh + nx, by = y2 - dy * sh + ny;
+      svg.push(`<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="${PALETTE[ci]}" stroke-width="${e.active ? 3.2 : 1.4}" ${e.active ? "" : 'stroke-dasharray="4 4" opacity=".6"'} marker-end="url(#a${ci})"/>`);
+    }
+  });
+  for (const id of ids) {
+    const n = S.nodes[id], [x, y] = P[id], col = COLORS[n.health] || "var(--off)", sel = id === selected;
+    const shape = n.role === "servidor"
+      ? `<rect x="${x - 22}" y="${y - 17}" width="44" height="34" rx="7" fill="${col}" stroke="${sel ? "var(--ink)" : "none"}" stroke-width="3"/>`
+      : `<circle cx="${x}" cy="${y}" r="${n.role === "cliente" ? 17 : 20}" fill="${col}" ${n.role === "cliente" ? 'fill-opacity=".85"' : ""} stroke="${sel ? "var(--ink)" : "none"}" stroke-width="3"/>`;
+    const rates = ((n.status && n.status.flows) || []).filter(f => f.active).map(f => `${f.origin}:${f.flow.replace("filme_", "")} ${f.stalled ? "✗" : Math.round(f.rate) + "/s"}`);
+    svg.push(`<g class="node" data-id="${esc(id)}">${shape}<text x="${x}" y="${y + 5}" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">${esc(id)}</text>`
+      + (n.spare ? `<text x="${x}" y="${y + 34}" text-anchor="middle" font-size="10" fill="var(--mute)">suplente</text>` : "")
+      + rates.map((r, i) => `<text x="${x}" y="${y + 34 + i * 12}" text-anchor="middle" font-size="10.5" fill="var(--ink)">${esc(r)}</text>`).join("") + `</g>`);
+  }
+  $("svg").innerHTML = svg.join("");
+  document.querySelectorAll(".node").forEach(g => g.onclick = () => { selected = g.dataset.id; render(); });
+  $("legend").innerHTML = Object.entries(LABELS).map(([k, v]) => `<span><i class="dot" style="background:${COLORS[k]}"></i>${v}</span>`).join("")
+    + flows.map((f) => `<span><i class="dot" style="background:${PALETTE[S.flows.indexOf(f) % PALETTE.length]}"></i>${esc(f)}</span>`).join("")
+    + '<span>▭ servidor · ● cliente/intermédio · traço cheio = ramo ativo, tracejado = rota sem procura</span>';
+}
+
+function pathTo(flow, id) {
+  const up = Object.fromEntries((S.tree[flow] || []).map(e => [e.to, e.from])), out = [id];
+  while (up[out[out.length - 1]] && out.length < 30) out.push(up[out[out.length - 1]]);
+  return out.join(" ← ");
+}
+
+function renderPanel() {
+  const n = S.nodes[selected];
+  if (!n) { $("panel").innerHTML = '<p class="muted">Clica num nó do grafo.</p>'; return; }
+  const st = n.status || {}, health = n.health;
+  let h = `<h3>${esc(n.id)} <span class="pill" style="background:${COLORS[health]}">${LABELS[health] || health}</span> <span class="muted">${esc(n.role)}${n.core !== n.id ? " · nó do CORE " + esc(n.core) : ""}</span></h3>`;
+  h += `<div class="row"><button data-act="start">Lançar</button><button data-act="stop">Parar (limpo)</button><button class="danger" data-act="kill">Matar</button><button data-act="freeze">Congelar</button><button data-act="thaw">Retomar</button></div>`;
+  h += `<h3>Vizinhos</h3>` + ((st.neighbors || []).length ? `<table><tr><th>nó</th><th>RTT ms</th></tr>${st.neighbors.map(x => `<tr><td>${esc(x.id)}</td><td class="num">${fmt(x.rtt_ms, 2)}</td></tr>`).join("")}</table>` : '<p class="muted">sem vizinhos</p>');
+  h += `<h3>Tabela de rotas</h3>`;
+  const routes = st.routes || [];
+  h += routes.length ? `<table><tr><th>fluxo</th><th>montante</th><th>saltos</th><th>atraso</th><th>estado</th><th>destinos</th><th>candidatos</th></tr>` + routes.map(r =>
+      `<tr><td>${esc(r.origin)}:${esc(r.flow)}</td><td>${esc(r.withdrawn ? "(retirada)" : r.upstream || "(origem)")}</td><td class="num">${fmt(r.metric, 0)}</td><td class="num">${fmt(r.delay_ms)}</td>`
+      + `<td>${esc(r.state)}</td><td>${esc(r.destinations.join(",") || "–")}${r.local_subscribers.length ? " + local" : ""}</td>`
+      + `<td class="muted">${Object.entries(r.candidates).filter(([, c]) => c.metric !== null).map(([k, c]) => esc(k) + ":" + c.metric + (c.delay_ms !== null ? "/" + fmt(c.delay_ms) : "")).join(" ")}</td></tr>`).join("") + "</table>"
+    : '<p class="muted">sem rotas</p>';
+  const flows = (st.flows || []);
+  if (flows.length) {
+    h += `<h3>Fluxos recebidos</h3><table><tr><th>fluxo</th><th>img/s</th><th>perdidos</th><th>jitter ms</th><th>estado</th><th>caminho</th></tr>` + flows.map(f =>
+      `<tr><td>${esc(f.origin)}:${esc(f.flow)}</td><td class="num">${fmt(f.rate)}</td><td class="num">${f.lost} (${fmt(f.loss_pct)}%)</td><td class="num">${fmt(f.jitter_ms, 2)}</td>`
+      + `<td>${f.stalled ? '<b class="ev-bad">parou</b>' : f.active ? "a chegar" : "à espera"}</td><td class="muted">${esc(pathTo(f.origin + ":" + f.flow, n.id))}</td></tr>`).join("") + "</table>";
+  }
+  if (st.data) h += `<p class="muted">Dados UDP: ${st.data.received} recebidos (${fmt(st.data.received_rate)}/s), ${st.data.forwarded} reencaminhados (${fmt(st.data.forwarded_rate)}/s), ${st.data.dropped} descartados (RPF ${st.data.rpf_dropped}).</p>`;
+  if (st.bootstrapper) h += `<p class="muted">Bootstrapper: registados ${esc(st.bootstrapper.join(", ") || "nenhum")}.</p>`;
+  $("panel").innerHTML = h;
+  $("panel").querySelectorAll("button[data-act]").forEach(b => b.onclick = () => act({action: b.dataset.act, node: n.id}));
+}
+
+function renderEvents() {
+  const only = $("onlysel").checked;
+  const kinds = {bad: ["vizinho_down", "rota_perdida", "withdraw", "fluxo_parou", "rota_esquecida", "paragem"], good: ["vizinho_up", "rota_recuperada", "fluxo_voltou", "arranque"]};
+  const list = S.events.filter(e => !only || e.node === selected).slice(-120).reverse();
+  $("events").innerHTML = list.map(e => {
+    const d = new Date(e.t * 1000), c = kinds.bad.includes(e.kind) ? "ev-bad" : kinds.good.includes(e.kind) ? "ev-good" : "ev-info";
+    return `<div class="${c}"><span class="t">${d.toLocaleTimeString("pt-PT")}.${String(d.getMilliseconds()).padStart(3, "0")}</span> <b>${esc(e.node)}</b> ${esc(e.text)}</div>`;
+  }).join("") || '<span class="muted">sem eventos</span>';
+}
+
+function renderNet() {
+  if (!S.can_network) { $("net").innerHTML = '<h3>Rede</h3><p class="muted">Atraso, jitter, perdas e cortes de ligações só estão disponíveis com o CORE (<code>ottctl up … --backend core</code>).</p>'; return; }
+  if ($("net").dataset.ready) return;
+  $("net").dataset.ready = "1";
+  const links = (underlay ? underlay.links : []).map((l, i) => `<option value="${i}">${esc(l.a)}:${esc(l.ia)} ↔ ${esc(l.b)}:${esc(l.ib)}</option>`).join("");
+  $("net").innerHTML = `<h3>Rede (CORE): atraso, jitter, perdas e débito por ligação</h3>
+    <div class="row"><label>Ligação <select id="lk">${links}</select></label>
+      <label>atraso <input id="d" size="6" placeholder="30ms"></label><label>jitter <input id="j" size="6" placeholder="10ms"></label>
+      <label>perdas <input id="l" size="5" placeholder="5%"></label><label>débito <input id="r" size="8" placeholder="500kbit"></label>
+      <button id="lk-apply" class="primary">Aplicar</button><button id="lk-clear">Limpar</button><button id="lk-cut" class="danger">Cortar</button><button id="lk-up">Repor</button></div>
+    <p class="muted">Aplica-se nos dois extremos da ligação. O atraso criado é por sentido: 30 ms em cada extremo dá ≈ 60 ms de RTT. Para atrasar um nó inteiro usa a ligação <i>router ↔ host</i> desse nó.</p>`;
+  const cur = () => { const l = underlay.links[$("lk").value]; return {a: l.a, ia: l.ia, b: l.b, ib: l.ib}; };
+  $("lk-apply").onclick = () => act({action: "link_netem", ...cur(), delay: $("d").value, jitter: $("j").value, loss: $("l").value, rate: $("r").value});
+  $("lk-clear").onclick = () => act({action: "link_clear", ...cur()});
+  $("lk-cut").onclick = () => act({action: "link_set", ...cur(), up: false});
+  $("lk-up").onclick = () => act({action: "link_set", ...cur(), up: true});
+}
+
+function renderHeader() {
+  $("title").textContent = "ottctl · " + S.scenario; $("backend").textContent = S.backend;
+  $("clock").textContent = new Date(S.time * 1000).toLocaleTimeString("pt-PT");
+  const sel = $("flowsel"), want = ["", ...S.flows].join("|");
+  if (sel.dataset.opts !== want) {
+    sel.innerHTML = '<option value="">todos</option>' + S.flows.map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join("");
+    sel.dataset.opts = want; sel.value = flowFilter;
+  }
+}
+
+function render() { if (!S) return; if (!selected || !S.nodes[selected]) selected = Object.keys(S.nodes).find(i => S.nodes[i].role === "servidor") || Object.keys(S.nodes)[0];
+  renderHeader(); renderGraph(); renderPanel(); renderEvents(); renderNet(); }
+
+async function poll() {
+  try { S = await (await fetch("/api/state")).json(); render(); } catch (e) { $("clock").textContent = "sem ligação ao painel"; }
+}
+$("flowsel").onchange = (e) => { flowFilter = e.target.value; render(); };
+$("onlysel").onchange = renderEvents;
+$("btn-up").onclick = () => act({action: "up"});
+$("btn-down").onclick = () => { if (confirm("Parar todos os nós?")) act({action: "down"}); };
+(async () => { try { underlay = await (await fetch("/api/underlay")).json(); } catch (e) {} poll(); setInterval(poll, 1000); })();
+</script>
+</body>
+</html>

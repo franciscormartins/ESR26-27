@@ -1,0 +1,4 @@
+#!/bin/sh
+# Lança e controla um cenário de teste: ./bin/ottctl up cenario4 --backend local
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="$DIR/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m ott.ctl "$@"

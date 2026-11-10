@@ -101,7 +101,21 @@ determinístico; para atrasar essas, usar o `tc` na `eth0` do host (atrasa tudo 
 | C4–O3 | r2–r3 | 1 | **1 (direta)** | r2: `eth1` · r3: `eth1` |
 | C4–O4 | r2–r7 | 1 | **1 (direta)** | r2: `eth2` · r7: `eth2` |
 
-## 3. Comandos de cada nó
+## 3. Lançar o cenário (sem abrir 11 terminais)
+
+Com o cenário aberto no CORE (**Start**, esperar ≈ 20 s) basta, na pasta do projeto:
+
+```sh
+./bin/ottctl up cenario4 --backend core        # lança os 10 nós (o O5 só com --spare)
+./bin/ottctl dashboard cenario4                # painel web: grafo, rotas, fluxos e eventos
+./bin/ottctl kill cenario4 S1                  # os testes A1 a A7 e C1 a C5 reduzem-se a comandos deste género
+./bin/ottctl down cenario4
+```
+
+Sem o CORE: `--backend local` põe os mesmos nós nesta máquina (sem `tc`). Detalhes em `docs/OTTCTL.md`. Os comandos manuais ficam abaixo,
+para quem preferir ver cada terminal.
+
+## 3.1. Comandos de cada nó (à mão)
 
 Em todos os terminais: `cd /home/franciscorm/Documentos/ESR26-27`. Arrancar primeiro `S1` e `S2` (IP do `S1`: `10.0.34.20`; do `S2`: `10.0.31.20`); os outros por qualquer ordem.
 
