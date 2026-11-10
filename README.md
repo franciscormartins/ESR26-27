@@ -14,7 +14,7 @@ relatório em `docs/relatorio/`.
 | `src/ott/routing.py` | tabela de rotas: anúncios, escolha do montante (latência acumulada, D34), subscrições agregadas, `WITHDRAW`, tempo de vida | 2 |
 | `src/ott/forwarding.py` | encaminhamento UDP pelos ramos ativos da árvore overlay (RPF estrito) | 2 |
 | `src/ott/status.py` | estado de um nó em JSON (`ott --status-file`): vizinhos, tabela de rotas, fluxos e eventos relevantes | apoio aos testes |
-| `src/ott/ctl/`, `bin/ottctl` | orquestração dos cenários (lançar nós, falhas, atrasos) e painel web; ver `docs/OTTCTL.md` | apoio aos testes |
+| `src/ott/ctl/`, `bin/ottctl` | orquestração dos cenários (lançar nós, falhas, atrasos) , testes automáticos (`ottctl test`) e painel web com modo de demonstração; ver `docs/OTTCTL.md` | apoio aos testes |
 | `src/ott/streaming/` | pacotes de vídeo (cabeçalho origem/fluxo/salto + RTP), emissor MJPEG e recetor UDP | 2/4 |
 | `progex/` | código de apoio do livro (Kurose) e `movie.Mjpeg`, só como referência | 4 |
 | `topologies/` | cenários 1–4 (`.json` do overlay e `.xml` do CORE); `aplicar_frr.py` repõe a config do FRR; `gerar_cenario4.py` gera o cenário 4 | – |

@@ -70,7 +70,7 @@ class WebTest(unittest.TestCase):
     def test_page_and_state(self):
         status, data = self.request("GET", "/")
         self.assertEqual(status, 200)
-        self.assertIn(b"ottctl", data)
+        self.assertIn(b"OTT", data)
         status, data = self.request("GET", "/api/state")
         state = json.loads(data)
         self.assertEqual((status, state["scenario"], sorted(state["nodes"])), (200, "mini", ["A", "C", "S"]))

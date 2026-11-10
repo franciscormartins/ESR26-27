@@ -3,196 +3,414 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ottctl</title>
+<title>OTT · painel</title>
 <style>
-  :root { --bg:#f5f6f8; --card:#fff; --ink:#1d2330; --mute:#6b7385; --line:#d9dde5; --ok:#2e9d57; --off:#9aa1ae;
-          --stop:#5b6272; --dead:#d64545; --frozen:#3b82f6; --stale:#e08a1e; --accent:#2f5bea; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#14171d; --card:#1d222b; --ink:#e6e9ef; --mute:#97a0b2; --line:#323a48; } }
-  * { box-sizing: border-box; }
-  body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--ink); }
-  header { display:flex; align-items:center; gap:12px; padding:10px 16px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  header h1 { font-size:16px; margin:0; }
-  .badge { padding:2px 8px; border-radius:10px; background:var(--accent); color:#fff; font-size:12px; }
-  .spacer { flex:1; }
-  button { font:inherit; padding:4px 10px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:6px; cursor:pointer; }
-  button:hover { border-color:var(--accent); }
-  button.danger { color:var(--dead); } button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-  select, input { font:inherit; padding:3px 6px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); }
-  main { display:grid; grid-template-columns: minmax(0,3fr) minmax(320px,2fr); gap:12px; padding:12px 16px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
-  #svg { width:100%; height:auto; max-height:68vh; display:block; }
+  :root { --bg:#f4f5f8; --card:#fff; --ink:#1b2130; --mute:#667085; --line:#d8dce5; --soft:#eef0f5;
+          --ok:#2e9d57; --off:#9aa1ae; --stop:#586174; --dead:#d64545; --frozen:#3b82f6; --stale:#e08a1e; --wait:#8e6bd8;
+          --accent:#2f5bea; --warn:#e08a1e; --fs:14px; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#13161c; --card:#1c212a; --ink:#e7eaf0; --mute:#99a2b4; --line:#313947; --soft:#262d39; } }
+  body.present { --fs:17px; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:var(--fs)/1.45 system-ui, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; gap:10px; padding:8px 16px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; position:sticky; top:0; z-index:5; }
+  header h1 { font-size:1.1em; margin:0 6px 0 0; white-space:nowrap; }
+  .badge { padding:2px 9px; border-radius:10px; background:var(--accent); color:#fff; font-size:.85em; white-space:nowrap; }
+  .badge.busy { background:var(--warn); } .spacer { flex:1; }
+  button { font:inherit; padding:4px 11px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:7px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); } button:disabled { opacity:.45; cursor:default; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; } button.danger { color:var(--dead); }
+  button.toggle.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  select, input[type=text], input[type=number] { font:inherit; padding:3px 7px; border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--ink); }
+  main { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(360px,1fr); gap:12px; padding:12px 16px; align-items:start; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; min-width:0; }
+  .card h3 { margin:0 0 6px; font-size:1em; }
+  #svg { width:100%; height:auto; max-height:66vh; display:block; }
   .node { cursor:pointer; } .node text { pointer-events:none; }
-  .legend span { margin-right:12px; white-space:nowrap; } .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; }
-  h3 { margin:0 0 6px; font-size:14px; }
-  table { border-collapse:collapse; width:100%; font-size:13px; } th, td { text-align:left; padding:3px 8px 3px 0; border-bottom:1px solid var(--line); }
-  th { color:var(--mute); font-weight:600; } td.num { font-variant-numeric: tabular-nums; }
-  .pill { padding:1px 8px; border-radius:10px; color:#fff; font-size:12px; }
-  .row { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; align-items:center; }
-  .events { max-height:260px; overflow:auto; font:12.5px/1.5 ui-monospace, monospace; }
-  .ev-bad { color:var(--dead); } .ev-good { color:var(--ok); } .ev-info { color:var(--accent); } .t { color:var(--mute); }
-  #toast { position:fixed; right:16px; bottom:16px; padding:8px 12px; border-radius:8px; background:var(--ink); color:var(--bg); opacity:0; transition:opacity .2s; }
-  #toast.show { opacity:.95; } .muted { color:var(--mute); } .full { grid-column: 1 / -1; }
-  label { color:var(--mute); font-size:12.5px; }
+  @keyframes pulse { 0% { r:26; opacity:.9 } 100% { r:40; opacity:0 } } .ring { fill:none; stroke:var(--accent); stroke-width:3; animation:pulse 1.4s infinite; }
+  .legend { color:var(--mute); font-size:.85em; margin-top:4px; } .legend span { margin-right:12px; white-space:nowrap; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; }
+  .tabs { display:flex; gap:2px; border-bottom:1px solid var(--line); margin:-4px 0 8px; }
+  .tabs button { border:none; border-bottom:3px solid transparent; border-radius:0; background:none; padding:6px 12px; color:var(--mute); }
+  .tabs button.on { color:var(--ink); border-bottom-color:var(--accent); font-weight:600; }
+  table { border-collapse:collapse; width:100%; font-size:.93em; } th, td { text-align:left; padding:3px 8px 3px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mute); font-weight:600; } td.num { font-variant-numeric:tabular-nums; }
+  .pill { padding:1px 9px; border-radius:10px; color:#fff; font-size:.85em; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:6px 0; }
+  label { color:var(--mute); font-size:.92em; } .muted { color:var(--mute); }
+  .events { max-height:300px; overflow:auto; font:12.5px/1.55 ui-monospace, monospace; }
+  .ev-bad { color:var(--dead); } .ev-good { color:var(--ok); } .ev-info { color:var(--accent); } .ev-act { color:var(--warn); } .t { color:var(--mute); }
+  #toast { position:fixed; right:16px; bottom:16px; padding:8px 14px; border-radius:8px; background:var(--ink); color:var(--bg); opacity:0; transition:opacity .2s; z-index:20; }
+  #toast.show { opacity:.96; }
+  .charts { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:8px; }
+  .chart { background:var(--soft); border-radius:8px; padding:4px 6px; } .chart b { font-size:.85em; }
+  .scen-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px; }
+  .test { border:1px solid var(--line); border-radius:8px; padding:6px 10px; margin:6px 0; border-left:5px solid var(--off); }
+  .test.ok { border-left-color:var(--ok); } .test.falhou, .test.erro { border-left-color:var(--dead); } .test.ignorado { border-left-color:var(--off); }
+  .caption { background:var(--soft); border-radius:10px; padding:12px 14px; margin:8px 0; }
+  .caption h2 { margin:0 0 6px; font-size:1.25em; } body.present .caption h2 { font-size:1.6em; } .caption p { margin:6px 0; }
+  .measured { border-left:4px solid var(--ok); padding-left:10px; margin-top:8px; }
+  .steps { list-style:none; margin:0; padding:0; } .steps li { padding:3px 8px; border-radius:6px; cursor:default; color:var(--mute); }
+  .steps li.done { color:var(--ink); } .steps li.cur { background:var(--accent); color:#fff; } .steps li.core::after { content:" (CORE)"; font-size:.8em; }
+  .full { grid-column:1 / -1; } code { background:var(--soft); padding:0 4px; border-radius:4px; }
+  @media (max-width: 1000px) { main { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
 <header>
-  <h1 id="title">ottctl</h1><span class="badge" id="backend"></span><span class="muted" id="clock"></span>
+  <h1>OTT · painel</h1>
+  <label>Cenário <select id="scen"></select></label>
+  <label>Modo <select id="mode"><option value="local">local</option><option value="core">CORE</option></select></label>
+  <button id="open" class="primary">Abrir</button>
+  <span class="badge" id="backend" hidden></span><span class="badge busy" id="busy" hidden></span>
   <span class="spacer"></span>
-  <label>Fluxo <select id="flowsel"></select></label>
-  <button class="primary" id="btn-up">Lançar tudo</button>
-  <button class="danger" id="btn-down">Parar tudo</button>
+  <button id="btn-up" class="primary" disabled>Lançar tudo</button>
+  <button id="btn-down" class="danger" disabled>Parar tudo</button>
+  <button id="btn-present" class="toggle" title="Letra maior; teclas: espaço = próximo passo, p = apresentação, f = ecrã inteiro">Apresentação</button>
+  <span class="muted" id="clock"></span>
 </header>
-<main>
-  <section class="card"><svg id="svg" viewBox="0 0 1000 640"></svg><div class="legend muted" id="legend"></div></section>
-  <aside class="card" id="panel"></aside>
-  <section class="card full" id="net"></section>
-  <section class="card full"><h3>Eventos relevantes <label><input type="checkbox" id="onlysel"> só o nó escolhido</label></h3><div class="events" id="events"></div></section>
-</main>
+<main id="main"></main>
 <div id="toast"></div>
 <script>
 "use strict";
-const COLORS = {up:"var(--ok)", off:"var(--off)", stopped:"var(--stop)", dead:"var(--dead)", frozen:"var(--frozen)", stale:"var(--stale)"};
-const LABELS = {up:"ligado", off:"por lançar", stopped:"parado", dead:"morto", frozen:"congelado", stale:"sem resposta"};
+const COLORS = {up:"var(--ok)", off:"var(--off)", stopped:"var(--stop)", dead:"var(--dead)", frozen:"var(--frozen)", stale:"var(--stale)", waiting:"var(--wait)"};
+const LABELS = {up:"ligado", off:"por lançar", stopped:"parado", dead:"morto", frozen:"congelado", stale:"sem resposta", waiting:"à espera do bootstrapper"};
 const PALETTE = ["#2f5bea", "#d9467a", "#16a085", "#e08a1e", "#8e44ad", "#7f8c8d"];
-let S = null, selected = null, underlay = null, flowFilter = "";
+const BAD = ["vizinho_down", "rota_perdida", "withdraw", "fluxo_parou", "fluxo_lacuna", "rota_esquecida", "paragem"];
+const GOOD = ["vizinho_up", "rota_recuperada", "fluxo_voltou", "arranque"];
+const U = {tab:"node", selected:null, flow:"", under:true, metric:"rate", onlySel:false, tests:null, demo:null, underlay:null, picked:new Set(), rtNode:"*", link:0, nf:{d:"",j:"",l:"",r:""}, repeat:1, present:false, built:null};
+let S = null; const H = {};   // H: histórico (no browser) de cada série
 
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 1) => v === null || v === undefined ? "–" : Number(v).toFixed(d);
+const clock = (t) => { const d = new Date(t * 1000); return d.toLocaleTimeString("pt-PT") + "." + String(d.getMilliseconds()).padStart(3, "0"); };
 
-function toast(msg, bad) { const t = $("toast"); t.textContent = msg; t.style.background = bad ? "var(--dead)" : "var(--ink)"; t.className = "show"; clearTimeout(toast.h); toast.h = setTimeout(() => t.className = "", 3500); }
-async function act(body) {
+function toast(msg, bad) { const t = $("toast"); t.textContent = msg; t.style.background = bad ? "var(--dead)" : "var(--ink)"; t.className = "show"; clearTimeout(toast.h); toast.h = setTimeout(() => t.className = "", 3800); }
+async function act(body, quiet) {
   try {
     const r = await fetch("/api/action", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
-    const j = await r.json(); toast(j.ok ? j.message : (j.error || "erro"), !j.ok); poll();
-  } catch (e) { toast("sem ligação ao painel", true); }
+    const j = await r.json(); if (!quiet || !j.ok) toast(j.ok ? j.message : (j.error || "erro"), !j.ok); poll(); return j;
+  } catch (e) { toast("sem ligação ao painel", true); return {ok:false}; }
+}
+const get = async (p) => (await fetch(p)).json();
+
+/* ------------------------------------------------------------------ histórico e gráficos */
+let lastHist = 0;
+async function record() {   // o servidor guarda uma amostra por segundo: o gráfico vem completo mesmo ao recarregar a página
+  const j = await get("/api/history?since=" + lastHist);
+  for (const s of j.samples) { lastHist = Math.max(lastHist, s.t);
+    for (const m of ["rate", "jit", "rtt"]) for (const [k, v] of Object.entries(s[m])) push(`${m}|${k}`, s.t, v); }
+}
+function push(k, t, v) { const a = H[k] || (H[k] = []); if (a.length && a[a.length - 1][0] === t) return; a.push([t, v]); while (a.length && a[0][0] < t - 330) a.shift(); }
+
+function chart(title, series, opt) {
+  const W = 300, Hh = 96, L = 28, R = 6, T = 8, B = 16, t1 = S.time, t0 = t1 - 90;
+  let ymax = opt.ymax || 1; for (const s of series) for (const [t, v] of s.pts) if (v !== null && t >= t0) ymax = Math.max(ymax, v * 1.1);
+  const x = (t) => L + (t - t0) / 90 * (W - L - R), y = (v) => T + (1 - v / ymax) * (Hh - T - B);
+  let g = `<line x1="${L}" y1="${y(0)}" x2="${W - R}" y2="${y(0)}" stroke="var(--line)"/><text x="2" y="${y(0) + 3}" font-size="8" fill="var(--mute)">0</text><text x="2" y="${y(ymax) + 8}" font-size="8" fill="var(--mute)">${Math.round(ymax)}</text>`;
+  g += `<text x="${L}" y="${Hh - 3}" font-size="8" fill="var(--mute)">−90 s</text><text x="${W - R}" y="${Hh - 3}" font-size="8" text-anchor="end" fill="var(--mute)">agora</text>`;
+  let last = -99;
+  for (const a of S.actions || []) {
+    if (a.t < t0) continue; const ax = x(a.t);
+    g += `<line x1="${ax}" y1="${T}" x2="${ax}" y2="${y(0)}" stroke="var(--warn)" stroke-dasharray="3 3" opacity=".8"/>`;
+    if (ax - last > 46) { g += `<text x="${ax + 2}" y="${T + 6}" font-size="7.5" fill="var(--warn)">${esc((a.short || a.text).slice(0, 16))}</text>`; last = ax; }
+  }
+  series.forEach((s, i) => {
+    const pts = s.pts.filter(([t]) => t >= t0); let d = "", pen = false;
+    for (const [t, v] of pts) { if (v === null) { pen = false; continue; } d += `${pen ? "L" : "M"}${x(t).toFixed(1)} ${y(Math.min(v, ymax)).toFixed(1)}`; pen = true; }
+    g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.6"/>`;
+  });
+  const leg = series.map(s => `<span style="color:${s.color}">■ ${esc(s.label)}</span>`).join(" ");
+  return `<div class="chart"><b>${esc(title)}</b> <span class="muted" style="font-size:.8em">${leg}</span><svg viewBox="0 0 ${W} ${Hh}">${g}</svg></div>`;
+}
+function renderCharts() {
+  const m = U.metric, out = [];
+  if (m === "rtt") {
+    const n = U.selected && S.nodes[U.selected]; const peers = n && n.status ? n.status.neighbors.map(x => x.id) : [];
+    out.push(chart(`RTT dos vizinhos de ${U.selected || "–"} (ms)`, peers.map((p, i) => ({label:p, color:PALETTE[i % 6], pts:H[`rtt|${U.selected}|${p}`] || []})), {ymax:5}));
+  } else {
+    for (const n of Object.values(S.nodes).filter(n => n.role === "cliente")) {
+      const keys = (n.subscribe || []).map((k, i) => ({label:k, color:PALETTE[S.flows.indexOf(k) % 6], pts:H[`${m}|${n.id}|${k}`] || []}));
+      out.push(chart(`${n.id}: ${m === "rate" ? "imagens/s" : "jitter (ms)"}`, keys, {ymax:m === "rate" ? 24 : 2}));
+    }
+  }
+  $("charts").innerHTML = out.join("") || '<span class="muted">sem clientes neste cenário</span>';
 }
 
+/* ------------------------------------------------------------------ grafo */
 function layout(pos, ids) {
   const xs = ids.map(i => pos[i][0]), ys = ids.map(i => pos[i][1]);
   const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-  const sx = 880 / Math.max(1, x1 - x0), sy = 540 / Math.max(1, y1 - y0), k = Math.min(sx, sy);
-  const ox = 500 - k * (x0 + x1) / 2, oy = 320 - k * (y0 + y1) / 2;
-  return Object.fromEntries(ids.map(i => [i, [ox + k * pos[i][0], oy + k * pos[i][1]]]));
+  const k = Math.min(900 / Math.max(1, x1 - x0), 560 / Math.max(1, y1 - y0));
+  const ox = 500 - k * (x0 + x1) / 2, oy = 330 - k * (y0 + y1) / 2;
+  return {P:Object.fromEntries(ids.map(i => [i, [ox + k * pos[i][0], oy + k * pos[i][1]]])), map:(x, y) => [ox + k * x, oy + k * y]};
 }
-
-function renderGraph() {
-  const ids = Object.keys(S.nodes), P = layout(S.positions, ids);
-  const flows = flowFilter ? [flowFilter] : S.flows, svg = [];
-  svg.push('<defs>' + PALETTE.map((c, i) => `<marker id="a${i}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`).join("") + '</defs>');
-  for (const [a, b] of S.edges) {
-    if (!P[a] || !P[b]) continue;
-    svg.push(`<line x1="${P[a][0]}" y1="${P[a][1]}" x2="${P[b][0]}" y2="${P[b][1]}" stroke="var(--line)" stroke-width="2"/>`);
+function effectFor(l) {
+  for (const e of S.net || []) {
+    const hit = (e.b ? ((e.a === l.a && e.ia === l.ia && e.b === l.b && e.ib === l.ib) || (e.a === l.b && e.ia === l.ib && e.b === l.a && e.ib === l.ia))
+                    : ((e.a === l.a && e.ia === l.ia) || (e.a === l.b && e.ia === l.ib)));
+    if (hit) return e;
   }
+  return null;
+}
+function renderGraph() {
+  const ids = Object.keys(S.nodes), pos = {...S.positions}, show = U.under && U.underlay && U.underlay.nodes.length;
+  const core = new Set(Object.values(S.nodes).map(n => n.core)), und = show ? U.underlay.nodes.filter(u => !core.has(u.name)) : [];
+  und.forEach(u => pos["u:" + u.name] = [u.x, u.y]);
+  const L = layout(pos, [...ids, ...und.map(u => "u:" + u.name)]), P = L.P, svg = [];
+  const flows = U.flow ? [U.flow] : S.flows;
+  svg.push("<defs>" + PALETTE.map((c, i) => `<marker id="a${i}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`).join("") + "</defs>");
+  if (show) {
+    const at = {}; U.underlay.nodes.forEach(u => at[u.name] = L.map(u.x, u.y));
+    for (const l of U.underlay.links) {
+      const a = at[l.a], b = at[l.b]; if (!a || !b) continue; const e = effectFor(l);
+      const col = e ? (e.down ? "var(--dead)" : "var(--warn)") : "var(--line)";
+      svg.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="${e ? 4 : 1.6}" ${e && e.down ? 'stroke-dasharray="6 5"' : ""} opacity="${e ? 1 : .8}"/>`);
+      if (e) { const p = e.params || {}, txt = e.down ? "cortada" : [p.delay, p.jitter && "±" + p.jitter, p.loss && p.loss + "%", p.rate].filter(Boolean).join(" ");
+        svg.push(`<text x="${(a[0] + b[0]) / 2}" y="${(a[1] + b[1]) / 2 - 5}" text-anchor="middle" font-size="11" font-weight="700" fill="${col}" stroke="var(--card)" stroke-width="3" paint-order="stroke">${esc(txt)}</text>`); }
+    }
+    for (const u of und) { const [x, y] = P["u:" + u.name];
+      svg.push(u.type === "router" ? `<rect x="${x - 9}" y="${y - 9}" width="18" height="18" rx="3" fill="var(--soft)" stroke="var(--mute)"/><text x="${x}" y="${y + 3.5}" text-anchor="middle" font-size="8.5" fill="var(--mute)">${esc(u.name)}</text>`
+                               : `<circle cx="${x}" cy="${y}" r="6" fill="var(--soft)" stroke="var(--mute)"/><text x="${x}" y="${y - 9}" text-anchor="middle" font-size="8" fill="var(--mute)">${esc(u.name)}</text>`); }
+  }
+  for (const [a, b] of S.edges) if (P[a] && P[b])
+    svg.push(`<line x1="${P[a][0]}" y1="${P[a][1]}" x2="${P[b][0]}" y2="${P[b][1]}" stroke="var(--mute)" stroke-opacity=".35" stroke-width="2"/>`);
   flows.forEach((f) => {
-    const ci = S.flows.indexOf(f) % PALETTE.length, off = (flows.indexOf(f) - (flows.length - 1) / 2) * 4;
+    const ci = S.flows.indexOf(f) % 6, off = (flows.indexOf(f) - (flows.length - 1) / 2) * 4;
     for (const e of (S.tree[f] || [])) {
       if (!P[e.from] || !P[e.to]) continue;
       const [x1, y1] = P[e.from], [x2, y2] = P[e.to], dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
-      const nx = -dy / len * off, ny = dx / len * off, sh = 20 / len;
-      const ax = x1 + dx * sh + nx, ay = y1 + dy * sh + ny, bx = x2 - dx * sh + nx, by = y2 - dy * sh + ny;
-      svg.push(`<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="${PALETTE[ci]}" stroke-width="${e.active ? 3.2 : 1.4}" ${e.active ? "" : 'stroke-dasharray="4 4" opacity=".6"'} marker-end="url(#a${ci})"/>`);
+      const nx = -dy / len * off, ny = dx / len * off, sh = 22 / len;
+      svg.push(`<line x1="${x1 + dx * sh + nx}" y1="${y1 + dy * sh + ny}" x2="${x2 - dx * sh + nx}" y2="${y2 - dy * sh + ny}" stroke="${PALETTE[ci]}" stroke-width="${e.active ? 3.4 : 1.4}" ${e.active ? "" : 'stroke-dasharray="4 4" opacity=".6"'} marker-end="url(#a${ci})"/>`);
     }
   });
+  const focus = new Set((U.tab === "demo" && U.demo && U.demo.index >= 0 && U.demo.steps[U.demo.index]) ? U.demo.steps[U.demo.index].focus : []);
   for (const id of ids) {
-    const n = S.nodes[id], [x, y] = P[id], col = COLORS[n.health] || "var(--off)", sel = id === selected;
-    const shape = n.role === "servidor"
-      ? `<rect x="${x - 22}" y="${y - 17}" width="44" height="34" rx="7" fill="${col}" stroke="${sel ? "var(--ink)" : "none"}" stroke-width="3"/>`
-      : `<circle cx="${x}" cy="${y}" r="${n.role === "cliente" ? 17 : 20}" fill="${col}" ${n.role === "cliente" ? 'fill-opacity=".85"' : ""} stroke="${sel ? "var(--ink)" : "none"}" stroke-width="3"/>`;
+    const n = S.nodes[id], [x, y] = P[id], col = COLORS[n.health] || "var(--off)", sel = id === U.selected;
+    const shape = n.role === "servidor" ? `<rect x="${x - 23}" y="${y - 18}" width="46" height="36" rx="8" fill="${col}" stroke="${sel ? "var(--ink)" : "none"}" stroke-width="3"/>`
+      : `<circle cx="${x}" cy="${y}" r="${n.role === "cliente" ? 17 : 20}" fill="${col}" stroke="${sel ? "var(--ink)" : "none"}" stroke-width="3"/>`;
     const rates = ((n.status && n.status.flows) || []).filter(f => f.active).map(f => `${f.origin}:${f.flow.replace("filme_", "")} ${f.stalled ? "✗" : Math.round(f.rate) + "/s"}`);
-    svg.push(`<g class="node" data-id="${esc(id)}">${shape}<text x="${x}" y="${y + 5}" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">${esc(id)}</text>`
+    svg.push(`<g class="node" data-id="${esc(id)}"><title>${esc(id)} — ${esc(LABELS[n.health] || n.health)}</title>${focus.has(id) ? `<circle class="ring" cx="${x}" cy="${y}"/>` : ""}${shape}`
+      + `<text x="${x}" y="${y + 5}" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">${esc(id)}</text>`
       + (n.spare ? `<text x="${x}" y="${y + 34}" text-anchor="middle" font-size="10" fill="var(--mute)">suplente</text>` : "")
-      + rates.map((r, i) => `<text x="${x}" y="${y + 34 + i * 12}" text-anchor="middle" font-size="10.5" fill="var(--ink)">${esc(r)}</text>`).join("") + `</g>`);
+      + rates.map((r, i) => `<text x="${x}" y="${y + 33 + i * 12}" text-anchor="middle" font-size="10.5" fill="var(--ink)" stroke="var(--card)" stroke-width="2.5" paint-order="stroke">${esc(r)}</text>`).join("") + "</g>");
   }
   $("svg").innerHTML = svg.join("");
-  document.querySelectorAll(".node").forEach(g => g.onclick = () => { selected = g.dataset.id; render(); });
+  document.querySelectorAll(".node").forEach(g => g.onclick = () => { U.selected = g.dataset.id; render(); });
   $("legend").innerHTML = Object.entries(LABELS).map(([k, v]) => `<span><i class="dot" style="background:${COLORS[k]}"></i>${v}</span>`).join("")
-    + flows.map((f) => `<span><i class="dot" style="background:${PALETTE[S.flows.indexOf(f) % PALETTE.length]}"></i>${esc(f)}</span>`).join("")
-    + '<span>▭ servidor · ● cliente/intermédio · traço cheio = ramo ativo, tracejado = rota sem procura</span>';
+    + flows.map(f => `<span><i class="dot" style="background:${PALETTE[S.flows.indexOf(f) % 6]}"></i>${esc(f)}</span>`).join("")
+    + "<span>▭ servidor · traço cheio = ramo ativo, tracejado = rota sem procura</span>" + (show ? "<span>laranja = atraso/perdas, vermelho = cortada</span>" : "");
 }
 
-function pathTo(flow, id) {
-  const up = Object.fromEntries((S.tree[flow] || []).map(e => [e.to, e.from])), out = [id];
-  while (up[out[out.length - 1]] && out.length < 30) out.push(up[out[out.length - 1]]);
-  return out.join(" ← ");
-}
-
-function renderPanel() {
-  const n = S.nodes[selected];
-  if (!n) { $("panel").innerHTML = '<p class="muted">Clica num nó do grafo.</p>'; return; }
-  const st = n.status || {}, health = n.health;
-  let h = `<h3>${esc(n.id)} <span class="pill" style="background:${COLORS[health]}">${LABELS[health] || health}</span> <span class="muted">${esc(n.role)}${n.core !== n.id ? " · nó do CORE " + esc(n.core) : ""}</span></h3>`;
-  h += `<div class="row"><button data-act="start">Lançar</button><button data-act="stop">Parar (limpo)</button><button class="danger" data-act="kill">Matar</button><button data-act="freeze">Congelar</button><button data-act="thaw">Retomar</button></div>`;
-  h += `<h3>Vizinhos</h3>` + ((st.neighbors || []).length ? `<table><tr><th>nó</th><th>RTT ms</th></tr>${st.neighbors.map(x => `<tr><td>${esc(x.id)}</td><td class="num">${fmt(x.rtt_ms, 2)}</td></tr>`).join("")}</table>` : '<p class="muted">sem vizinhos</p>');
-  h += `<h3>Tabela de rotas</h3>`;
+/* ------------------------------------------------------------------ separadores */
+function tabNode() {
+  const n = S.nodes[U.selected]; if (!n) return '<p class="muted">Clica num nó do grafo.</p>';
+  const st = n.status || {};
+  let h = `<h3>${esc(n.id)} <span class="pill" style="background:${COLORS[n.health]}">${LABELS[n.health] || n.health}</span> <span class="muted">${esc(n.role)}${n.core !== n.id ? " · nó do CORE " + esc(n.core) : ""}</span></h3>`;
+  if (!["up", "waiting"].includes(n.health) && n.status) h += '<p class="muted">Último estado conhecido (o nó não está a correr).</p>';
+  h += `<div class="row">${["start:Lançar", "stop:Parar (limpo)", "kill:Matar", "freeze:Congelar", "thaw:Retomar"].map(a => { const [k, l] = a.split(":"); return `<button class="${k === "kill" ? "danger" : ""}" data-act="${k}">${l}</button>`; }).join("")}</div>`;
+  h += "<h3>Vizinhos</h3>" + ((st.neighbors || []).length ? `<table><tr><th>nó</th><th>RTT ms</th></tr>${st.neighbors.map(x => `<tr><td>${esc(x.id)}</td><td class="num">${fmt(x.rtt_ms, 2)}</td></tr>`).join("")}</table>` : '<p class="muted">sem vizinhos</p>');
+  h += "<h3>Tabela de rotas</h3>";
   const routes = st.routes || [];
-  h += routes.length ? `<table><tr><th>fluxo</th><th>montante</th><th>saltos</th><th>atraso</th><th>estado</th><th>destinos</th><th>candidatos</th></tr>` + routes.map(r =>
-      `<tr><td>${esc(r.origin)}:${esc(r.flow)}</td><td>${esc(r.withdrawn ? "(retirada)" : r.upstream || "(origem)")}</td><td class="num">${fmt(r.metric, 0)}</td><td class="num">${fmt(r.delay_ms)}</td>`
-      + `<td>${esc(r.state)}</td><td>${esc(r.destinations.join(",") || "–")}${r.local_subscribers.length ? " + local" : ""}</td>`
-      + `<td class="muted">${Object.entries(r.candidates).filter(([, c]) => c.metric !== null).map(([k, c]) => esc(k) + ":" + c.metric + (c.delay_ms !== null ? "/" + fmt(c.delay_ms) : "")).join(" ")}</td></tr>`).join("") + "</table>"
-    : '<p class="muted">sem rotas</p>';
-  const flows = (st.flows || []);
-  if (flows.length) {
-    h += `<h3>Fluxos recebidos</h3><table><tr><th>fluxo</th><th>img/s</th><th>perdidos</th><th>jitter ms</th><th>estado</th><th>caminho</th></tr>` + flows.map(f =>
-      `<tr><td>${esc(f.origin)}:${esc(f.flow)}</td><td class="num">${fmt(f.rate)}</td><td class="num">${f.lost} (${fmt(f.loss_pct)}%)</td><td class="num">${fmt(f.jitter_ms, 2)}</td>`
-      + `<td>${f.stalled ? '<b class="ev-bad">parou</b>' : f.active ? "a chegar" : "à espera"}</td><td class="muted">${esc(pathTo(f.origin + ":" + f.flow, n.id))}</td></tr>`).join("") + "</table>";
-  }
+  h += routes.length ? "<table><tr><th>fluxo</th><th>montante</th><th>saltos</th><th>atraso</th><th>estado</th><th>destinos</th><th>candidatos</th></tr>" + routes.map(r =>
+      `<tr><td>${esc(r.origin)}:${esc(r.flow)}</td><td>${esc(r.withdrawn ? "(retirada)" : r.upstream || "(origem)")}</td><td class="num">${fmt(r.metric, 0)}</td><td class="num">${fmt(r.delay_ms)}</td><td>${esc(r.state)}</td>`
+      + `<td>${esc(r.destinations.join(",") || "–")}${r.local_subscribers.length ? " + local" : ""}</td>`
+      + `<td class="muted">${Object.entries(r.candidates).filter(([, c]) => c.metric !== null).map(([k, c]) => esc(k) + ":" + c.metric + (c.delay_ms !== null ? "/" + fmt(c.delay_ms) : "")).join(" ")}</td></tr>`).join("") + "</table>" : '<p class="muted">sem rotas</p>';
+  const flows = st.flows || [];
+  if (flows.length) h += "<h3>Fluxos recebidos</h3><table><tr><th>fluxo</th><th>img/s</th><th>perdidos</th><th>jitter</th><th>estado</th></tr>" + flows.map(f =>
+      `<tr><td>${esc(f.origin)}:${esc(f.flow)}</td><td class="num">${fmt(f.rate)}</td><td class="num">${f.lost} (${fmt(f.loss_pct)}%)</td><td class="num">${fmt(f.jitter_ms, 2)} ms</td><td>${f.stalled ? '<b class="ev-bad">parou</b>' : f.active ? "a chegar" : "à espera"}</td></tr>`).join("") + "</table>";
   if (st.data) h += `<p class="muted">Dados UDP: ${st.data.received} recebidos (${fmt(st.data.received_rate)}/s), ${st.data.forwarded} reencaminhados (${fmt(st.data.forwarded_rate)}/s), ${st.data.dropped} descartados (RPF ${st.data.rpf_dropped}).</p>`;
   if (st.bootstrapper) h += `<p class="muted">Bootstrapper: registados ${esc(st.bootstrapper.join(", ") || "nenhum")}.</p>`;
-  $("panel").innerHTML = h;
-  $("panel").querySelectorAll("button[data-act]").forEach(b => b.onclick = () => act({action: b.dataset.act, node: n.id}));
+  return h;
 }
 
-function renderEvents() {
-  const only = $("onlysel").checked;
-  const kinds = {bad: ["vizinho_down", "rota_perdida", "withdraw", "fluxo_parou", "rota_esquecida", "paragem"], good: ["vizinho_up", "rota_recuperada", "fluxo_voltou", "arranque"]};
-  const list = S.events.filter(e => !only || e.node === selected).slice(-120).reverse();
-  $("events").innerHTML = list.map(e => {
-    const d = new Date(e.t * 1000), c = kinds.bad.includes(e.kind) ? "ev-bad" : kinds.good.includes(e.kind) ? "ev-good" : "ev-info";
-    return `<div class="${c}"><span class="t">${d.toLocaleTimeString("pt-PT")}.${String(d.getMilliseconds()).padStart(3, "0")}</span> <b>${esc(e.node)}</b> ${esc(e.text)}</div>`;
-  }).join("") || '<span class="muted">sem eventos</span>';
-}
-
-function renderNet() {
-  if (!S.can_network) { $("net").innerHTML = '<h3>Rede</h3><p class="muted">Atraso, jitter, perdas e cortes de ligações só estão disponíveis com o CORE (<code>ottctl up … --backend core</code>).</p>'; return; }
-  if ($("net").dataset.ready) return;
-  $("net").dataset.ready = "1";
-  const links = (underlay ? underlay.links : []).map((l, i) => `<option value="${i}">${esc(l.a)}:${esc(l.ia)} ↔ ${esc(l.b)}:${esc(l.ib)}</option>`).join("");
-  $("net").innerHTML = `<h3>Rede (CORE): atraso, jitter, perdas e débito por ligação</h3>
-    <div class="row"><label>Ligação <select id="lk">${links}</select></label>
-      <label>atraso <input id="d" size="6" placeholder="30ms"></label><label>jitter <input id="j" size="6" placeholder="10ms"></label>
-      <label>perdas <input id="l" size="5" placeholder="5%"></label><label>débito <input id="r" size="8" placeholder="500kbit"></label>
-      <button id="lk-apply" class="primary">Aplicar</button><button id="lk-clear">Limpar</button><button id="lk-cut" class="danger">Cortar</button><button id="lk-up">Repor</button></div>
-    <p class="muted">Aplica-se nos dois extremos da ligação. O atraso criado é por sentido: 30 ms em cada extremo dá ≈ 60 ms de RTT. Para atrasar um nó inteiro usa a ligação <i>router ↔ host</i> desse nó.</p>`;
-  const cur = () => { const l = underlay.links[$("lk").value]; return {a: l.a, ia: l.ia, b: l.b, ib: l.ib}; };
-  $("lk-apply").onclick = () => act({action: "link_netem", ...cur(), delay: $("d").value, jitter: $("j").value, loss: $("l").value, rate: $("r").value});
-  $("lk-clear").onclick = () => act({action: "link_clear", ...cur()});
-  $("lk-cut").onclick = () => act({action: "link_set", ...cur(), up: false});
-  $("lk-up").onclick = () => act({action: "link_set", ...cur(), up: true});
-}
-
-function renderHeader() {
-  $("title").textContent = "ottctl · " + S.scenario; $("backend").textContent = S.backend;
-  $("clock").textContent = new Date(S.time * 1000).toLocaleTimeString("pt-PT");
-  const sel = $("flowsel"), want = ["", ...S.flows].join("|");
-  if (sel.dataset.opts !== want) {
-    sel.innerHTML = '<option value="">todos</option>' + S.flows.map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join("");
-    sel.dataset.opts = want; sel.value = flowFilter;
+function tabTests() {
+  const T = U.tests; if (!T) return '<p class="muted">a carregar…</p>';
+  const run = T.run, here = (t) => t.runs_here;
+  let h = '<div class="row"><button id="t-all">Todos os possíveis</button><button id="t-none">Nenhum</button><label>repetições <input id="t-rep" type="number" min="1" max="50" value="' + U.repeat + '" style="width:60px"></label>'
+        + `<button id="t-run" class="primary" ${run.running ? "disabled" : ""}>Executar</button><button id="t-stop" ${run.running ? "" : "disabled"}>Parar</button></div>`;
+  h += "<table>" + T.tests.map(t => `<tr><td><input type="checkbox" data-t="${esc(t.id)}" ${U.picked.has(t.id) ? "checked" : ""} ${here(t) ? "" : "disabled"}></td><td><b>${esc(t.id)}</b></td><td>${esc(t.title)}${t.core ? ' <span class="muted">(precisa do CORE)</span>' : ""}${t.slow ? ' <span class="muted">(lento)</span>' : ""}</td></tr>`).join("") + "</table>";
+  if (run.running) h += `<p><b>A correr:</b> ${run.current ? esc(run.current.id) + " " + esc(run.current.title) + " (repetição " + run.current.repeat + ")" : "…"}</p>`;
+  if (run.results.length) {
+    h += "<h3>Resultados</h3>";
+    h += run.results.slice().reverse().map(r => `<div class="test ${esc(r.status)}"><b>${esc(r.id)}</b> ${esc(r.title)} <span class="pill" style="background:${r.status === "ok" ? "var(--ok)" : r.status === "ignorado" ? "var(--off)" : "var(--dead)"}">${esc(r.status)}</span> <span class="muted">${r.seconds} s · rep. ${r.repeat}</span>`
+      + (r.error ? `<div class="ev-bad">${esc(r.error)}</div>` : "")
+      + (r.measures.length ? "<table>" + r.measures.map(m => `<tr><td>${esc(m.name)}</td><td class="num"><b>${fmt(m.value, 2)} ${esc(m.unit)}</b></td><td class="muted">${m.expect ? "esperado " + m.expect[0] + "–" + m.expect[1] : ""}</td><td>${m.ok === false ? '<span class="ev-bad">✗</span>' : m.ok ? '<span class="ev-good">✓</span>' : ""}</td></tr>`).join("") + "</table>" : "")
+      + r.checks.map(c => `<div class="${c.ok ? "ev-good" : "ev-bad"}">${c.ok ? "✓" : "✗"} ${esc(c.name)}${!c.ok && c.detail ? " (" + esc(c.detail) + ")" : ""}</div>`).join("")
+      + r.notes.map(n => `<div class="muted">nota: ${esc(n)}</div>`).join("") + "</div>").join("");
+    if (run.summary.some(s => s.runs)) h += '<h3>Resumo</h3><table><tr><th>teste</th><th>ok</th><th>medições (mín / média / máx)</th></tr>' + run.summary.filter(s => s.runs).map(s => `<tr><td><b>${esc(s.id)}</b></td><td>${s.ok}/${s.runs}</td><td>${s.measures.map(m => `${esc(m.name)}: ${m.min} / ${m.mean} / ${m.max} ${esc(m.unit)}`).join("<br>") || "–"}</td></tr>`).join("") + '</table><div class="row"><button id="t-copy">Copiar tabela (Markdown)</button></div>';
   }
+  return h;
 }
 
-function render() { if (!S) return; if (!selected || !S.nodes[selected]) selected = Object.keys(S.nodes).find(i => S.nodes[i].role === "servidor") || Object.keys(S.nodes)[0];
-  renderHeader(); renderGraph(); renderPanel(); renderEvents(); renderNet(); }
+function tabDemo() {
+  const D = U.demo; if (!D || !D.steps.length) return '<p class="muted">a carregar…</p>';
+  const cur = D.steps[D.index], core = S.backend === "core";
+  let h = '<div class="row"><button id="d-prev" ' + (D.index < 0 || D.state === "running" ? "disabled" : "") + '>◀ Anterior</button><button id="d-next" class="primary" ' + (D.state === "running" || D.index + 1 >= D.steps.length ? "disabled" : "") + `>${D.index < 0 ? "Começar" : "Seguinte"} ▶</button><button id="d-reset" ${D.state === "running" ? "disabled" : ""}>Repor</button></div>`;
+  h += '<ol class="steps">' + D.steps.map((s, i) => `<li class="${i === D.index ? "cur" : i < D.index ? "done" : ""} ${s.core ? "core" : ""}">${i + 1}. ${esc(s.title)}</li>`).join("") + "</ol>";
+  if (cur) {
+    const extra = D.log[D.index] || "";
+    h += `<div class="caption"><h2>${D.index + 1}. ${esc(cur.title)}</h2><p>${esc(cur.text)}</p>${D.state === "running" && D.index >= 0 ? '<p class="muted">a executar…</p>' : ""}${extra ? `<div class="measured">${esc(extra)}</div>` : ""}</div>`;
+  } else h += '<div class="caption"><p>Guião passo a passo para a apresentação: cada passo explica o que vai acontecer, executa-o (falhas reais nos nós) e mostra o que foi medido. Usa <b>espaço</b> ou <b>→</b> para avançar.</p></div>';
+  return h;
+}
 
+function tabNet() {
+  if (!S.can_network) return '<p class="muted">Atraso, jitter, perdas, débito e cortes de ligações só estão disponíveis com o CORE (modo <b>CORE</b>).</p>';
+  const links = (U.underlay ? U.underlay.links : []).map((l, i) => `<option value="${i}" ${String(U.link) === String(i) ? "selected" : ""}>${esc(l.a)}:${esc(l.ia)} ↔ ${esc(l.b)}:${esc(l.ib)}</option>`).join("");
+  const active = (S.net || []).map(e => `<tr><td>${esc(e.a)}:${esc(e.ia)}${e.b ? " ↔ " + esc(e.b) + ":" + esc(e.ib) : ""}</td><td>${e.down ? "cortada" : esc(Object.entries(e.params || {}).filter(([, v]) => v).map(([k, v]) => k + "=" + v).join(" "))}</td></tr>`).join("");
+  return `<h3>Ligação do underlay</h3><div class="row"><select id="lk">${links}</select></div>
+    <div class="row"><label>atraso <input id="d" value="${esc(U.nf.d)}" type="text" size="6" placeholder="30ms"></label><label>jitter <input id="j" value="${esc(U.nf.j)}" type="text" size="6" placeholder="10ms"></label>
+      <label>perdas <input id="l" value="${esc(U.nf.l)}" type="text" size="5" placeholder="5%"></label><label>débito <input id="r" value="${esc(U.nf.r)}" type="text" size="8" placeholder="500kbit"></label></div>
+    <div class="row"><span class="muted">Perdas rápidas:</span>${[1, 5, 10, 20, 30].map(p => `<button data-loss="${p}">${p}%</button>`).join("")}</div>
+    <div class="row"><button id="lk-apply" class="primary">Aplicar</button><button id="lk-clear">Limpar</button><button id="lk-cut" class="danger">Cortar</button><button id="lk-up">Repor</button></div>
+    <p class="muted">As perdas são de pacotes e perdem-se mais imagens do que isso (cada imagem vai em vários fragmentos IP): 10 % de pacotes ≈ 45 % de imagens. Os botões rápidos usam também o atraso, jitter e débito escritos. Aplica-se nos dois extremos: 30 ms em cada sentido dá ≈ 60 ms de RTT. As ligações com efeito aparecem a laranja (cortadas a vermelho) no grafo, com a camada «underlay» ligada.</p>
+    <h3>Efeitos ativos</h3>${active ? `<table>${active}</table>` : '<p class="muted">nenhum</p>'}<div class="row"><button id="net-clear" ${active ? "" : "disabled"}>Repor toda a rede</button></div>`;
+}
+
+function routeRows(id) {
+  const n = S.nodes[id], st = (n && n.status) || {};
+  return (st.routes || []).map(r => ({node:id, flow:r.origin + ":" + r.flow,
+    cost:(r.metric === null ? "∞" : r.metric + " saltos") + (r.delay_ms !== null ? " · " + fmt(r.delay_ms) + " ms" : ""),
+    from:r.withdrawn ? "(retirada)" : r.upstream || "(origem)", dest:(r.destinations.join(", ") || "–") + (r.local_subscribers.length ? " + local" : ""),
+    state:r.state, cand:Object.entries(r.candidates).filter(([, c]) => c.metric !== null).map(([k, c]) => k + ":" + c.metric + (c.delay_ms !== null ? "/" + fmt(c.delay_ms) : "")).join(" ")}));
+}
+function routeSelection() { return U.rtNode === "*" ? Object.keys(S.nodes) : [U.rtNode in S.nodes ? U.rtNode : U.selected]; }
+function tabRoutes() {
+  const ids = routeSelection(), rows = ids.flatMap(routeRows), all = U.rtNode === "*";
+  const opts = '<option value="*"' + (all ? " selected" : "") + ">todos os nós</option>" + Object.keys(S.nodes).map(i => `<option value="${esc(i)}"${!all && ids[0] === i ? " selected" : ""}>${esc(i)}</option>`).join("");
+  let h = `<h3>Tabelas de encaminhamento</h3><div class="row"><label>nó <select id="rt-node">${opts}</select></label><button id="rt-copy">Copiar (Markdown)</button></div>
+    <p class="muted">Uma linha por fluxo, como no enunciado: <b>Fluxo</b> (servidor:fluxo), <b>Custo</b> (saltos e atraso acumulado), <b>Origem</b> (vizinho de onde chega o fluxo, o montante), <b>Destinos</b> (vizinhos a jusante com o fluxo ativo) e <b>Estado</b> (inativa até haver subscritores). Os <b>candidatos</b> são os montantes alternativos (saltos/atraso ms).</p>`;
+  if (!rows.length) return h + '<p class="muted">sem rotas (os nós ainda não anunciaram ou não estão a correr)</p>';
+  const cls = {ativa:"ev-good"};
+  h += "<table><tr>" + (all ? "<th>nó</th>" : "") + "<th>fluxo</th><th>custo</th><th>origem</th><th>destinos</th><th>estado</th><th>candidatos</th></tr>" + rows.map(r =>
+    `<tr>${all ? `<td><b>${esc(r.node)}</b></td>` : ""}<td>${esc(r.flow)}</td><td class="num" style="white-space:nowrap">${esc(r.cost)}</td><td>${esc(r.from)}</td><td>${esc(r.dest)}</td><td class="${cls[r.state] || ""}">${esc(r.state)}</td><td class="muted">${esc(r.cand)}</td></tr>`).join("") + "</table>";
+  const stale = ids.filter(i => S.nodes[i].status && !["up", "waiting"].includes(S.nodes[i].health));
+  if (stale.length) h += `<p class="muted">Último estado conhecido de: ${esc(stale.join(", "))} (nós que não estão a correr).</p>`;
+  return h;
+}
+function routesMarkdown() {
+  const rows = routeSelection().flatMap(routeRows);
+  return "| Nó | Fluxo | Custo | Origem | Destinos | Estado |\n|---|---|---|---|---|---|\n" + rows.map(r => `| ${r.node} | ${r.flow} | ${r.cost} | ${r.from} | ${r.dest} | ${r.state} |`).join("\n");
+}
+
+const TABS = {node:["Nó", tabNode], tests:["Testes", tabTests], demo:["Demonstração", tabDemo], routes:["Rotas", tabRoutes], net:["Rede", tabNet]};
+function renderSide() {
+  const side = $("side");
+  const keep = document.activeElement && side.contains(document.activeElement) && ["INPUT", "SELECT"].includes(document.activeElement.tagName);
+  if (keep) return;   // não estragar o que se está a escrever
+  side.innerHTML = '<div class="tabs">' + Object.entries(TABS).map(([k, [l]]) => `<button data-tab="${k}" class="${U.tab === k ? "on" : ""}">${l}</button>`).join("") + "</div>" + TABS[U.tab][1]();
+  side.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { U.tab = b.dataset.tab; if (U.tab === "tests") refreshTests(); if (U.tab === "demo") refreshDemo(); render(); });
+  side.querySelectorAll("button[data-act]").forEach(b => b.onclick = () => act({action:b.dataset.act, node:U.selected}));
+  if (U.tab === "tests") wireTests(); if (U.tab === "demo") wireDemo(); if (U.tab === "net") wireNet(); if (U.tab === "routes") wireRoutes();
+}
+function wireTests() {
+  const T = U.tests; if (!T) return;
+  document.querySelectorAll("input[data-t]").forEach(c => c.onchange = () => c.checked ? U.picked.add(c.dataset.t) : U.picked.delete(c.dataset.t));
+  const bind = (id, fn) => { const e = $(id); if (e) e.onclick = fn; };
+  bind("t-all", () => { T.tests.filter(t => t.runs_here).forEach(t => U.picked.add(t.id)); renderSide(); });
+  bind("t-none", () => { U.picked.clear(); renderSide(); });
+  bind("t-run", async () => { U.repeat = Math.max(1, +$("t-rep").value || 1); await act({action:"tests_run", ids:[...U.picked], repeat:U.repeat}); refreshTests(); });
+  bind("t-stop", () => act({action:"tests_stop"}));
+  bind("t-copy", () => { navigator.clipboard.writeText(T.run.markdown).then(() => toast("tabela copiada"), () => toast("não consegui copiar", true)); });
+}
+function wireDemo() {
+  const bind = (id, op) => { const e = $(id); if (e) e.onclick = async () => { await act({action:"demo", op}, true); refreshDemo(); }; };
+  bind("d-next", "next"); bind("d-prev", "prev"); bind("d-reset", "reset");
+}
+function wireRoutes() {
+  $("rt-node").onchange = () => { U.rtNode = $("rt-node").value; renderSide(); };
+  $("rt-copy").onclick = () => navigator.clipboard.writeText(routesMarkdown()).then(() => toast("tabela copiada"), () => toast("não consegui copiar", true));
+}
+function wireNet() {
+  const cur = () => { const l = U.underlay.links[$("lk").value]; return l && {a:l.a, ia:l.ia, b:l.b, ib:l.ib}; };
+  const bind = (id, fn) => { const e = $(id); if (e) e.onclick = fn; };
+  ["d", "j", "l", "r"].forEach(k => $(k) && ($(k).oninput = () => { U.nf[k] = $(k).value; }));
+  $("lk") && ($("lk").onchange = () => { U.link = $("lk").value; });
+  const apply = loss => cur() && act({action:"link_netem", ...cur(), delay:$("d").value, jitter:$("j").value, loss, rate:$("r").value});
+  document.querySelectorAll("button[data-loss]").forEach(b => b.onclick = () => { $("l").value = U.nf.l = b.dataset.loss + "%"; apply($("l").value); });
+  bind("lk-apply", () => cur() && act({action:"link_netem", ...cur(), delay:$("d").value, jitter:$("j").value, loss:$("l").value, rate:$("r").value}));
+  bind("lk-clear", () => cur() && act({action:"link_clear", ...cur()}));
+  bind("lk-cut", () => cur() && act({action:"link_set", ...cur(), up:false}));
+  bind("lk-up", () => cur() && act({action:"link_set", ...cur(), up:true}));
+  bind("net-clear", () => act({action:"clear_network"}));
+}
+
+/* ------------------------------------------------------------------ eventos, cabeçalho, escolha de cenário */
+function renderEvents() {
+  const items = S.events.map(e => ({t:e.t, node:e.node, text:e.text, kind:e.kind})).concat((S.actions || []).map(a => ({t:a.t, node:"▶", text:a.text, kind:"acao"})))
+    .filter(e => !U.onlySel || e.node === U.selected || e.node === "▶").sort((a, b) => a.t - b.t).slice(-150).reverse();
+  $("events").innerHTML = items.map(e => { const c = e.kind === "acao" ? "ev-act" : BAD.includes(e.kind) ? "ev-bad" : GOOD.includes(e.kind) ? "ev-good" : "ev-info";
+    return `<div class="${c}"><span class="t">${clock(e.t)}</span> <b>${esc(e.node)}</b> ${esc(e.text)}</div>`; }).join("") || '<span class="muted">sem eventos</span>';
+}
+function renderHeader() {
+  const sel = $("scen"), names = (S.scenarios || []).map(s => s.name).join("|");
+  if (sel.dataset.opts !== names) { sel.innerHTML = (S.scenarios || []).map(s => `<option value="${esc(s.name)}">${esc(s.name)} (${s.nodes} nós${s.core_session ? ", CORE sessão " + s.core_session : ""})</option>`).join(""); sel.dataset.opts = names; if (S.scenario) sel.value = S.scenario; }
+  if (S.scenario && sel.dataset.cur !== S.scenario) { sel.value = S.scenario; sel.dataset.cur = S.scenario; $("mode").value = S.backend; }
+  $("backend").hidden = !S.scenario; $("backend").textContent = S.scenario ? S.backend : "";
+  $("busy").hidden = !S.busy; $("busy").textContent = S.busy || "";
+  $("clock").textContent = S.time ? new Date(S.time * 1000).toLocaleTimeString("pt-PT") : "";
+  $("btn-up").disabled = $("btn-down").disabled = !S.scenario || !!S.busy;
+}
+function welcome() {
+  $("main").innerHTML = '<section class="card full"><h3>Escolhe um cenário</h3><p class="muted">Modo <b>local</b>: todos os nós nesta máquina (sem CORE). Modo <b>CORE</b>: os nós de uma sessão já aberta (Start) com o cenário.</p><div class="scen-grid">'
+    + (S.scenarios || []).map(s => `<div class="card"><b>${esc(s.name)}</b><div class="muted">${s.nodes} nós · servidores ${esc(s.servers.join(", "))}</div><div class="row"><button class="primary" data-open="${esc(s.name)}|local">Abrir (local)</button><button data-open="${esc(s.name)}|core" ${s.core_session ? "" : "disabled"} title="${s.core_session ? "sessão " + s.core_session : "não há sessão do CORE com este cenário"}">Abrir (CORE)</button></div></div>`).join("")
+    + "</div></section>";
+  document.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { const [name, mode] = b.dataset.open.split("|"); act({action:"select", scenario:name, backend:mode}); });
+  U.built = null;
+}
+function build() {
+  $("main").innerHTML = `<section class="card"><div class="row"><label>Fluxo <select id="flowsel"></select></label><label><input type="checkbox" id="under" ${U.under ? "checked" : ""}> underlay</label></div><svg id="svg" viewBox="0 0 1000 660"></svg><div class="legend" id="legend"></div></section>
+    <aside class="card" id="side"></aside>
+    <section class="card"><div class="row"><h3 style="margin:0">Fluxos no tempo</h3><select id="metric"><option value="rate">imagens/s dos clientes</option><option value="jit">jitter dos clientes</option><option value="rtt">RTT do nó escolhido</option></select></div><div class="charts" id="charts"></div></section>
+    <section class="card"><h3>Eventos relevantes <label><input type="checkbox" id="onlysel"> só o nó escolhido</label></h3><div class="events" id="events"></div></section>`;
+  $("flowsel").onchange = (e) => { U.flow = e.target.value; render(); };
+  $("under").onchange = (e) => { U.under = e.target.checked; render(); };
+  $("metric").value = U.metric; $("metric").onchange = (e) => { U.metric = e.target.value; renderCharts(); };
+  $("onlysel").checked = U.onlySel; $("onlysel").onchange = (e) => { U.onlySel = e.target.checked; renderEvents(); };
+  U.built = S.scenario; lastHist = 0; for (const k of Object.keys(H)) delete H[k];
+  U.under = S.backend === "core";   // no modo local o underlay não é real
+  $("under").checked = U.under;
+}
+function render() {
+  if (!S) return;
+  renderHeader();
+  if (!S.scenario) return welcome();
+  if (U.built !== S.scenario) { build(); U.underlay = null; get("/api/underlay").then(u => { U.underlay = u; render(); }); }
+  if (!U.selected || !S.nodes[U.selected]) U.selected = Object.keys(S.nodes).find(i => S.nodes[i].role === "servidor") || Object.keys(S.nodes)[0];
+  const fs = $("flowsel"), want = ["", ...S.flows].join("|");
+  if (fs.dataset.opts !== want) { fs.innerHTML = '<option value="">todos</option>' + S.flows.map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join(""); fs.dataset.opts = want; }
+  fs.value = U.flow;
+  renderGraph(); renderSide(); renderCharts(); renderEvents();
+}
+async function refreshTests() { try { U.tests = await get("/api/tests"); if (U.tab === "tests") renderSide(); } catch (e) {} }
+async function refreshDemo() {
+  try { const d = await get("/api/demo"), prev = U.demo ? U.demo.index : -2; U.demo = d;
+    if (d.index !== prev && d.index >= 0) { const st = d.steps[d.index]; if (st) U.flow = st.flow || ""; }
+    if (U.tab === "demo") renderSide(); renderGraph(); } catch (e) {}
+}
 async function poll() {
-  try { S = await (await fetch("/api/state")).json(); render(); } catch (e) { $("clock").textContent = "sem ligação ao painel"; }
+  try { S = await get("/api/state"); await record(); render();
+    if (U.tab === "tests" && (!U.tests || U.tests.run.running || S.busy)) refreshTests();
+    if (U.tab === "demo" && (!U.demo || S.busy || (U.demo && U.demo.state === "running"))) refreshDemo();
+  } catch (e) { $("clock").textContent = "sem ligação ao painel"; }
 }
-$("flowsel").onchange = (e) => { flowFilter = e.target.value; render(); };
-$("onlysel").onchange = renderEvents;
-$("btn-up").onclick = () => act({action: "up"});
-$("btn-down").onclick = () => { if (confirm("Parar todos os nós?")) act({action: "down"}); };
-(async () => { try { underlay = await (await fetch("/api/underlay")).json(); } catch (e) {} poll(); setInterval(poll, 1000); })();
+$("open").onclick = () => act({action:"select", scenario:$("scen").value, backend:$("mode").value});
+$("btn-up").onclick = () => act({action:"up"});
+$("btn-down").onclick = () => { if (confirm("Parar todos os nós?")) act({action:"down"}); };
+$("btn-present").onclick = () => { U.present = !U.present; document.body.classList.toggle("present", U.present); $("btn-present").classList.toggle("on", U.present); };
+document.addEventListener("keydown", (e) => {
+  if (["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName)) return;
+  if ((e.key === " " || e.key === "ArrowRight") && S && S.scenario) { e.preventDefault(); if (U.tab !== "demo") { U.tab = "demo"; refreshDemo(); render(); } else { const b = $("d-next"); if (b && !b.disabled) b.click(); } }
+  else if (e.key === "ArrowLeft" && U.tab === "demo") { const b = $("d-prev"); if (b && !b.disabled) b.click(); }
+  else if (e.key === "p") $("btn-present").click();
+  else if (e.key === "f") { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); }
+});
+{ const h = location.hash.replace("#", "").split(","); // ex.: #demo,present
+  if (["node", "tests", "demo", "routes", "net"].includes(h[0])) U.tab = h[0]; else if (h[0] === "testes") U.tab = "tests"; else if (h[0] === "rotas") U.tab = "routes";
+  if (h.includes("present")) $("btn-present").click();
+  if (U.tab === "tests") refreshTests(); if (U.tab === "demo") refreshDemo(); }
+poll(); setInterval(poll, 1000);
 </script>
 </body>
 </html>

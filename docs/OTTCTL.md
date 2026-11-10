@@ -22,8 +22,9 @@ Só usa a biblioteca standard. As pastas de trabalho (estado e logs de cada nó)
 | Rede (atraso, jitter, perdas, cortar ligações) | sim (`tc netem` e `ip link` nos nós) | não |
 | Para que serve | os ensaios a sério e a demonstração | desenvolver, demonstrar sem o CORE, testes automáticos |
 
-No modo `core` a sessão é a mais recente que tenha os nós do cenário (`--session N` para escolher). **Este modo foi testado com um
-executor simulado e com a experiência dos ensaios manuais; ainda não foi corrido contra uma sessão real do CORE.**
+No modo `core` a sessão é a mais recente que tenha os nós do cenário (`--session N` para escolher). **Este modo foi validado
+contra uma sessão real do CORE 9.2.1 (cenário 4): lançamento dos nós, leitura do estado pelo sistema de ficheiros partilhado, `netem`,
+`link down` e os testes `G1`, `A1`–`A3`, `B1`, `B3`, `B6` e `C1`–`C7`.**
 
 ## Comandos
 
@@ -38,9 +39,10 @@ executor simulado e com a experiência dos ensaios manuais; ainda não foi corri
 | `ottctl stop\|kill\|freeze\|thaw\|start CEN NÓ…` | saída limpa (`SIGTERM`, com BYE), morte abrupta (`SIGKILL`), nó calado (`SIGSTOP`), retomar, (re)lançar |
 | `ottctl netem CEN NÓ IFACE --delay 30ms --jitter 10ms --loss 5 --rate 500kbit` | atraso/jitter/perdas/débito numa interface (só `core`); `NÓ` é um nó overlay ou do CORE (`r4`) |
 | `ottctl netem-clear CEN NÓ IFACE` · `ottctl link CEN NÓ IFACE up\|down` | remove o `netem`; liga/desliga uma interface |
-| `ottctl dashboard CEN [--port 8080]` | painel web |
+| `ottctl test CEN [IDS…] [--list] [--repeat N] [--md] [--json F]` | corre os testes automáticos do cenário (ver abaixo); `--repeat` dá mínimo/média/máximo, `--md` uma tabela para o relatório |
+| `ottctl dashboard [CEN] [--backend core\|local] [--session N] [--port 8080]` | painel web (sem `CEN` escolhe-se o cenário no próprio painel) |
 
-## O painel
+## O painel (guia completo em `docs/PAINEL.md`)
 
 Grafo do overlay na posição do desenho do CORE, com a cor de cada nó pelo estado (ligado, por lançar, parado, morto, congelado, sem
 resposta) e **a árvore de cada fluxo** desenhada com setas (traço cheio = ramo ativo, tracejado = rota sem procura). Nos clientes
@@ -51,6 +53,31 @@ perdas ou débito numa ligação do underlay e para a cortar e repor.
 
 O servidor só escuta em `127.0.0.1`; recusa pedidos cujo `Host` não seja local e só aceita `POST` em JSON; as interfaces e os valores do
 `tc` são validados com expressões estritas (no CORE correm como root dentro do nó).
+
+## Atalhos (`Makefile`)
+
+`make dashboard` abre o painel (local) e `make dashboard-core [SESSION=N]` liga-o a uma sessão do CORE já iniciada; `make test`,
+`make test-core`, `make test-md`, `make up|down|status|events`, `make unit` e `make help`. Variáveis: `CEN`, `PORT`, `BACKEND`,
+`SESSION`, `ARGS`. No separador *Rede* há botões de perdas rápidas (1, 5, 10, 20, 30 %) para a ligação escolhida.
+
+## Testes automáticos (`ottctl test` e separador *Testes*)
+
+Cada teste prepara a situação, provoca a falha, espera pela reação e **mede** (tempo até haver rota nova, interrupção do vídeo, RTT,
+perdas). Os de `G` servem qualquer cenário; os de `A` (falhas de nós), `C` (arranque, suplentes, bootstrapper) e `B` (rede: atraso,
+perdas, só no CORE) são do cenário 4. Os testes `B` põem e retiram o `netem` por si. Resultados medidos em local e no CORE estão em
+`docs/ESTADO.md`. Duas observações que saíram daqui:
+
+- **B3**: com 10 % de perdas de pacotes perdem-se ≈ 44 % das imagens, porque cada imagem JPEG (≈ 8 KiB) vai num só datagrama UDP que
+  o IP parte em ≈ 6 fragmentos e basta perder um (esperado 1 − 0,9⁶ ≈ 47 %).
+- **B6**: com 100 ms no S1 o C1 troca o `filme_c` para o caminho de 3 saltos; é o comportamento da D34 (latência primeiro), já não o
+  "saltos primeiro" da D21.
+
+## Demonstração guiada
+
+O separador *Demonstração* percorre passos (arranque, árvore de um fluxo, queda de um nó, regresso, atraso na rede…) com texto
+explicativo e executa cada ação a pedido. Modo de apresentação: tecla `p` (ou `#demo,present` no endereço), `espaço`/`→` avança,
+`f` põe os fluxos em foco. O separador *Rede* mostra os efeitos `netem`/`link` ativos e o *Nó* os gráficos (img/s, jitter, RTT) com as
+ações marcadas no tempo (histórico amostrado a 1 Hz no servidor, `/api/history`).
 
 ## Como funciona
 
@@ -63,6 +90,9 @@ O servidor só escuta em `127.0.0.1`; recusa pedidos cujo `Host` não seja local
 3. **O orquestrador** (`src/ott/ctl/`) monta a linha de comandos do `ott` de cada nó e lança-a no modo escolhido.
 
 ## Limitações
+
+- O estado de um nó passa a ter `phase` ("a registar" enquanto espera pelo bootstrapper) e eventos `fluxo_lacuna` (interrupção ≥ 1 s
+  que recupera antes de o fluxo ser dado como parado).
 
 - Os eventos de rotas e de fluxos saem de comparar fotografias de 0,5 s: duas mudanças dentro do mesmo intervalo contam como uma.
 - Um nó morto com `kill -9` deixa de escrever; o painel mostra-o como "morto" (se foi o `ottctl` a matá-lo) ou "sem resposta".

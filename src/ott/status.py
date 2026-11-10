@@ -20,6 +20,7 @@ from collections import deque
 log = logging.getLogger("ott.status")
 
 STALL_AFTER = 2.0   # segundos sem imagens novas para dar um fluxo como parado
+GAP_MIN = 1.0       # interrupção mínima (s) que se regista quando o fluxo volta sem ter chegado a "parar"
 
 
 def _num(value):
@@ -38,6 +39,7 @@ class StatusWriter:
         self.forwarder = forwarder
         self.receivers = receivers if receivers is not None else {}
         self.published = list(published)
+        self.phase = "a correr"   # "a registar" enquanto espera pelo bootstrapper
         self.subscriptions = subscriptions or (lambda: ([], []))   # () -> (pendentes, ativas)
         self.interval = interval
         self.started = time.time()
@@ -49,6 +51,17 @@ class StatusWriter:
         self._stop = threading.Event()
         self._thread = None
         self._lock = threading.Lock()
+
+    def bind(self, forwarder=None, receivers=None, published=None, subscriptions=None):
+        """Liga o que só existe depois do registo no bootstrapper (plano de dados, fluxos)."""
+        if forwarder is not None:
+            self.forwarder = forwarder
+        if receivers is not None:
+            self.receivers = receivers
+        if published is not None:
+            self.published = list(published)
+        if subscriptions is not None:
+            self.subscriptions = subscriptions
 
     # -- eventos -------------------------------------------------------
 
@@ -139,11 +152,15 @@ class StatusWriter:
             if now > prev["t"]:
                 rate = (st.received - prev["received"]) / (now - prev["t"])
             if st.received > prev["received"]:
+                gap = now - prev["last_rx"]
+                if prev["stalled"]:
+                    self.event("fluxo_voltou", f"fluxo {name} voltou a chegar (parado {gap:.1f} s)", route=name,
+                               gap=round(gap, 1))
+                    prev["stalled"] = False
+                elif prev["seen"] and gap >= GAP_MIN:
+                    self.event("fluxo_lacuna", f"fluxo {name}: interrupção de {gap:.1f} s", route=name, gap=round(gap, 1))
                 prev["last_rx"] = now
                 prev["seen"] = True
-                if prev["stalled"]:
-                    self.event("fluxo_voltou", f"fluxo {name} voltou a chegar", route=name)
-                    prev["stalled"] = False
             elif (name in {f"{a}:{b}" for a, b in active} and prev["seen"] and not prev["stalled"]
                   and now - prev["last_rx"] >= STALL_AFTER):
                 self.event("fluxo_parou", f"fluxo {name} parou de chegar", route=name)
@@ -179,10 +196,12 @@ class StatusWriter:
                     "forwarded_rate": rate["forwarded"]}
         service = getattr(self.node, "bootstrap_service", None)
         pending, active = self.subscriptions()
+        flows = self._flows(now)   # antes de copiar os eventos: gera os eventos dos fluxos desta fotografia
         with self._lock:
             events = list(self.events)
         return {
-            "node": self.node.id, "online": True, "ts": round(now, 3), "started": round(self.started, 3),
+            "node": self.node.id, "online": True, "phase": self.phase, "ts": round(now, 3),
+            "started": round(self.started, 3),
             "pid": os.getpid(), "port": self.node.port,
             "bootstrapper": sorted(service.registered) if service is not None else None,
             "neighbors": neighbors,
@@ -190,7 +209,7 @@ class StatusWriter:
             "subscriptions": {"pending": sorted(f"{a}:{b}" for a, b in pending),
                               "active": sorted(f"{a}:{b}" for a, b in active)},
             "routes": sorted(routes.values(), key=lambda r: (r["origin"], r["flow"])),
-            "flows": self._flows(now),
+            "flows": flows,
             "data": data,
             "events": events,
         }

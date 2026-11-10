@@ -19,6 +19,8 @@ class Orchestrator:
         self.rundir = rundir or os.path.join(tempfile.gettempdir(), "ottctl", plan.name)
         self.verbose = verbose
         self.flags = {}          # id -> {"frozen": bool, "killed": bool, "stopped": bool}
+        self.actions = []        # [{t, text, kind}]: o que o orquestrador fez (marcas nos gráficos, medição de tempos)
+        self.net_effects = {}    # "a:ia|b:ib" ou "nó:iface" -> {a, ia, b, ib, params, down}
         self._lock = threading.RLock()
         self._underlay = None
         os.makedirs(self.rundir, exist_ok=True)
@@ -37,7 +39,8 @@ class Orchestrator:
 
     def save(self, started=None):
         meta = {"scenario": self.plan.name, "backend": self.backend.name, "verbose": self.verbose, "flags": self.flags,
-                "pids": getattr(self.backend, "pids", {}), "started": started or self.load().get("started")}
+                "pids": getattr(self.backend, "pids", {}), "started": started or self.load().get("started"),
+                "actions": self.actions[-200:], "net": self.net_effects}
         if isinstance(self.backend, CoreBackend):
             meta["session"] = self.backend.session
         if isinstance(self.backend, LocalBackend):
@@ -72,7 +75,16 @@ class Orchestrator:
             backend.adopt(meta.get("pids", {}))
         orch = cls(plan, backend, rundir, meta.get("verbose", False))
         orch.flags = meta.get("flags", {})
+        orch.actions = meta.get("actions", [])
+        orch.net_effects = meta.get("net", {})
         return orch
+
+    def record(self, text, kind="acao", short=None):
+        """Regista uma ação (com a hora) para as marcas nos gráficos; devolve a hora."""
+        t = time.time()
+        self.actions.append({"t": round(t, 3), "text": text, "kind": kind, "short": short or text[:16]})
+        del self.actions[:-200]
+        return t
 
     # -- ciclo de vida -------------------------------------------------
 
@@ -98,24 +110,28 @@ class Orchestrator:
                     self._start(spec)
                 if group is servers and servers and others:
                     time.sleep(settle)
+            self.record(f"lançados {len(servers) + len(others)} nós ({self.backend.name})", "up")
             self.save(started=time.time())
             return [n.id for n in servers + others]
 
-    def _start(self, spec):
+    def _start(self, spec, extra=(), bootstrap=None):
         if self.backend.alive(spec):
             raise BackendError(f"{spec.id} já está a correr (usa primeiro: ottctl down {self.plan.name})")
         try:
             os.remove(self.status_path(spec.id))
         except FileNotFoundError:
             pass
-        argv = self.backend.argv(spec, self.status_path(spec.id), self.verbose)
+        argv = self.backend.argv(spec, self.status_path(spec.id), self.verbose, extra=extra, bootstrap=bootstrap)
         self.backend.start(spec, argv, self.log_path(spec.id))
         self.flags.pop(spec.id, None)
 
-    def start(self, ids):
+    def start(self, ids, extra=(), bootstrap=None):
+        """(Re)lança nós; ``extra`` acrescenta argumentos e ``bootstrap`` usa outro nó como bootstrapper."""
         with self._lock:
             for node_id in ids:
-                self._start(self._spec(node_id))
+                self._start(self._spec(node_id), extra, bootstrap)
+                self.record(f"lançado {node_id}" + (f" (bootstrapper {bootstrap})" if bootstrap else "")
+                            + (f" {' '.join(extra)}" if extra else ""), "start", short=f"start {node_id}")
             self.save()
 
     def _spec(self, node_id):
@@ -132,6 +148,9 @@ class Orchestrator:
                     self.flags.setdefault(node_id, {})[flag] = True
                 if name == "CONT":
                     self.flags.get(node_id, {}).pop("frozen", None)
+                self.record({"TERM": "parado", "KILL": "morto (kill -9)", "STOP": "congelado", "CONT": "retomado"}
+                            .get(name, name) + f": {node_id}", name.lower(),
+                            short={"TERM": "stop", "KILL": "kill", "STOP": "freeze", "CONT": "thaw"}.get(name, name) + f" {node_id}")
             self.save()
 
     def stop(self, ids):
@@ -172,6 +191,7 @@ class Orchestrator:
                     except BackendError:
                         pass
             self.flags = {}
+            self.record("todos os nós parados", "down")
             self.save()
 
     # -- rede (só no CORE) --------------------------------------------
@@ -189,35 +209,92 @@ class Orchestrator:
             self._underlay = underlay_of(self.plan)
         return self._underlay
 
-    def netem(self, node, iface, delay=None, jitter=None, loss=None, rate=None):
+    def _effect(self, key, **info):
+        entry = self.net_effects.setdefault(key, {})
+        entry.update(info)
+        if not entry.get("params") and not entry.get("down"):
+            self.net_effects.pop(key, None)
+        self.save()
+
+    @staticmethod
+    def _end_key(node, iface):
+        return f"{node}:{iface}"
+
+    @staticmethod
+    def _link_key(a, ia, b, ib):
+        return "|".join(sorted((f"{a}:{ia}", f"{b}:{ib}")))
+
+    @staticmethod
+    def _describe(params):
+        return " ".join(f"{k}={v}" for k, v in params.items() if v)
+
+    def netem(self, node, iface, delay=None, jitter=None, loss=None, rate=None, _key=None):
         cmd = netem_command(iface, delay, jitter, loss, rate)
         rc, out = self.backend.execute(self._core_node(node), cmd)
         if rc != 0:
             raise BackendError(f"tc falhou em {node} {iface}: {out}")
+        params = {"delay": delay, "jitter": jitter, "loss": loss, "rate": rate}
+        if _key is None:
+            self.record(f"netem em {node}:{iface} ({self._describe(params)})", "netem")
+            self._effect(self._end_key(node, iface), a=node, ia=iface, b=None, ib=None, params=params)
 
-    def netem_clear(self, node, iface):
+    def netem_clear(self, node, iface, _key=None):
         netem_command(iface, delay="1ms")   # só valida a interface
         self.backend.execute(self._core_node(node), ["tc", "qdisc", "del", "dev", iface, "root"])
+        if _key is None:
+            self.record(f"netem removido de {node}:{iface}", "netem")
+            self._effect(self._end_key(node, iface), params={})
 
     def link_netem(self, a, ia, b, ib, **params):
         """Atraso, jitter, perdas ou débito numa ligação do underlay: aplica-se nos dois extremos."""
-        self.netem(a, ia, **params)
-        self.netem(b, ib, **params)
+        self.netem(a, ia, _key=True, **params)
+        self.netem(b, ib, _key=True, **params)
+        shown = {k: params.get(k) for k in ("delay", "jitter", "loss", "rate")}
+        self.record(f"ligação {a}:{ia} ↔ {b}:{ib}: {self._describe(shown)}", "netem")
+        self._effect(self._link_key(a, ia, b, ib), a=a, ia=ia, b=b, ib=ib, params=shown)
 
     def link_clear(self, a, ia, b, ib):
-        self.netem_clear(a, ia)
-        self.netem_clear(b, ib)
+        self.netem_clear(a, ia, _key=True)
+        self.netem_clear(b, ib, _key=True)
+        self.record(f"ligação {a}:{ia} ↔ {b}:{ib}: netem removido", "netem")
+        self._effect(self._link_key(a, ia, b, ib), params={})
 
     def link_set(self, a, ia, b, ib, up):
         """Corta ou repõe uma ligação do underlay (nos dois extremos)."""
-        self.link_state(a, ia, up)
-        self.link_state(b, ib, up)
+        self.link_state(a, ia, up, _key=True)
+        self.link_state(b, ib, up, _key=True)
+        self.record(f"ligação {a}:{ia} ↔ {b}:{ib} {'reposta' if up else 'cortada'}", "link")
+        self._effect(self._link_key(a, ia, b, ib), a=a, ia=ia, b=b, ib=ib, down=not up)
 
-    def link_state(self, node, iface, up):
+    def link_state(self, node, iface, up, _key=None):
         netem_command(iface, delay="1ms")
         rc, out = self.backend.execute(self._core_node(node), ["ip", "link", "set", iface, "up" if up else "down"])
         if rc != 0:
             raise BackendError(f"ip link falhou em {node} {iface}: {out}")
+        if _key is None:
+            self.record(f"interface {node}:{iface} {'ligada' if up else 'desligada'}", "link")
+            self._effect(self._end_key(node, iface), a=node, ia=iface, b=None, ib=None, down=not up)
+
+    def clear_network(self):
+        """Remove todos os efeitos de rede aplicados por este orquestrador (netem e cortes)."""
+        for entry in list(self.net_effects.values()):
+            ends = [(entry["a"], entry["ia"])] + ([(entry["b"], entry["ib"])] if entry.get("b") else [])
+            for node, iface in ends:
+                try:
+                    if entry.get("params"):
+                        self.netem_clear(node, iface, _key=True)
+                    if entry.get("down"):
+                        self.link_state(node, iface, True, _key=True)
+                except BackendError:
+                    pass
+        self.net_effects = {}
+        self.record("rede reposta (sem atrasos nem cortes)", "netem")
+        self.save()
+
+    def probe(self, free_node, args, timeout=30):
+        """Corre o ``ott`` num host livre (ex.: L1) e devolve (código, texto): serve para testar o bootstrap."""
+        self.record(f"sonda em {free_node}: ott {' '.join(args)}", "probe")
+        return self.backend.probe(free_node, list(args), timeout)
 
     # -- observação ----------------------------------------------------
 
@@ -241,7 +318,7 @@ class Orchestrator:
         if not status.get("online", True):
             return "stopped"
         if now - status.get("ts", 0) <= STALE_AFTER:
-            return "up"
+            return "waiting" if status.get("phase") == "a registar" else "up"
         return "dead" if self.backend.alive(spec) is False else "stale"
 
     def state(self):
@@ -271,6 +348,7 @@ class Orchestrator:
                 "started": meta.get("started"), "rundir": self.rundir, "nodes": nodes, "edges": self.plan.edges(),
                 "positions": self.plan.positions(), "flows": sorted(flows), "tree": tree,
                 "events": events[-EVENTS_KEPT:], "free": self.plan.free,
+                "actions": meta.get("actions", self.actions)[-100:], "net": list(meta.get("net", self.net_effects).values()),
                 "can_network": isinstance(self.backend, CoreBackend)}
 
 

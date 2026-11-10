@@ -139,6 +139,11 @@ def main(argv=None):
                                        routing_table=routing_table)
                  if args.publish_flow else None)
     node.start()
+    status = None
+    if args.status_file:   # logo ao arrancar: um nó à espera do bootstrapper também aparece no painel
+        status = StatusWriter(args.status_file, node, routing_table, interval=args.status_interval)
+        status.phase = "a registar" if args.bootstrapper else "a correr"
+        status.start()
 
     if service and args.id in service.nodes:
         node.add_targets({service.address_of(n["id"]): n["id"]
@@ -148,6 +153,8 @@ def main(argv=None):
     if args.bootstrapper:
         host, port = parse_addr(args.bootstrapper)
         if not node.bootstrap(host, port):
+            if status is not None:
+                status.stop()
             routing_table.close()
             node.stop()
             raise SystemExit("não foi possível obter vizinhos do bootstrapper")
@@ -167,12 +174,10 @@ def main(argv=None):
                for flow in args.publish_flow]
     pending_subscriptions = set(subscriptions)
     active_subscriptions = set()
-    status = None
-    if args.status_file:
-        status = StatusWriter(args.status_file, node, routing_table, forwarder, receivers,
-                              published=args.publish_flow,
-                              subscriptions=lambda: (set(pending_subscriptions), set(active_subscriptions)),
-                              interval=args.status_interval).start()
+    if status is not None:
+        status.bind(forwarder, receivers, args.publish_flow,
+                    lambda: (set(pending_subscriptions), set(active_subscriptions)))
+        status.phase = "a correr"
 
     log = logging.getLogger("ott.cli")
     stop = threading.Event()

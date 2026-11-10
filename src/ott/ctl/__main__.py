@@ -66,9 +66,20 @@ def parser():
     ln.add_argument("node")
     ln.add_argument("iface")
     ln.add_argument("state", choices=["up", "down"])
-    db = sub.add_parser("dashboard", help="painel web (http://127.0.0.1:PORTA)")
-    db.add_argument("scenario")
-    db.add_argument("--port", type=int, default=8080)
+    ts = sub.add_parser("test", help="corre os testes automáticos do cenário (o cenário tem de estar lançado)")
+    ts.add_argument("scenario")
+    ts.add_argument("ids", nargs="*", help="testes a correr (por omissão todos); ver --list")
+    ts.add_argument("--list", action="store_true", help="lista os testes do cenário")
+    ts.add_argument("--repeat", type=int, default=1, help="repetições (para médias e máximos)")
+    ts.add_argument("--md", action="store_true", help="no fim, tabela em Markdown para o relatório")
+    ts.add_argument("--json", metavar="FICHEIRO", help="guarda os resultados em JSON")
+    db = sub.add_parser("dashboard", help="painel web (http://127.0.0.1:PORTA); o cenário também se escolhe na página")
+    db.add_argument("scenario", nargs="?")
+    db.add_argument("--port", type=int, default=8080, help="porta do painel")
+    db.add_argument("--backend", choices=["local", "core"], default="local")
+    db.add_argument("--session", type=int, help="sessão do CORE")
+    db.add_argument("--node-port", type=int, default=5000, help="porta TCP dos nós (modo local)")
+    db.add_argument("--node-data-port", type=int, default=6000, help="porta UDP dos nós (modo local)")
     return p
 
 
@@ -92,6 +103,13 @@ def run(args):
         print(f"{orch.plan.name}: {len(ids)} nós lançados ({orch.backend.name}); estado e logs em {orch.rundir}")
         time.sleep(2.5)
         print(render_status(orch.state()))
+        return 0
+    if args.cmd == "dashboard":
+        from .web import Controller, serve
+        controller = Controller(backend=args.backend, port=args.node_port, data_port=args.node_data_port, rundir=args.dir)
+        if args.scenario:
+            controller.select(args.scenario, args.backend, args.session)
+        serve(controller, args.port)
         return 0
     orch = Orchestrator.attach(args.scenario, args.dir)
     if args.cmd == "down":
@@ -125,9 +143,22 @@ def run(args):
         orch.netem_clear(args.node, args.iface)
     elif args.cmd == "link":
         orch.link_state(args.node, args.iface, args.state == "up")
-    elif args.cmd == "dashboard":
-        from .web import serve
-        serve(orch, args.port)
+    elif args.cmd == "test":
+        import json
+        from . import scenarios
+        if args.list:
+            for t in scenarios.tests_for(orch.plan, orch.backend.name):
+                print(f"{t['id']:<3} {t['title']}" + ("  [precisa do CORE]" if t["core"] else "") + ("  [lento]" if t["slow"] else ""))
+            return 0
+        results = scenarios.run_tests(orch, args.ids or None, args.repeat,
+                                      on_result=lambda r: print(scenarios.render_text([r]), flush=True))
+        print()
+        print(scenarios.render_markdown(results) if args.md else
+              "; ".join(f"{s['id']} {s['ok']}/{s['runs']}" for s in scenarios.summarize(results)))
+        if args.json:
+            with open(args.json, "w") as f:
+                json.dump(results, f, ensure_ascii=False, indent=1)
+        return 0 if all(r["status"] in ("ok", "ignorado") for r in results) else 2
     return 0
 
 

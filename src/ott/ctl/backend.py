@@ -77,14 +77,17 @@ class Backend:
     def overlay_for_serve(self):
         return self.plan.overlay_path
 
-    def argv(self, spec, status_path, verbose=False, interval=0.5):
-        """Argumentos do ``ott`` para este nó (sem o executável)."""
+    def argv(self, spec, status_path, verbose=False, interval=0.5, extra=(), bootstrap=None):
+        """Argumentos do ``ott`` para este nó (sem o executável).
+
+        ``extra`` acrescenta argumentos (ex.: ``--min-neighbors 4``); ``bootstrap`` troca o bootstrapper por outro nó.
+        """
         a = ["-i", spec.id, *self.net_args(spec.id), "--status-file", status_path, "--status-interval", str(interval)]
         if spec.serve:
             a += ["--serve", self.overlay_for_serve()]
-        boot = self.plan.bootstrap_of(spec)
+        boot = bootstrap or self.plan.bootstrap_of(spec)
         if not spec.serve:
-            override = self.bootstrap_override(spec)
+            override = None if bootstrap else self.bootstrap_override(spec)
             if override:
                 a += ["-b", override]
             elif boot:
@@ -95,7 +98,7 @@ class Backend:
         for sub in spec.subscribe:
             a += ["--subscribe", sub]
         a += self.neighbor_args(spec)
-        a += spec.extra
+        a += spec.extra + list(extra)
         if verbose:
             a.append("-v")
         return a
@@ -126,6 +129,10 @@ class Backend:
 
     def execute(self, core_name, argv):
         raise BackendError(f"o modo {self.name} não executa comandos de rede (só no CORE)")
+
+    def probe(self, core_name, argv, timeout=30):
+        """Corre o ``ott`` com estes argumentos num host livre e devolve (código, texto de saída)."""
+        raise NotImplementedError
 
 
 class LocalBackend(Backend):
@@ -172,6 +179,16 @@ class LocalBackend(Backend):
         self.procs[spec.id] = proc
         self.pids[spec.id] = proc.pid
         return proc.pid
+
+    def probe(self, core_name, argv, timeout=30):
+        env = dict(os.environ, PYTHONPATH=os.path.join(ROOT, "src"))
+        try:
+            p = subprocess.run([sys.executable, "-m", "ott", "--bind", "127.0.0.250", "-p", str(self.port + 40),
+                                "--data-port", str(self.data_port + 40), *argv], capture_output=True, text=True,
+                               timeout=timeout, env=env, cwd=ROOT)
+        except subprocess.TimeoutExpired as exc:
+            return 124, f"(excedeu {timeout} s) {exc.stdout or ''}"
+        return p.returncode, (p.stdout + p.stderr).strip()
 
     def adopt(self, pids):
         """Retoma pids de uma execução anterior (de outro processo ``ottctl``)."""
@@ -267,3 +284,7 @@ class CoreBackend(Backend):
 
     def execute(self, core_name, argv):
         return self.vcmd(core_name, argv)
+
+    def probe(self, core_name, argv, timeout=30):
+        command = f"cd {shlex.quote(ROOT)} && timeout {int(timeout)} ./bin/ott {shlex.join(argv)} 2>&1"
+        return self.vcmd(core_name, ["sh", "-c", command], timeout=timeout + 10)

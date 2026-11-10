@@ -1,7 +1,7 @@
 """Tabelas de texto com o estado de um cenário (para o terminal)."""
 import time
 
-HEALTH = {"up": "ligado", "off": "por lançar", "stopped": "parado", "dead": "morto", "frozen": "congelado",
+HEALTH = {"up": "ligado", "waiting": "à espera do bootstrapper", "off": "por lançar", "stopped": "parado", "dead": "morto", "frozen": "congelado",
           "stale": "sem resposta"}
 
 
