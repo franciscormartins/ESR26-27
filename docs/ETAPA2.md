@@ -300,6 +300,8 @@ Ensaios no CORE necessários para dar a etapa como validada:
 
 | 4 (cenário 2, S1–O1, S1–O2, O1–O2, O1–C2, O2–C1; C1 e C2 subscritos) | 2026-11-09 | **Passou.** Janela de 23:40:24 a 23:40:46. Cada cliente usa o caminho de 2 saltos e não o de 3 pela ligação O1–O2: O2 tem `recebidos` = `encaminhados` (+40 a cada 2 s, só para C1) e O1 tem `recebidos` = `encaminhados` (+40 a cada 2 s, só para C2), ou seja, nenhum dos dois reencaminha para o outro. S1 envia 2 cópias por pacote (+80 a cada 2 s depois de C2 entrar às 23:40:22), uma por ramo, como esperado porque os ramos divergem logo no servidor. C1 e C2: 20/s, `perdidos=0`, jitter 0,06–0,13 ms. `descartados=0` e `RPF=0` em todos os nós, incluindo O1 e O2 com 3 interfaces cada (sem sinais da limitação L7). RTT entre vizinhos 0,3–0,7 ms. |
 
+| Arranque do cenário 3 (atribuição da Figura 1; O4, O8, O9, O10 com `filme_a`, O11 com `filme_b`) — **parcial, só O2** | 2026-11-10 | Janela de 00:02:03 a 00:02:33 no O2 (r1). Vizinhos O1, O3 e O7, como no JSON. `recebidos` +80 a cada 2 s (40/s = 2 fluxos × 20/s: cada fluxo atravessa o troço O1–O2 **uma só vez**, apesar de o `filme_a` ter 4 clientes). `encaminhados` +120 a cada 2 s (60/s = 3 cópias por imagem: `filme_a` para O3 e O7, `filme_b` só para o ramo que leva à O5). `descartados=0`, `RPF=0`. Falta ver os restantes nós para confirmar o caminho da O5 e a entrega nos clientes. |
+
 Nota sobre os `perdidos` do ensaio 1/2: os 434/439 acumularam-se **antes** da janela medida (não
 cresceram durante ela) e os dois clientes mostram `reinicios=1`. O emissor numera todas as imagens,
 mesmo quando não há destinos, por isso um período sem caminho (por exemplo, um nó reiniciado) conta
