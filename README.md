@@ -15,7 +15,7 @@ relatório em `docs/relatorio/`.
 | `src/ott/forwarding.py` | encaminhamento UDP pelos ramos ativos da árvore overlay (RPF estrito) | 2 |
 | `src/ott/streaming/` | pacotes de vídeo (cabeçalho origem/fluxo/salto + RTP), emissor MJPEG e recetor UDP | 2/4 |
 | `progex/` | código de apoio do livro (Kurose) e `movie.Mjpeg`, só como referência | 4 |
-| `topologies/` | cenários 1–3 (ajustar `host` aos IPs do CORE) | – |
+| `topologies/` | cenários 1–4 (`.json` do overlay e `.xml` do CORE); `aplicar_frr.py` repõe a config do FRR; `gerar_cenario4.py` gera o cenário 4 | – |
 | `tests/` | testes automáticos (`python3 -m unittest discover -s tests -t .`) e `medicoes.py` (tempos em localhost, 10 repetições) | – |
 | `docs/ESTADO.md` | **ponto da situação**: o que está feito, decisões, como testar, pendentes, perguntas ao docente | – |
 | `docs/protocolo.md` | especificação das mensagens e interações | 1, 2 |

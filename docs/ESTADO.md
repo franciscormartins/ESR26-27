@@ -14,7 +14,7 @@
 - **Etapa 2 (estado em 2026-11-09):** anúncios periódicos por fluxo; montante escolhido por
   saltos com desempate pelo RTT (com histerese); subscrições agregadas por ramo; dados RTP/JPEG
   por UDP pelos ramos ativos com RPF estrito; reparação rápida, `WITHDRAW` e tempo de vida das
-  rotas para falhas e reinício do servidor. Tudo coberto por 118 testes automáticos, incluindo
+  rotas para falhas e reinício do servidor. Tudo coberto por 129 testes automáticos, incluindo
   nós reais em localhost. Até 2026-11-09 a Etapa 2 só funcionava com nós falsos (handlers
   recebiam o objeto `Neighbor`, corrigido em `e83e37b`). **Falta:** segundo servidor nas
   topologias e todos os ensaios no CORE (ver `docs/ETAPA2.md`).
@@ -77,6 +77,7 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 | D27 | Épocas e retirada: o servidor começa as épocas na hora do arranque em ms (+1 por ronda); uma rota retirada por este nó só aceita épocas maiores do que a retirada durante `route_ttl` (retenção), e depois qualquer época (**implementado** em 2026-11-10) | Substitui a regra da D22 "rota sem caminho aceita qualquer época", que no CORE (ensaio 9) deixou anúncios antigos em trânsito formar um ciclo fantasma O6 ↔ O7 que só o tempo de vida desfez (L9). Épocas a partir do relógio mantêm o reinício do servidor imediato sem essa regra. Impacto: formato das mensagens inalterado (só o valor de `epoch` muda), por isso não há problema de compatibilidade; uma retirada só é reaprendida na ronda seguinte; um servidor com o relógio atrasado só é aceite ao fim de `--route-ttl`. |
 | D28 | Envios da tabela de rotas por ordem: as mensagens decididas sob o bloqueio entram nessa altura numa fila única e são enviadas fora do bloqueio, por ordem, uma thread de cada vez (**implementado** em 2026-11-10) | Antes, cada handler enviava depois de libertar o bloqueio, e duas threads podiam trocar a ordem: no CORE (ensaio 9 repetido), um `ACTIVATE` saiu depois do `DEACTIVATE` da troca de montante seguinte e deixou um ramo órfão (L10). Formato das mensagens inalterado. Custo: um envio lento a um vizinho atrasa os envios seguintes de outras threads (já atrasava os da própria thread). |
 | D29 | Uma exceção num handler (rotas, streaming) é registada no log e **não fecha a ligação** ao vizinho; um nó que não é bootstrapper responde `ERROR "este nó não é bootstrapper"` | Um erro de outro módulo não pode derrubar a ligação nem fazer o vizinho dar-nos como caídos; o texto antigo (`nó desconhecido`) enganava quem apontava `-b` a um nó errado. Cobertos por `RobustnessTest`. |
+| D30 | Cenário 4 (`docs/CENARIO4.md`): **rede em teia** de 13 routers (centro, anel interior, anel exterior, raios e ligações radiais), 4 clientes e **dois servidores ligados entre si**, de modo que cada um é caminho de passagem dos fluxos do outro; overlay **só em hosts** com o id igual ao nome do nó no CORE; `S1` e `S2` correm ambos `--serve`; `S1` publica `filme_a` e `filme_b`, `S2` publica `filme_c` e `filme_b` (réplica) | Serve para ver como o programa reage à queda de um servidor (rotas do outro redirecionadas, réplica a salvar o cliente) e para avaliar rotas com atraso, jitter e perdas diferentes (empates de saltos em `C3` e `C4`; ligações diretas para `tc netem` ligação a ligação). Atraso base 0 de propósito (o OSPF reparte por caminhos de custo igual). Gerado por `topologies/gerar_cenario4.py`; coerência XML/JSON e canvas em `tests/test_topologias.py`. **Ainda não aberto no CORE.** |
 
 ## 4. Arquitetura (resumo)
 
@@ -117,7 +118,7 @@ Os handlers recebem `fn(node, neighbor_id, msg)`, em que `neighbor_id` é uma st
 
 ## 6. Como testar
 
-**Suite completa (118 testes, ~26 s):**
+**Suite completa (129 testes, ~26 s):**
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -t .
@@ -272,7 +273,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] E2: candidatos com desempate por RTT, `WITHDRAW` e reparação rápida (passos 5 e 6, 2026-11-09).
 - [x] E2: tempo de vida das rotas (passo 7, 2026-11-09).
 - [x] E2: retirar `seen_announcements` e revisão final da documentação (passos 8 e 9, 2026-11-09).
-- [ ] E2: segundo servidor `S2` nas topologias (passo 10).
+- [ ] E2: segundo servidor `S2` nas topologias (passo 10). O cenário 4 novo (D30) já tem dois servidores com 2 fluxos cada e pode cumprir este passo; falta abri-lo no CORE e correr os ensaios (ver `docs/CENARIO4.md` §4).
 - [x] E2: ensaios 1 e 2 no CORE (cenário 1: caminho básico e troço comum partilhado), 2026-11-09.
 - [x] E2: ensaio 4 no CORE (cenário 2: cada cliente usa o caminho mais curto), 2026-11-09.
 - [x] E2: ensaio 6 no CORE (cenário 3: reparação rápida na queda do O3), 2026-11-10, depois da correção D26.
@@ -297,6 +298,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-10 | **Cenário 4 refeito (rede em teia, dois servidores).** A 1.ª versão tinha 6 nós fora do canvas do CORE (1000×750), por isso só se via o `S1`; o gerador passa a verificar que tudo cabe. Nova topologia: 13 routers em teia, 4 clientes, 11 nós overlay (`S1`–`S2` ligados, `O1`–`O4`, `C1`–`C4`, suplente `O5`) e 2 hosts livres; `docs/CENARIO4.md` com nós, IPs, interfaces, ligações overlay diretas/com 2 caminhos, saltos por fluxo e por falha, comandos de cada nó e 22 testes por ensaiar (falha de servidor e réplica, atraso/jitter/perdas/largura de banda, entradas e saídas, bootstrap). `tests/test_topologias.py`: coerência XML/JSON dos 4 cenários, nós dentro do canvas e propriedades do cenário 4 (cada servidor é caminho de passagem do outro, qualquer falha deixa os clientes ligados, empates de saltos). 129 testes. Por abrir no CORE. |
 | 2026-11-10 | **Verificação do E1 depois das alterações do E2.** 118 testes OK; `ott` ensaiado de ponta a ponta com o CLI novo (registo no bootstrapper, `--stats`, `Ctrl+C` em 0,3 s com código 0 e `desligado` imediato no vizinho); `cenario3.json` validado contra o XML (todos os IPs pertencem ao nó do CORE indicado, 12 arestas = Figura 1). Reposta a proteção contra exceções em handlers e o `ERROR` próprio de nós que não são bootstrapper, com 7 testes de robustez (D29), que tinham ficado só num `git stash`. Novo `docs/REVISAO_E2.md` com a revisão cruzada fechada. |
 | 2026-11-10 | **Ensaios 3 e 5 da Etapa 2 no CORE.** Ensaio 3 (cenário 1): sair o C1 deixa o C2 a 20/s sem perdas e o O2 a enviar uma só cópia; sair o C2 faz o S1 deixar de emitir. Ensaio 5 (cenário 2): com o link O2–S1 em baixo, o O2 deteta por timeout em ≈ 5,5 s, retira e reaprende pelo O1; o C1 fica ≈ 6,9 s sem vídeo (138 imagens); ao repor o link, o O2 volta ao caminho direto sem nenhuma imagem perdida. `RPF=0` em todos os nós. Falta só o ensaio 7. Logs em `~/uni/esr/ott-logs/2026-11-10-7` e `-8`. |
 | 2026-11-10 | **Ensaio 9 no CORE repetido com a topologia completa (D26–D28).** Os 11 nós com os vizinhos certos; três reinícios do servidor, com os 5 clientes de volta em 1,2–2,9 s e uma cópia por ligação depois de cada um. `descartados=0` e `RPF=0` em todos os nós e `perdidos=0` em todos os clientes. Substitui, para o ramo O6/O8/O9, a sessão anterior em que o C2 arrancou como O9. Logs em `~/uni/esr/ott-logs/2026-11-10-6`. |
