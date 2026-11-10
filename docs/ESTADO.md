@@ -259,7 +259,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] Ensaiar o overlay no cenário 3 (11 nós) com a atribuição proposta (2026-11-02).
 - [x] Passar a especificação e os resultados para o relatório (`docs/relatorio/e1_overlay.tex`, incluída em `main.tex`).
 - [x] Atribuição overlay→CORE do cenário 3: decidida em 2026-11-09, fiel à Figura 1 (D13; `cenario3.json` atualizado).
-- [ ] Repetir no CORE o overlay completo do cenário 3 com a nova atribuição (os resultados 3, 4, 8 e 11 da secção 7 foram obtidos com a atribuição anterior).
+- [x] Repetir no CORE o overlay completo do cenário 3 com a nova atribuição: os 11 nós com exatamente os vizinhos do JSON (2026-11-10, logs `2026-11-10-6`). Os resultados 3, 4, 8 e 11 da secção 7 continuam a ser os da atribuição anterior.
 - [ ] **Grupo:** rever `docs/protocolo.md` (inclui o `BYE reason=duplicate`) e o texto `e1_overlay.tex`; o `babel` em português do `main.tex` não está instalado nesta máquina (compila noutra com `texlive-babel-portuguese`).
 - [ ] Decidir se refazemos o cenário 2 com 3 intermédios, como no enunciado.
 
@@ -277,7 +277,8 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] E2: ensaio 8 no CORE (cenário 3: atraso no caminho ativo, troca única sem perdas), 2026-11-10.
 - [x] E2: ensaio 9 no CORE repetido com a correção D27: os dois fluxos voltam em ≈ 1–2 s, sem rota fantasma (2026-11-10). Ensaio 6 repetido também passou.
 - [x] E2: correção do L10 (D28) confirmada no CORE: três reinícios do servidor, clientes de volta em ≈ 1–2 s, `RPF=0` e sem cópias a mais no O5 (2026-11-10).
-- [ ] E2: ensaios 3, 5 e 7 no CORE (desativação, queda do montante, dois servidores; ver `docs/ETAPA2.md`).
+- [x] E2: ensaios 3 (cenário 1, desativação dos clientes) e 5 (cenário 2, queda do link O2–S1: C1 sem vídeo ≈ 6,9 s, regresso ao caminho direto sem perdas) no CORE, 2026-11-10.
+- [ ] E2: ensaio 7 no CORE (dois servidores; depende do `S2` nas topologias).
 - [ ] E3: interface de apresentação do vídeo, cenários e medições de streaming.
 
 ## 10. Perguntas para os docentes
@@ -294,6 +295,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-10 | **Ensaios 3 e 5 da Etapa 2 no CORE.** Ensaio 3 (cenário 1): sair o C1 deixa o C2 a 20/s sem perdas e o O2 a enviar uma só cópia; sair o C2 faz o S1 deixar de emitir. Ensaio 5 (cenário 2): com o link O2–S1 em baixo, o O2 deteta por timeout em ≈ 5,5 s, retira e reaprende pelo O1; o C1 fica ≈ 6,9 s sem vídeo (138 imagens); ao repor o link, o O2 volta ao caminho direto sem nenhuma imagem perdida. `RPF=0` em todos os nós. Falta só o ensaio 7. Logs em `~/uni/esr/ott-logs/2026-11-10-7` e `-8`. |
 | 2026-11-10 | **Ensaio 9 no CORE repetido com a topologia completa (D26–D28).** Os 11 nós com os vizinhos certos; três reinícios do servidor, com os 5 clientes de volta em 1,2–2,9 s e uma cópia por ligação depois de cada um. `descartados=0` e `RPF=0` em todos os nós e `perdidos=0` em todos os clientes. Substitui, para o ramo O6/O8/O9, a sessão anterior em que o C2 arrancou como O9. Logs em `~/uni/esr/ott-logs/2026-11-10-6`. |
 | 2026-11-10 | **Ensaio 9 no CORE com a D28: três reinícios do servidor.** Em cada um, O4, O10 e O11 voltam a receber em ≈ 1–2 s; O2, O3, O5 e O7 sempre com `descartados=0` e `RPF=0`, e o O5 a 40 imagens/s, sem cópias a mais (L10 não se repetiu, incluindo uma troca de montante do `filme_b` logo a seguir a um arranque). Nesta sessão o nó C2 arrancou por engano com `-i O9`, por isso os resultados de O6, O8 e O9 não contam. Logs em `~/uni/esr/ott-logs/2026-11-10-5`. |
 | 2026-11-10 | **Correção do L10 (D28).** A `RoutingTable` passa a meter os envios numa fila única ainda sob o bloqueio (`_transaction`) e a enviá-los por ordem fora dele, uma thread de cada vez (`_flush`); `activate`, `deactivate`, `handle_activate`, `handle_deactivate` e `handle_neighbor_up` deixam de chamar `node.send` diretamente. Teste de regressão `SendOrderTest` (duas threads, envio lento: o O7 recebia `DEACTIVATE` antes de `ACTIVATE`; falhava antes). Suite: 111 testes, todos passam; testes de rotas, integração e RPF repetidos 3×. Atualizados `ETAPA2.md` e `ETAPA2_NOTAS.md`. Validado só em localhost. |

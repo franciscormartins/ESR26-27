@@ -20,7 +20,8 @@ ensaios no CORE (passo 11): em 2026-11-09 passaram os ensaios 1 e 2 (cenário 1)
 em 2026-11-10 passaram os ensaios 6, 8 e 9 (cenário 3; o 9 depois da correção D27 do L9). O
 ensaio 9 repetido mostrou um defeito novo (L10, ramo órfão por reordenação de
 `ACTIVATE`/`DEACTIVATE`), corrigido pela D28 e confirmado com três reinícios do servidor;
-os ensaios 3, 5 e 7 continuam por fazer.
+em 2026-11-10 passaram também os ensaios 3 (cenário 1) e 5 (cenário 2). Falta o ensaio 7
+(dois servidores), que depende do passo 10.
 
 ## Estado e tarefas
 
@@ -276,9 +277,9 @@ seguintes. Estado atual de cada uma:
 - [x] RPF (`tests/test_forwarding.py`, UDP real em loopback): só o montante é entregue e
   reencaminhado; após troca de montante, o antigo é descartado; sem rota ou sem caminho tudo é
   descartado; o próprio fluxo que volta ao nó de origem não é reencaminhado.
-- [ ] CORE: ativar dois clientes e desativar um mantém o outro a receber; desativar o
-  último deixa a rota sem tráfego.
-- [ ] CORE: exercitar as topologias 1 e 2 antes do cenário 3.
+- [x] CORE: ativar dois clientes e desativar um mantém o outro a receber; desativar o
+  último deixa a rota sem tráfego (cenário 1, ensaio 3, 2026-11-10).
+- [x] CORE: exercitar as topologias 1 e 2 antes do cenário 3 (ensaios 1–5).
 
 Cenário 3: nó do CORE onde corre cada nó overlay (fiel à Figura 1, D13). Todos com
 `-b 10.0.18.20`; o servidor é o `O1` (subscrições `O1:filme_a`).
@@ -331,6 +332,9 @@ cada ensaio em `docs/testes-core.md`, local e fora do repositório):
 | 9, três reinícios do servidor com a correção D28 (cenário 3) | 2026-11-10 | **Passou (L10 não se repetiu).** Logs em `~/uni/esr/ott-logs/2026-11-10-5`. O1 reiniciado às 11:48:28,7, 11:49:38,1 e 11:50:45,9; em cada um, O4, O10 e O11 voltam a receber em ≈ 1–2 s. Em todo o período, O2, O3, O5 e O7 com `descartados=0` e `RPF=0`; o O5 recebe 40 imagens/s (sem cópias a mais). No 3.º reinício o O5 trocou o montante do `filme_b` do O3 para o O7 ≈ 6 s depois do arranque e o O3 deixou logo de lhe enviar esse fluxo (40 → 80 só com o `filme_a`), sem ramo órfão. **Erro de configuração nesta sessão:** o nó C2 arrancou com `-i O9` em vez de `-i O8` (dois nós O9; o O7 vê `O9` como vizinho e o O9 verdadeiro, no C4, perde e recupera a ligação ao O6 continuamente). Os resultados de O6, O8 e O9 não são válidos; os de O2, O3, O5, O7, O4, O10 e O11 não dependem desse ramo. |
 
 | 9, três reinícios do servidor com D26–D28 e a topologia completa (cenário 3) | 2026-11-10 | **Passou.** Logs em `~/uni/esr/ott-logs/2026-11-10-6`. Os 11 nós com os vizinhos do JSON (O7: O2, O5, O6, O8; O6: O5, O7, O9), sem quedas inesperadas nem expirações. O1 reiniciado às 12:02:04, 12:02:56 e 12:03:57; os 5 clientes voltam a receber em **1,2–2,9 s** (limite superior: primeira linha de `--stats`, de 2 em 2 s), o O8 sempre primeiro e o O11 sempre último. Entre reinícios, a árvore volta a ter uma cópia por ligação: O1 0 → 40, O2 40 → 60, O3 40 → 60, O5 40 → 40, O6 20 → 20, O7 20 → 40 imagens/s; depois do 3.º reinício o O5 recebe o `filme_b` pelo O7 e o `filme_a` pelo O3 (O3 20 → 40, O7 40 → 60), também sem duplicados. No fim, `descartados=0` e `RPF=0` em todos os nós e `perdidos=0` em todos os clientes. |
+
+| 3 (cenário 1, S1 – O2 – {C1, C2}; desativar os clientes um a um) | 2026-11-10 | **Passou.** Logs em `~/uni/esr/ott-logs/2026-11-10-7`. Com os dois clientes: S1 0 → 20, O2 20 → 40 imagens/s. Ctrl-C no C1 (O2 deteta às 12:30:15,5): o O2 passa a 20 → 20 (só para o C2) e o C2 continua a 20/s, sem nenhuma imagem perdida. Ctrl-C no C2 (O2 deteta às 12:31:08,5): o S1 deixa de emitir na janela seguinte (`encaminhados` parado em 2574 até ao fim, 12:31:47) e o O2 deixa de receber. `descartados=0` e `RPF=0` em todos os nós. |
+| 5 (cenário 2; link O2–S1 em baixo com `ip link set eth2 down` no O2, depois reposto) | 2026-11-10 | **Passou.** Logs em `~/uni/esr/ott-logs/2026-11-10-8`. Antes: S1 0 → 40 (uma cópia por ramo), O1 e O2 20 → 20 cada. Link em baixo por volta das 12:25:27,2 (última imagem no C1): o O2 deteta por timeout às 12:25:32,7 (`sem resposta`, ≈ 5,5 s) e o S1 às 12:25:34,2; o O2 não tem alternativa viável (o O1 anuncia 1 salto, como o próprio O2), envia `WITHDRAW` e reaprende o caminho pelo O1 na ronda seguinte; o C1 volta a receber às ≈ 12:25:34,2. **Falha no vídeo do C1: 138 imagens (≈ 6,9 s)**, quase toda devida à deteção. Pelo caminho novo: S1 0 → 20, O1 20 → 40 (para C2 e O2), O2 20 → 20. Link reposto: o S1 religa-se ao O2 às 12:27:03,3 e o O2 volta logo ao caminho direto (menos saltos): O1 de novo 20 → 20 e S1 0 → 40, **sem nenhuma imagem perdida** no C1. `descartados=0` e `RPF=0` em todos os nós. |
 
 Nota sobre os `perdidos` do ensaio 1/2: os 434/439 acumularam-se **antes** da janela medida (não
 cresceram durante ela) e os dois clientes mostram `reinicios=1`. O emissor numera todas as imagens,
