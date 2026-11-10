@@ -240,9 +240,9 @@ seguintes. Estado atual de cada uma:
 - [x] 9. Atualizar `protocolo.md`, este ficheiro e `ESTADO.md` com o comportamento final.
 - [ ] 10. Segundo servidor (`S2`, 2 fluxos cada) em `cenario2.json` e `cenario3.json`.
 - [x] 12. Latência acumulada como métrica principal, com condição de viabilidade (D30,
-  2026-11-10). Validado só em localhost; os ensaios 4, 6 e 8 no CORE foram feitos com a D21 e
-  têm de ser repetidos, mais um ensaio em que o `netem` torne mais rápido um caminho com mais
-  saltos (o nó deve passar para ele).
+  2026-11-10). Ensaios 4, 5, 6, 8 e 9 repetidos no CORE e ensaio 10 novo (`netem` torna mais
+  rápido um caminho com mais saltos), todos passaram (2026-11-10, logs `2026-11-10-9` e
+  `-10`; ver "Resultados no CORE").
 - [ ] 11. Ensaios no CORE (lista abaixo).
 
 ## Plano de testes
@@ -366,6 +366,21 @@ cada ensaio em `docs/testes-core.md`, local e fora do repositório):
 | 3 (cenário 1, S1 – O2 – {C1, C2}; desativar os clientes um a um) | 2026-11-10 | **Passou.** Logs em `~/uni/esr/ott-logs/2026-11-10-7`. Com os dois clientes: S1 0 → 20, O2 20 → 40 imagens/s. Ctrl-C no C1 (O2 deteta às 12:30:15,5): o O2 passa a 20 → 20 (só para o C2) e o C2 continua a 20/s, sem nenhuma imagem perdida. Ctrl-C no C2 (O2 deteta às 12:31:08,5): o S1 deixa de emitir na janela seguinte (`encaminhados` parado em 2574 até ao fim, 12:31:47) e o O2 deixa de receber. `descartados=0` e `RPF=0` em todos os nós. |
 | 5 (cenário 2; link O2–S1 em baixo com `ip link set eth2 down` no O2, depois reposto) | 2026-11-10 | **Passou.** Logs em `~/uni/esr/ott-logs/2026-11-10-8`. Antes: S1 0 → 40 (uma cópia por ramo), O1 e O2 20 → 20 cada. Link em baixo por volta das 12:25:27,2 (última imagem no C1): o O2 deteta por timeout às 12:25:32,7 (`sem resposta`, ≈ 5,5 s) e o S1 às 12:25:34,2; o O2 não tem alternativa viável (o O1 anuncia 1 salto, como o próprio O2), envia `WITHDRAW` e reaprende o caminho pelo O1 na ronda seguinte; o C1 volta a receber às ≈ 12:25:34,2. **Falha no vídeo do C1: 138 imagens (≈ 6,9 s)**, quase toda devida à deteção. Pelo caminho novo: S1 0 → 20, O1 20 → 40 (para C2 e O2), O2 20 → 20. Link reposto: o S1 religa-se ao O2 às 12:27:03,3 e o O2 volta logo ao caminho direto (menos saltos): O1 de novo 20 → 20 e S1 0 → 40, **sem nenhuma imagem perdida** no C1. `descartados=0` e `RPF=0` em todos os nós. |
 
+**Ensaios repetidos com a D30 (latência acumulada como métrica, ramo `feat/metrica-latencia`).**
+As trocas de montante feitas pela seleção normal não ficam no log (só a reparação e o `WITHDRAW`);
+foram deduzidas dos contadores do `--stats`, do RTT e, no cenário 3, de `tcpdump` nas interfaces
+do r9. O cenário 2 não tem registo das horas das ações (`acoes.log`); foram deduzidas do RTT e das
+quedas.
+
+| Ensaio | Data | Resultado |
+|---|---|---|
+| 4, com a D30 (cenário 2) | 2026-11-10 | **Passou.** Logs em `~/uni/esr/ott-logs/2026-11-10-9`. Janela de 17:03:30 a 17:04:06: S1 0 → 40 imagens/s (uma cópia por ramo), O1 e O2 20 → 20 cada: cada cliente usa o caminho de 2 saltos e a ligação O1–O2 não leva dados. RTT 0,5–0,7 ms em todas as ligações: as latências ficam empatadas e decidem os saltos. C1 e C2 sem perdas; `descartados=0` e `RPF=0`. |
+| 10 (novo; cenário 2, `tc netem delay 20ms` na `eth0` do S1, ligação S1→O2) | 2026-11-10 | **Passou.** Atraso aplicado por volta das 17:04:07 (RTT do O2 para o S1 0,6 → 6,6 ms às 17:04:08 e ≈ 20,5 ms a seguir; O2–O1 e O1–S1 ficam em ≈ 0,5–0,6 ms). O O2 passa para o caminho de **2 saltos via O1, uma só vez**, na janela 17:04:06–08: S1 0 → 20/s (uma cópia), O1 20 → 40/s (para C2 e O2), O2 a receber do O1. **C1: 1 imagem perdida**; O2 com `RPF=1` (o pico esperado na troca). Estável durante ≈ 70 s com o atraso. Atraso removido por volta das 17:05:19 (RTT a descer pela média móvel, 20,6 → 1,4 ms em 18 s): o O2 volta ao S1 **uma só vez**, às ≈ 17:05:37, quando as latências ficam empatadas (aí ganha o caminho com menos saltos): S1 de novo 0 → 40/s, O1 20 → 20. |
+| 5, com a D30 (cenário 2; link O2–S1 em baixo no O2, logo a seguir ao ensaio 10, depois reposto) | 2026-11-10 | **Passou, com reparação rápida (novo).** Última imagem do S1 no O2 às ≈ 17:05:38; o O2 deteta por timeout às 17:05:44,995 e **repara via O1 no mesmo milissegundo, sem `WITHDRAW`**: com a D30 o O1 é viável, porque anuncia uma latência menor do que a que o O2 anunciou (com a D21 anunciava os mesmos saltos e não era). O C1 volta a receber às 17:05:45. **Falha no vídeo do C1: 130 imagens (≈ 6,5 s)**, quase toda devida à deteção (com a D21: 138 imagens e `WITHDRAW`). Link reposto: o S1 religa-se às 17:06:46,6 e o O2 volta ao caminho direto em ≈ 2 s (S1 0 → 40, O1 20 → 20), **sem nenhuma imagem perdida** no C1 e sem `RPF`. No fim, `descartados=0` em todos os nós exceto o `RPF=1` do O2 no ensaio 10; C2 sem nenhuma imagem perdida em toda a sessão. |
+| 8, com a D30 (cenário 3, `tc netem delay 20ms` no r9 `eth2`, caminho ativo do O5 via O3) | 2026-11-10 | **Passou.** Logs em `~/uni/esr/ott-logs/2026-11-10-10`. Antes: `tcpdump` de 10 s no r9 com 359 datagramas a entrar na `eth2` (O3) e 1 na `eth1` (O7). Atraso aplicado às 17:15:49,2; RTT do O5 para o O3 0,75 → 6,7 (17:15:52) → 18,9 ms (17:16:04); O7 em 0,7–0,9 ms. O O5 troca para o O7 **uma só vez**, na janela 17:15:50–52 (`RPF` +2 no O5, o pico da troca): `eth2` 1 e `eth1` 361, igual em mais duas contagens ao longo de ≈ 3 min. **Nenhuma imagem perdida** no O10 e no O11. Atraso removido às 17:19:00,4 (RTT 20,6 → 4,1 ms em 10 s): o O5 **mantém o O7** (`eth1` 359 e 361; mesmos saltos, latências empatadas, sem razão para trocar). |
+| 6, com a D30 (cenário 3, Ctrl-C no O7, o montante do O5 depois do ensaio 8) | 2026-11-10 | **Passou.** O7 parado às 17:21:26,0: o O5 repara os dois fluxos **via O3** às 17:21:26,016, sem `WITHDRAW`. O10 sem nenhuma imagem perdida; O11 com 1. O O6, que também usava o O7, não tinha alternativa viável (o último anúncio do O5 vinha pelo O7, por isso podia passar pelo O7 e foi bem recusado) e retirou (`WITHDRAW` às 17:21:26,015); o O9, atrás dele, perdeu só 2 imagens (o O6 voltou a ter caminho quase de imediato; os logs INFO não mostram por onde). O O8 (único vizinho: O7) fica sem vídeo, como esperado. O7 reiniciado: religa-se às 17:23:17 e o O8 volta a receber às 17:23:18 (≈ 2 s; os 2212 `perdidos` do O8 são as imagens dos ≈ 111 s sem O7). O O5 mantém o O3 até ao fim. |
+| 9, com a D30 (cenário 3, Ctrl-C no servidor O1 e novo arranque) | 2026-11-10 | **Passou.** Ctrl-C às 17:25:23,27; o O2 deteta às 17:25:23,623 e o `WITHDRAW` chega a todos os nós em 3 ms (até 17:25:23,626). O1 reiniciado às 17:26:09,9; os 5 clientes voltam a receber entre 17:26:10 e 17:26:12 (≈ 1–2 s, limite da granularidade do `--stats`). A seguir, o O6 troca uma vez de montante (`RPF` +1 às 17:26:16; O9 com 1 imagem perdida às 17:26:15). Sem rota fantasma nem expirações. No fim da sessão, `descartados` só nos picos das trocas (O5: 2, ensaio 8; O6: 1) e `perdidos` nos clientes: O4 0, O10 0, O11 1, O9 3, O8 só o período sem O7. |
+
 Nota sobre os `perdidos` do ensaio 1/2: os 434/439 acumularam-se **antes** da janela medida (não
 cresceram durante ela) e os dois clientes mostram `reinicios=1`. O emissor numera todas as imagens,
 mesmo quando não há destinos, por isso um período sem caminho (por exemplo, um nó reiniciado) conta
@@ -379,7 +394,7 @@ PYTHONPATH=src python3 -m unittest tests.test_routing -v        # modelo (nós f
 PYTHONPATH=src python3 -m unittest tests.test_integration -v    # nós reais em localhost
 PYTHONPATH=src python3 -m unittest tests.test_forwarding -v     # RPF no plano de dados
 PYTHONPATH=src python3 -m unittest tests.test_cli -v            # opções da CLI
-PYTHONPATH=src python3 -m unittest discover -s tests -t .       # tudo (111 testes)
+PYTHONPATH=src python3 -m unittest discover -s tests -t .       # tudo (138 testes)
 ```
 
 `tests/test_integration.py` dá a cada nó um IP de loopback (127.0.0.1–4), porque todos os
