@@ -6,7 +6,7 @@ import unittest
 
 from ott.streaming.client import StreamReceiver, StreamStats
 from ott.streaming.rtp import (PacketError, RtpPacket, pack_data, seq_newer,
-                               unpack_data)
+                               unpack_data, unpack_data_hop)
 from ott.streaming.server import MjpegFile, StreamSource, udp_sender
 
 MOVIE = os.path.join(os.path.dirname(__file__), "..", "progex", "movie.Mjpeg")
@@ -28,6 +28,23 @@ class PacketTest(unittest.TestCase):
         back = RtpPacket.decode(raw)
         self.assertEqual((back.seq, back.timestamp, back.payload, back.pt),
                          (65535, 123456, b"jpeg", 26))
+
+    def test_hop_roundtrip_and_default(self):
+        rtp = RtpPacket(7, 0, b"jpeg").encode()
+        self.assertEqual(unpack_data_hop(pack_data("S1", "filme_a", rtp, hop="O7")),
+                         ("S1", "filme_a", "O7", rtp))
+        # sem salto explícito, quem envia é a própria origem
+        self.assertEqual(unpack_data_hop(pack_data("S1", "filme_a", rtp))[2], "S1")
+
+    def test_rejects_old_version_and_truncated_hop(self):
+        rtp = RtpPacket(7, 0, b"jpeg").encode()
+        old = b"OT\x01\x02S1\x07filme_a" + rtp            # versão 1, sem salto
+        truncated = b"OT\x02\x02S1\x07filme_a\x05O7"     # salto mais curto do que diz
+        for bad in (old, truncated, b"OT\x02\x02S1\x07filme_a"):
+            with self.assertRaises(PacketError):
+                unpack_data_hop(bad)
+        with self.assertRaises(PacketError):
+            pack_data("S1", "filme_a", rtp, hop="")
 
     def test_rejects_garbage(self):
         for bad in (b"", b"XX\x01\x02S1", b"OT\x09\x02S1\x01f", b"OT\x01\x05S1"):

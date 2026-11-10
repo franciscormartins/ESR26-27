@@ -168,10 +168,26 @@ do vizinho de montante atual da rota (`RoutingTable.upstream_of`). Datagramas de
 vizinhos, de fluxos sem rota, de rotas sem caminho ou do próprio fluxo do nó são descartados
 e contados (`rpf_dropped`). Isto evita cópias duplicadas quando o montante muda e quebra
 ciclos de dados transitórios; o custo é uma falha curta durante a troca de montante, até o
-novo montante começar a enviar. O vizinho de entrada é identificado pelo IP de origem do
-datagrama, comparado com o IP da ligação TCP a esse vizinho. O servidor só emite datagramas quando existem destinos ativos; no cliente, os pacotes
-são entregues ao recetor RTP local. O formato do datagrama está definido em
-`src/ott/streaming/rtp.py`.
+novo montante começar a enviar. O servidor só emite datagramas quando existem destinos
+ativos; no cliente, os pacotes são entregues ao recetor RTP local.
+
+**Vizinho de entrada (D26).** Cada datagrama leva no cabeçalho o id overlay do nó que o
+enviou (campo `salto`); quem reencaminha substitui-o pelo seu. O recetor usa esse id, e não o
+IP de origem, para saber de que vizinho veio o datagrama: um id que não é vizinho ativo é
+descartado (`descartados`, sem contar como RPF). Antes (até 2026-11-10) usava-se o IP de
+origem comparado com o IP da ligação TCP, o que falhou no CORE quando o emissor tinha várias
+interfaces e a rota para o recetor saía por uma interface diferente da da ligação (limitação
+L7). O pacote envia-se para o IP remoto da ligação TCP com o vizinho.
+
+Formato do datagrama (versão 2, definido em `src/ott/streaming/rtp.py`):
+
+```
+"OT" (2 B) | versão = 2 (1 B) | len + origem | len + fluxo | len + salto | RTP (12 B + JPEG)
+```
+
+Cada identificador ocupa 1 byte de comprimento (1–255) seguido do texto UTF-8. Pacotes da
+versão 1 (sem `salto`), truncados ou com identificadores vazios são rejeitados. Todos os nós
+têm de usar a mesma versão.
 
 Na CLI, `--publish-flow ID` anuncia e publica o MJPEG desse fluxo; `--subscribe
 SERVIDOR:FLUXO` ativa a subscrição. Todos os nós do caminho têm de executar `ott` para
@@ -270,8 +286,8 @@ clientes ──ACTIVATE──> ... ──> S1                                   
   alternativa, os ramos só reabrem quando o caminho é reaprendido (até um intervalo de
   anúncio); todos os nós têm de usar o mesmo `--announce-interval`; `ACTIVATE`/`DEACTIVATE`
   não têm confirmação; o servidor não conhece os clientes individuais (subscrições agregadas).
-- O vizinho de entrada de um datagrama UDP é identificado pelo IP da ligação TCP; ainda não
-  foi validado no CORE em nós com várias interfaces.
+- O vizinho de entrada de um datagrama UDP é identificado pelo id no campo `salto` (D26),
+  sem autenticação: um nó pode declarar o id de outro.
 
 ## 7. Modelo de estado das rotas (Etapa 2)
 

@@ -14,7 +14,7 @@
 - **Etapa 2 (estado em 2026-11-09):** anúncios periódicos por fluxo; montante escolhido por
   saltos com desempate pelo RTT (com histerese); subscrições agregadas por ramo; dados RTP/JPEG
   por UDP pelos ramos ativos com RPF estrito; reparação rápida, `WITHDRAW` e tempo de vida das
-  rotas para falhas e reinício do servidor. Tudo coberto por 101 testes automáticos, incluindo
+  rotas para falhas e reinício do servidor. Tudo coberto por 105 testes automáticos, incluindo
   nós reais em localhost. Até 2026-11-09 a Etapa 2 só funcionava com nós falsos (handlers
   recebiam o objeto `Neighbor`, corrigido em `e83e37b`). **Falta:** segundo servidor nas
   topologias e todos os ensaios no CORE (ver `docs/ETAPA2.md`).
@@ -73,6 +73,7 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 | D23 | Plano de dados com RPF estrito: só se aceitam datagramas do montante (**implementado** em 2026-11-09) | Elimina duplicados e ciclos de dados; aceita-se uma falha curta ao trocar de montante. |
 | D24 | Subscrições agregadas por ramo: `ACTIVATE` na transição 0→1, `DEACTIVATE` na 1→0; `subscriber_id` opcional e informativo (**implementado** em 2026-11-09) | Fiel à tabela do enunciado ("Destinos: O7, O3") e escala com o número de clientes; o servidor deixa de conhecer cada cliente. |
 | D25 | Dois servidores com fluxos distintos; chave `(server_id, flow)` mantém-se | Requisito mínimo do enunciado (pág. 3); falta acrescentar `S2` às topologias. |
+| D26 | Plano de dados: o datagrama leva o id do nó que o envia (campo `salto`, formato versão 2); o vizinho de entrada (RPF) é esse id e não o IP de origem (**implementado** em 2026-11-10) | Substitui a identificação pelo IP da ligação TCP (`neighbor_for_address`, que fica na interface do `OverlayNode` mas deixa de ser usada pelo forwarder). Falhou no CORE (cenário 3): o r5 envia o UDP para o r9 pela `eth1` (10.0.5.1), mas o O5 conhece o O7 pelo IP a que se ligou, 10.0.4.2, e descartou todo o vídeo após a reparação rápida. O id não depende do encaminhamento IP. Impacto: `rtp.py` passa à versão 2 e rejeita a 1, por isso todos os nós têm de ser atualizados juntos; `protocolo.md` §3.6. Sem autenticação do id, como no resto do controlo. |
 
 ## 4. Arquitetura (resumo)
 
@@ -113,7 +114,7 @@ Os handlers recebem `fn(node, neighbor_id, msg)`, em que `neighbor_id` é uma st
 
 ## 6. Como testar
 
-**Suite completa (101 testes, ~23 s):**
+**Suite completa (105 testes, ~24 s):**
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -t .
@@ -243,8 +244,8 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - Depois de um `WITHDRAW`, os ramos a jusante são desfeitos e só voltam a abrir quando o caminho é reaprendido (até um intervalo de anúncio, 5 s por omissão); a reparação rápida evita isto quando há alternativa viável.
 - Com RPF estrito, uma troca de montante provoca uma falha curta no vídeo (até o novo montante começar a enviar); por medir no CORE.
 - Com subscrições agregadas, o servidor não sabe quantos clientes tem: só vê os ramos que lhe pedem o fluxo.
-- A origem dos datagramas UDP identifica-se pelo IP do *peer* TCP (`neighbor_for_address`); validar no CORE em nós com várias interfaces.
-- `docs/testes-core.md` e `docs/CHECKPOINT1.md` são citados neste ficheiro mas não estão no repositório.
+- Até 2026-11-10 a origem dos datagramas UDP identificava-se pelo IP do *peer* TCP, o que falhou no CORE (cenário 3: o O5 descartou todo o vídeo do O7 depois da reparação rápida, porque o r5 envia o UDP com origem 10.0.5.1 e o O5 conhece o O7 como 10.0.4.2). **Corrigido (D26):** o vizinho de entrada passa a ser o id no campo `salto` do datagrama; validado no CORE no ensaio 6 (2026-11-10). O id não é autenticado.
+- `docs/testes-core.md` existe localmente (recriado em 2026-11-10) mas está no `.gitignore`; `docs/CHECKPOINT1.md` é citado mas não está no repositório.
 
 ## 9. Por fazer
 
@@ -267,7 +268,8 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [ ] E2: segundo servidor `S2` nas topologias (passo 10).
 - [x] E2: ensaios 1 e 2 no CORE (cenário 1: caminho básico e troço comum partilhado), 2026-11-09.
 - [x] E2: ensaio 4 no CORE (cenário 2: cada cliente usa o caminho mais curto), 2026-11-09.
-- [ ] E2: ensaios 3 e 5–9 no CORE (desativação, falhas, reparação rápida, dois servidores, RTT, reinício do servidor; ver `docs/ETAPA2.md`).
+- [x] E2: ensaio 6 no CORE (cenário 3: reparação rápida na queda do O3), 2026-11-10, depois da correção D26.
+- [ ] E2: ensaios 3, 5 e 7–9 no CORE (desativação, queda do montante, dois servidores, RTT, reinício do servidor; ver `docs/ETAPA2.md`).
 - [ ] E3: interface de apresentação do vídeo, cenários e medições de streaming.
 
 ## 10. Perguntas para os docentes
@@ -284,6 +286,10 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-10 | **Ensaio 6 da Etapa 2 no CORE (cenário 3), com a correção D26: passou.** Ctrl-C no O3 com o O5 a receber: o O5 repara a rota via O7 no mesmo milissegundo, sem `WITHDRAW`; o O7 passa a 40 → 80/s e o O5 recebe pelo O7 com `descartados=0` e `RPF=0` em todos os nós. Falha no vídeo: O10 sem perdas, O11 com 1 imagem perdida. O O3 reiniciado religa-se em ≤ 1,3 s e o O4 volta a receber em ≈ 2 s; o O5 mantém o montante O7 (D21). Logs em `~/uni/esr/ott-logs/2026-11-10-2`; detalhe em `docs/ETAPA2.md`. |
+| 2026-11-10 | **Correção do L7 (D26).** O datagrama de vídeo passa à versão 2, com o id do nó que o envia (campo `salto`, reescrito em cada salto); o `OverlayForwarder` identifica o vizinho de entrada por esse id em vez do IP de origem e descarta ids que não são vizinhos. Testes novos: regressão com o montante a enviar de outro IP e id não vizinho (`test_forwarding.py`, falhavam antes da correção), ida e volta do salto, versão 1 e salto truncado (`test_streaming.py`). Suite: 105 testes, todos passam. Atualizados `protocolo.md` §3.6 e §6, `ETAPA2.md` (L7), README. Validado só em localhost; ensaio 6 por repetir no CORE. |
+| 2026-11-10 | **Cenário 3 completo no CORE (análise dos logs `/tmp/ott-O*.log`).** Com os 11 nós e 5 clientes (4 × `filme_a`, 1 × `filme_b`), a árvore está correta: uma cópia de cada fluxo por ligação overlay (O2 e O3 a 40 → 60/s, O5 40 → 40 via O3, O7 20 → 40, O6 20 → 20), clientes a 20/s sem perdas, `descartados=0` e `RPF=0`. Na saída dos nós, a queda do O3 mostrou a reparação rápida no controlo (O5 → O7 sem `WITHDRAW`, no mesmo ms) mas o O5 descartou todos os dados do O7 como origem não vizinha: **limitação L7 confirmada** (rotas verificadas: o UDP do O7 sai com origem 10.0.5.1, o O5 conhece-o como 10.0.4.2), por corrigir antes de repetir o ensaio 6. Detalhe em `docs/ETAPA2.md`. |
+| 2026-11-10 | **`docs/testes-core.md` recriado** (não existia; continua no `.gitignore`): comandos de cada nó do CORE para os cenários 1, 2 e 3 (tabela nó do CORE → id overlay → IPs, estratégia 1 nos clientes dos cenários 1 e 2, que não alcançam o bootstrapper sem routers; `-b 10.0.18.20` no cenário 3), leitura do `--stats`, ensaios 1–9 da Etapa 2 com a ação e o que observar, e ações da Etapa 1. Comandos deduzidos do código e dos XML, ainda não corridos tal como estão escritos. |
 | 2026-11-10 | **Cenário 3 no CORE com a atribuição da Figura 1 (primeira observação, só O2/r1).** O2 liga-se a O1, O3 e O7; recebe 40/s (dois fluxos, uma cópia de cada no troço O1–O2) e encaminha 60/s (`filme_a` para os dois ramos, `filme_b` só para um), sem descartes. Restantes nós por analisar. |
 | 2026-11-09 | **Cenário 3 alinhado com a Figura 1.** Verificado que o `cenario3.json` é consistente com o `cenario3.xml` (nós e IPs) e que as 12 ligações overlay coincidem com a figura; o underlay do XML é isomorfo ao da figura. A atribuição overlay→CORE passou a ser a da figura (D13): O4=C8, O5=r9, O6=r10, O7=r5, O9=C4, O10=C6, O11=C7 (O1, O2, O3 e O8 mantêm-se). JSON validado contra o XML e o `BootstrapService`. Ensaios de cenário 3 da secção 7 ficam como históricos da atribuição anterior. |
 | 2026-11-09 | **Ensaio 4 da Etapa 2 no CORE (cenário 2).** Com C1 (atrás de O2) e C2 (atrás de O1) subscritos, cada ramo segue o caminho de 2 saltos (S1→O2→C1 e S1→O1→C2) e a ligação O1–O2 não transporta dados (em O1 e O2, `encaminhados` = `recebidos`). S1 envia uma cópia por ramo (40/s). Clientes a 20/s sem perdas, jitter ≤ 0,13 ms; `descartados=0` e `RPF=0` em todos os nós, incluindo os que têm 3 interfaces. |

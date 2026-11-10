@@ -3,13 +3,18 @@
 Cada datagrama UDP leva um pacote RTP (como no exemplo do livro) precedido
 por um pequeno cabeçalho do overlay que diz a que transmissão pertence:
 
-    +------+-----+---------+----------+-------+--------+---------------------+
-    | "OT" | ver | len(o)  | origem   | len(f)| fluxo  | pacote RTP          |
-    | 2 B  | 1 B | 1 B     | len(o) B | 1 B   | len(f) | 12 B cabeçalho+JPEG |
-    +------+-----+---------+----------+-------+--------+---------------------+
+    +------+-----+--------+--------+--------+--------+--------+--------+-------------+
+    | "OT" | ver | len(o) | origem | len(f) | fluxo  | len(s) | salto  | pacote RTP  |
+    | 2 B  | 1 B | 1 B    | len(o) | 1 B    | len(f) | 1 B    | len(s) | 12 B + JPEG |
+    +------+-----+--------+--------+--------+--------+--------+--------+-------------+
 
 - (origem, fluxo) é a mesma chave da tabela de rotas (``RoutingTable``): é com
   ela que um nó intermédio sabe para que vizinhos replicar o pacote.
+- salto é o id overlay do nó que enviou este datagrama (a origem, no primeiro
+  salto); cada nó que reencaminha substitui-o pelo seu. É por ele que o recetor
+  identifica o vizinho de entrada (RPF), e não pelo IP de origem: num nó com
+  várias interfaces o UDP pode sair com um IP diferente do da ligação TCP
+  (versão 2; a versão 1 não tinha este campo e é rejeitada).
 - O cabeçalho RTP segue o RFC 3550 (versão 2, PT 26 = JPEG). O número de
   sequência (16 bits) permite ao cliente detetar perdas e pacotes fora de
   ordem; o timestamp usa o relógio de 90 kHz habitual em vídeo, para se poder
@@ -19,7 +24,7 @@ import struct
 import time
 
 MAGIC = b"OT"
-VERSION = 1
+VERSION = 2
 RTP_HEADER_SIZE = 12
 PT_JPEG = 26
 RTP_CLOCK = 90000          # Hz
@@ -71,9 +76,13 @@ def _name(text, what):
     return bytes([len(raw)]) + raw
 
 
-def pack_data(origin, flow, rtp_bytes):
-    """Junta o cabeçalho do overlay a um pacote RTP já codificado."""
-    data = MAGIC + bytes([VERSION]) + _name(origin, "origem") + _name(flow, "fluxo") + rtp_bytes
+def pack_data(origin, flow, rtp_bytes, hop=None):
+    """Junta o cabeçalho do overlay a um pacote RTP já codificado.
+
+    ``hop`` é o id do nó que envia o datagrama (por omissão, a origem).
+    """
+    data = (MAGIC + bytes([VERSION]) + _name(origin, "origem") + _name(flow, "fluxo")
+            + _name(origin if hop is None else hop, "salto") + rtp_bytes)
     if len(data) > MAX_DATAGRAM:
         raise PacketError("imagem demasiado grande para um datagrama UDP")
     return data
@@ -81,13 +90,19 @@ def pack_data(origin, flow, rtp_bytes):
 
 def unpack_data(data):
     """Devolve (origem, fluxo, bytes RTP); levanta PacketError se inválido."""
-    if len(data) < 5 or data[:2] != MAGIC:
+    origin, flow, _, rtp = unpack_data_hop(data)
+    return origin, flow, rtp
+
+
+def unpack_data_hop(data):
+    """Devolve (origem, fluxo, salto, bytes RTP); levanta PacketError se inválido."""
+    if len(data) < 3 or data[:2] != MAGIC:
         raise PacketError("não é um pacote de dados do overlay")
     if data[2] != VERSION:
         raise PacketError(f"versão {data[2]} desconhecida")
     pos = 3
     names = []
-    for _ in range(2):
+    for _ in range(3):
         if pos >= len(data):
             raise PacketError("cabeçalho truncado")
         size = data[pos]
@@ -99,7 +114,7 @@ def unpack_data(data):
         except UnicodeDecodeError as exc:
             raise PacketError("identificador não é UTF-8 válido") from exc
         pos = end
-    return names[0], names[1], data[pos:]
+    return names[0], names[1], names[2], data[pos:]
 
 
 def seq_newer(a, b):

@@ -4,7 +4,7 @@ import socket
 import threading
 import time
 
-from .streaming.rtp import PacketError, RtpPacket, unpack_data
+from .streaming.rtp import PacketError, RtpPacket, pack_data, unpack_data_hop
 from .streaming.server import DATA_PORT
 
 log = logging.getLogger("ott.forwarding")
@@ -17,6 +17,9 @@ class OverlayForwarder:
     viajam por UDP, um por vizinho a jusante, sem duplicar cópias para vários
     subscritores atrás do mesmo vizinho. Um datagrama só é aceite (entregue
     localmente e reencaminhado) se vier do vizinho de montante da rota (RPF).
+    O vizinho de entrada é o id no campo "salto" do pacote, não o IP de origem
+    (que num nó com várias interfaces pode diferir do da ligação TCP); cada
+    cópia reencaminhada leva o id deste nó.
     """
 
     def __init__(self, node, routing_table, port=DATA_PORT, bind="0.0.0.0"):
@@ -55,12 +58,12 @@ class OverlayForwarder:
     def send(self, packet):
         """Envia um pacote originado neste nó pelos destinos ativos."""
         try:
-            origin, flow, rtp = unpack_data(packet)
+            origin, flow, _, rtp = unpack_data_hop(packet)
             RtpPacket.decode(rtp)
         except PacketError:
             self.dropped += 1
             return 0
-        return self._forward(packet, origin, flow, incoming=None)
+        return self._forward(origin, flow, rtp, incoming=None)
 
     def _receive_loop(self):
         while not self._stop.is_set():
@@ -72,17 +75,17 @@ class OverlayForwarder:
                 break
             self.received += 1
             try:
-                origin, flow, rtp = unpack_data(packet)
+                origin, flow, incoming, rtp = unpack_data_hop(packet)
                 RtpPacket.decode(rtp)
             except PacketError as exc:
                 self.dropped += 1
                 log.debug("datagrama inválido de %s: %s", address[0], exc)
                 continue
 
-            incoming = self.node.neighbor_for_address(address[0])
-            if incoming is None:
+            if incoming not in self.node.neighbor_ids():
                 self.dropped += 1
-                log.debug("datagrama de origem não vizinha %s descartado", address[0])
+                log.debug("datagrama de %s (%s), que não é vizinho, descartado",
+                          incoming, address[0])
                 continue
 
             # RPF estrito: só se aceitam dados vindos do montante atual da rota.
@@ -102,12 +105,19 @@ class OverlayForwarder:
                 if receiver is not None:
                     receiver.handle(packet, time.monotonic())
 
-            self._forward(packet, origin, flow, incoming=incoming)
+            self._forward(origin, flow, rtp, incoming=incoming)
 
-    def _forward(self, packet, origin, flow, incoming):
+    def _forward(self, origin, flow, rtp, incoming):
         sent = 0
         destinations = self.routing_table.active_destinations(
             origin, flow, exclude=(() if incoming is None else (incoming,)))
+        if destinations:
+            try:
+                packet = pack_data(origin, flow, rtp, hop=self.node.id)
+            except PacketError as exc:   # ex.: o id deste nó não cabe no datagrama
+                self.dropped += 1
+                log.debug("pacote %s:%s não reencaminhado: %s", origin, flow, exc)
+                return 0
         for neighbor in destinations:
             host = self.node.neighbor_address(neighbor)
             if host is None:

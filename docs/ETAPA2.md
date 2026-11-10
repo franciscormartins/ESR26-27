@@ -15,9 +15,10 @@ Esta escolha é compatível com as primitivas de overlay existentes (`send` e `b
 
 **Ponto da situação (2026-11-09).** Os passos 0 a 9 do plano (ver "Revisão de 2026-11-09")
 estão feitos e cobertos por testes automáticos, incluindo ensaios com nós reais em localhost
-(101 testes na suite). Falta o segundo servidor nas topologias (passo 10) e a maior parte dos
+(105 testes na suite). Falta o segundo servidor nas topologias (passo 10) e a maior parte dos
 ensaios no CORE (passo 11): em 2026-11-09 passaram os ensaios 1 e 2 (cenário 1) e 4 (cenário 2);
-os ensaios 3 e 5 a 9 continuam por fazer.
+em 2026-11-10 passou o ensaio 6 (cenário 3, reparação rápida, depois da correção D26); os
+ensaios 3, 5 e 7 a 9 continuam por fazer.
 
 ## Estado e tarefas
 
@@ -192,7 +193,7 @@ seguintes. Estado atual de cada uma:
 | L3 | ~~Não há retirada nem expiração de rotas~~ — **resolvido**: retirada (passo 6) e tempo de vida (passo 7) | Um servidor morto deixa rotas `ativa` para sempre |
 | L4 | ~~Numa época nova, a primeira cópia ganha; empates não têm critério determinista~~ — **resolvido** (passo 5) | O montante pode oscilar a cada ronda (ex.: O5 via O3/O7 no cenário 3) |
 | L5 | ~~O forwarder aceita datagramas de qualquer vizinho~~ — **resolvido** pelo RPF estrito (passo 4) | Duplicados ao trocar de montante; ciclos de dados transitórios |
-| L7 | A origem UDP é identificada pelo IP do *peer* TCP — **por validar** no CORE | Nós com várias interfaces podem ver datagramas descartados como "origem não vizinha" |
+| L7 | A origem UDP era identificada pelo IP do *peer* TCP — confirmada no CORE em 2026-11-10 (cenário 3, O7→O5 depois da reparação rápida; ver "Resultados no CORE"). **Corrigida em 2026-11-10 (D26):** o datagrama leva o id do nó que o envia (campo `salto`); teste de regressão em `tests/test_forwarding.py`; validada no CORE no ensaio 6 (2026-11-10) | Nós com várias interfaces viam datagramas descartados como "origem não vizinha" (`descartados` sobe, `RPF` não) |
 | L8 | ~~`protocolo.md` §7 diz que só a transição 0→1 propaga `ACTIVATE`; o código propaga cada subscritor; `seen_announcements` só é escrito e cresce sem limite~~ — **resolvido** (passos 3, 8 e 9) | Documentação incoerente |
 
 **Decisões tomadas pelo grupo:**
@@ -232,6 +233,9 @@ seguintes. Estado atual de cada uma:
 - [x] Integração CORE: dois clientes partilham o troço comum sem encaminhamento duplicado nesse troço
   (cenário 1, 2026-11-09; confirmado pelos contadores, `tcpdump` não registado).
 - [x] Integração CORE: caminhos alternativos escolhem o custo menor (cenário 2, 2026-11-09).
+- [x] Integração CORE: queda de um nó intermédio com alternativa de custo igual (cenário 3,
+  O3 cai com o O5 a receber): reparação rápida via O7 sem `WITHDRAW`, O10 sem perdas e O11
+  com 1 imagem perdida (2026-11-10, depois da correção D26).
 - [x] Unidade: queda do vizinho de montante invalida a rota e anúncio alternativo reativa subscrições.
 - [x] Unidade: queda de um destino remove o ramo e desativa a subscrição a montante.
 - [x] Unidade: caminho melhor troca o montante e move o ramo ativo.
@@ -279,7 +283,8 @@ O3–O5 = r3>r6>r9; no r9, `eth2` liga ao r6) e via O7 (O5–O7 = r9>r7>r5; no r
 ao r7). Os ensaios 6 e 8 usam estes dois caminhos (`netem` no r9 na interface do caminho
 ativo). Nós do CORE livres para um segundo servidor: C1, C3, C5 e C9.
 
-Ensaios no CORE necessários para dar a etapa como validada:
+Ensaios no CORE necessários para dar a etapa como validada (comandos de cada nó e ação de
+cada ensaio em `docs/testes-core.md`, local e fora do repositório):
 
 1. Cenário 1: S1 → O2 → C1 a reproduzir.
 2. Dois clientes: um só fluxo no troço comum (contadores `--stats` e `tcpdump`).
@@ -302,6 +307,11 @@ Ensaios no CORE necessários para dar a etapa como validada:
 
 | Arranque do cenário 3 (atribuição da Figura 1; O4, O8, O9, O10 com `filme_a`, O11 com `filme_b`) — **parcial, só O2** | 2026-11-10 | Janela de 00:02:03 a 00:02:33 no O2 (r1). Vizinhos O1, O3 e O7, como no JSON. `recebidos` +80 a cada 2 s (40/s = 2 fluxos × 20/s: cada fluxo atravessa o troço O1–O2 **uma só vez**, apesar de o `filme_a` ter 4 clientes). `encaminhados` +120 a cada 2 s (60/s = 3 cópias por imagem: `filme_a` para O3 e O7, `filme_b` só para o ramo que leva à O5). `descartados=0`, `RPF=0`. Falta ver os restantes nós para confirmar o caminho da O5 e a entrega nos clientes. |
 
+| Cenário 3 completo (atribuição da Figura 1; O4, O8, O9, O10 com `filme_a`, O11 com `filme_b`) | 2026-11-10 | **Passou.** Logs `/tmp/ott-O*.log`, janela de 09:44:00 a 09:47:40 (218–220 s) com os 11 nós ligados e os vizinhos do JSON. Taxas (imagens/s, recebidos → encaminhados): O1 0 → 40; O2 40 → 60 (`filme_a` para O3 e O7, `filme_b` para O3); O3 40 → 60 (`filme_a` para O4 e O5, `filme_b` para O5); O5 40 → 40 (`filme_a` para O10, `filme_b` para O11), com montante O3; O7 20 → 40 (`filme_a` para O8 e O6; não envia para O5); O6 20 → 20 (para O9). Uma só cópia de cada fluxo em cada ligação overlay. Clientes O4, O8, O9, O10, O11 a 20/s, `perdidos=0`, jitter 0,15–0,31 ms. `descartados=0` e `RPF=0` em todos os nós. |
+| Saída do O11 e queda do O3 (fim da sessão anterior, não foi um ensaio planeado) | 2026-11-10 | **Controlo passou, dados falharam (L7).** 09:47:46 sai o O11: o `filme_b` deixa de ter clientes e o O1 passa a emitir só o `filme_a` (20/s), como esperado. 09:47:49,095 sai o O3: o O5 deteta no mesmo milissegundo e regista `rota ... reparada via O7` para os dois fluxos, sem `WITHDRAW`; o O2 passa a enviar só para o O7 (20 → 20) e o O7 passa a 3 cópias (O8, O6 e O5). **Mas o O5 descarta tudo o que vem do O7:** `recebidos` +40 a cada 2 s, `encaminhados` +2 e depois +0, `descartados` +38, +40, com `RPF=0`, ou seja, descarte por "origem não vizinha". O O10 fica parado em 6003 imagens até à saída do O2 às 09:47:53. **Causa confirmada com `ip route get`:** o O5 ligou-se por TCP ao O7 em 10.0.4.2 a partir de 10.0.2.1 (no r9, `10.0.4.2 via 10.0.2.2 dev eth1 src 10.0.2.1`); o O7 envia o UDP para 10.0.2.1 e o r5 usa `dev eth1 src 10.0.5.1`. O O5 conhece o O7 como 10.0.4.2, por isso 10.0.5.1 não é vizinho. O problema só aparece quando o emissor do UDP é o lado que **aceitou** a ligação TCP e o seu encaminhamento para o outro lado sai por uma interface diferente da do IP a que o outro se ligou. Corrigido em 2026-11-10 (D26) e validado no CORE no ensaio 6 (linha seguinte). |
+
+| 6 (cenário 3, queda do O3 com o O5 a receber; código com a correção D26) | 2026-11-10 | **Passou.** Logs em `~/uni/esr/ott-logs/2026-11-10-2`. Antes (10:03:40–10:04:44): a mesma árvore do ensaio anterior (O2 40 → 60, O5 40 → 40 via O3, O7 20 → 40). Ctrl-C no O3 às 10:04:46,125: O2, O4 e O5 detetam no mesmo milissegundo; o O5 regista `reparada via O7` para os dois fluxos, **sem `WITHDRAW`**. Sem O3 (10:04:50–10:05:42): O2 40 → 40 (só para O7), O7 40 → 80 (`filme_a` para O8, O6 e O5; `filme_b` para O5), O5 40 → 40, `descartados=0` e `RPF=0` em todos os nós. **Falha no vídeo:** O10 sem nenhuma imagem perdida (+40 a cada 2 s sem interrupção); O11 com 1 imagem perdida. O O4, cujo único vizinho é o O3, fica sem vídeo, como esperado. O3 reiniciado às 10:05:44: religa-se a O2, O4 e O5 em ≤ 1,3 s e o O4 volta a receber em ≈ 2 s (os 1188 `perdidos` do O4 são as imagens do período sem O3, ≈ 59 s × 20/s). O O5 **mantém o montante O7** (mesmo número de saltos; sem ganho de atraso acima da histerese, D21), por isso o O3 passa a levar só o `filme_a` para o O4 (20 → 20). |
+
 Nota sobre os `perdidos` do ensaio 1/2: os 434/439 acumularam-se **antes** da janela medida (não
 cresceram durante ela) e os dois clientes mostram `reinicios=1`. O emissor numera todas as imagens,
 mesmo quando não há destinos, por isso um período sem caminho (por exemplo, um nó reiniciado) conta
@@ -315,7 +325,7 @@ PYTHONPATH=src python3 -m unittest tests.test_routing -v        # modelo (nós f
 PYTHONPATH=src python3 -m unittest tests.test_integration -v    # nós reais em localhost
 PYTHONPATH=src python3 -m unittest tests.test_forwarding -v     # RPF no plano de dados
 PYTHONPATH=src python3 -m unittest tests.test_cli -v            # opções da CLI
-PYTHONPATH=src python3 -m unittest discover -s tests -t .       # tudo (101 testes)
+PYTHONPATH=src python3 -m unittest discover -s tests -t .       # tudo (105 testes)
 ```
 
 `tests/test_integration.py` dá a cada nó um IP de loopback (127.0.0.1–4), porque todos os

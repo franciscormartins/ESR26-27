@@ -13,7 +13,7 @@ relatório em `docs/relatorio/`.
 | `src/ott/cli.py` | comando `ott` | 1 |
 | `src/ott/routing.py` | tabela de rotas: anúncios, escolha do montante (saltos + RTT), subscrições agregadas, `WITHDRAW`, tempo de vida | 2 |
 | `src/ott/forwarding.py` | encaminhamento UDP pelos ramos ativos da árvore overlay (RPF estrito) | 2 |
-| `src/ott/streaming/` | pacotes de vídeo (cabeçalho origem/fluxo + RTP), emissor MJPEG e recetor UDP | 2/4 |
+| `src/ott/streaming/` | pacotes de vídeo (cabeçalho origem/fluxo/salto + RTP), emissor MJPEG e recetor UDP | 2/4 |
 | `progex/` | código de apoio do livro (Kurose) e `movie.Mjpeg`, só como referência | 4 |
 | `topologies/` | cenários 1–3 (ajustar `host` aos IPs do CORE) | – |
 | `tests/` | testes automáticos (`python3 -m unittest discover -s tests -t .`) e `medicoes.py` (tempos em localhost, 10 repetições) | – |
