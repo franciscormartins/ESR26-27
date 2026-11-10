@@ -29,5 +29,14 @@ class RouteTtlOptionTest(unittest.TestCase):
         self.assertEqual(args.announce_interval, 5.0)
 
 
+class GuiOptionTest(unittest.TestCase):
+    def test_gui_needs_a_subscription(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            cli.main(["--gui"])
+
+    def test_gui_is_off_by_default(self):
+        self.assertFalse(cli.build_parser().parse_args([]).gui)
+
+
 if __name__ == "__main__":
     unittest.main()

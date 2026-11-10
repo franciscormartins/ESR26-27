@@ -231,7 +231,7 @@ class AnnouncementLearningTest(unittest.TestCase):
         self.assertEqual(table.get("S1", "filme_a").upstream, "O3")
         # Época nova vinda primeiro por um caminho pior: o montante atual (O3)
         # mantém-se e a época nova só é propagada quando chegar a cópia do O3
-        # (não se anuncia uma época com o caminho da anterior, D30).
+        # (não se anuncia uma época com o caminho da anterior, D34).
         self.assertFalse(table.handle_announce(node, "O4", self.announce(2, 4)))
         route = table.get("S1", "filme_a")
         self.assertEqual((route.epoch, route.metric, route.upstream), (2, 1, "O3"))
@@ -456,7 +456,7 @@ class RouteActivationTest(unittest.TestCase):
 
 class RouteSelectionTest(unittest.TestCase):
     """Tabela de candidatos; métrica principal: latência acumulada, com
-    histerese; desempate por saltos e pelo ID do vizinho (D30)."""
+    histerese; desempate por saltos e pelo ID do vizinho (D34)."""
 
     class Node(AnnouncementLearningTest.Node):
         def __init__(self):
@@ -485,7 +485,7 @@ class RouteSelectionTest(unittest.TestCase):
         node.received_broadcasts.clear()
 
         # A cópia do O5 chega primeiro: fica o O1 e a época 2 ainda não é
-        # anunciada; é anunciada uma vez, quando chega a cópia do O1 (D30).
+        # anunciada; é anunciada uma vez, quando chega a cópia do O1 (D34).
         self.assertFalse(table.handle_announce(node, "O5", self.announce("O5", 2, 2)))
         self.assertTrue(table.handle_announce(node, "O1", self.announce("O1", 2, 1)))
 
@@ -525,7 +525,7 @@ class RouteSelectionTest(unittest.TestCase):
         self.assertEqual(route.upstream, "O7")              # estável nas rondas seguintes
 
     def test_lower_delay_wins_even_with_more_hops_whatever_the_order(self):
-        # Substitui o contrato da D21 ("menos saltos ganha sempre"): D30.
+        # Substitui o contrato da D21 ("menos saltos ganha sempre"): D34.
         for order in (("O3", "O7"), ("O7", "O3")):
             with self.subTest(order=order):
                 table, node = RoutingTable(), self.Node()
@@ -639,7 +639,7 @@ class RouteSelectionTest(unittest.TestCase):
 
 
 class FeasibilityTest(unittest.TestCase):
-    """D30: condição de viabilidade (época, atraso, saltos) e épocas anunciadas."""
+    """D34: condição de viabilidade (época, atraso, saltos) e épocas anunciadas."""
 
     Node = RouteSelectionTest.Node
     announce = RouteSelectionTest.announce
@@ -746,7 +746,7 @@ class FeasibilityTest(unittest.TestCase):
 
 
 class LoopFreedomTest(unittest.TestCase):
-    """D30: rede simulada em memória, entregas por ordem aleatória, RTT a mudar,
+    """D34: rede simulada em memória, entregas por ordem aleatória, RTT a mudar,
     ligações a cair e a voltar; o grafo de montantes nunca pode ter ciclos."""
 
     LINKS = [("S1", "A"), ("S1", "B"), ("A", "B"), ("A", "C"), ("B", "D"),

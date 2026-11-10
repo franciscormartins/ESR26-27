@@ -1,0 +1,42 @@
+{
+  "_comment": "Cenário 2: S1, O1, O2, C1, C2 (ligações diretas). O1 regista-se no S1 pelo IP da ligação S1-O1; O2 pelo IP da ligação S1-O2.",
+  "xml": "cenario2.xml",
+  "overlay": "cenario2.json",
+  "bootstrap": "S1",
+  "nodes": {
+    "S1": {
+      "serve": true,
+      "publish": [
+        "filme_a"
+      ]
+    },
+    "O1": {},
+    "O2": {
+      "core_bootstrap": "10.0.3.21"
+    },
+    "C1": {
+      "subscribe": [
+        "S1:filme_a"
+      ],
+      "bootstrap": null,
+      "neighbors": [
+        "O2"
+      ],
+      "core_neighbors": [
+        "10.0.1.21"
+      ]
+    },
+    "C2": {
+      "subscribe": [
+        "S1:filme_a"
+      ],
+      "bootstrap": null,
+      "neighbors": [
+        "O1"
+      ],
+      "core_neighbors": [
+        "10.0.0.21"
+      ]
+    }
+  }
+}

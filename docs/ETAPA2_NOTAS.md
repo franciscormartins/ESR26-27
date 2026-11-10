@@ -44,7 +44,7 @@ Cada nó mantém a sua própria entrada; as entradas não são partilhadas entre
 - `flow`: nome estável do conteúdo ou stream, por exemplo `"filme_a"`.
 - `origin`: ID overlay do servidor que origina o fluxo, por exemplo `"S1"`.
 - `metric`: número de saltos até ao servidor (desempate e condição de
-  viabilidade; a métrica principal é `delay`, D30). `math.inf` indica que o nó
+  viabilidade; a métrica principal é `delay`, D34). `math.inf` indica que o nó
   perdeu o caminho e ainda não aprendeu uma alternativa.
 - `upstream`: vizinho que leva na direção do servidor. É `None` no servidor ou
   enquanto a rota estiver invalidada.
@@ -54,14 +54,14 @@ Cada nó mantém a sua própria entrada; as entradas não são partilhadas entre
   um caminho válido até ao servidor; caso contrário, fica `"inativa"`.
 - `epoch`: época mais recente conhecida para a rota.
 - `delay`: latência acumulada estimada até ao servidor, em segundos (soma do
-  custo de cada ligação, metade do RTT); é a métrica principal (D30).
+  custo de cada ligação, metade do RTT); é a métrica principal (D34).
   `math.inf` se desconhecida (anúncio sem `delay`).
 - `candidates`: mapa `vizinho -> Candidate(epoch, metric, delay)` com o último
   anúncio de cada vizinho. `metric` e `delay` são os valores anunciados, antes
   de somar o salto e a ligação até ao vizinho. O montante é escolhido entre eles.
 - `feasibility`: melhor `(época, atraso, saltos)` que este nó anunciou na última
   época que anunciou, ou `None` (ainda não anunciou, ou retirou a rota). É a
-  referência da condição de viabilidade (D30).
+  referência da condição de viabilidade (D34).
 
 ### `RouteEntry.key`
 
@@ -249,9 +249,9 @@ Regista o anúncio como candidato do vizinho emissor e reavalia o montante.
 Exemplo: `O4` usa `O3`. Na ronda 8 chega primeiro a cópia de `O5`, mais lenta:
 `O3` continua válido (época 7, é o montante atual) e mantém-se; `O4` **não**
 propaga ainda a época 8 (continuaria a anunciar a 7). Quando chegar a cópia de
-`O3` da época 8, `O4` propaga a época 8 com os valores do `O3` (D30).
+`O3` da época 8, `O4` propaga a época 8 com os valores do `O3` (D34).
 
-### `_select(node, route)` e auxiliares (D30)
+### `_select(node, route)` e auxiliares (D34)
 
 - `_link_delay(node, vizinho)`: custo da ligação, metade de `node.rtt(vizinho)`
   com o mínimo `min_link_delay` (0,1 ms); sem RTT, `unknown_link_delay` (1 s).
@@ -299,7 +299,7 @@ Chamada sob o bloqueio quando o montante cai ou envia `WITHDRAW`.
 1. Remove o candidato perdido e, se o antigo montante ainda está ligado e havia
    procura, envia-lhe `DEACTIVATE`.
 2. Tenta a reparação rápida: `_select` entre os candidatos viáveis (a mesma
-   condição de viabilidade de sempre, D30). Se houver alternativa, abre o ramo
+   condição de viabilidade de sempre, D34). Se houver alternativa, abre o ramo
    nela (`ACTIVATE`) e propaga o anúncio.
 3. Sem alternativa: rota sem caminho (`metric` e `delay` infinitos), apaga
    candidatos, destinos e `feasibility` (a retenção da D27 garante que só se
@@ -374,7 +374,7 @@ o encerramento do servidor.
 - As quedas e recuperações de vizinhos têm testes unitários e de integração em
   localhost (`tests/test_integration.py`), mas ainda precisam de ensaios no CORE,
   incluindo continuidade do tráfego após falhas.
-- A rota usa a menor latência acumulada (D30); os saltos só desempatam latências
+- A rota usa a menor latência acumulada (D34); os saltos só desempatam latências
   praticamente iguais. Não se escolhe intencionalmente um percurso mais lento
   apenas por já estar ativo.
 - Depois de anunciar uma época, um caminho mais rápido que anunciou mais do que

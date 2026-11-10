@@ -10,6 +10,9 @@ Opções úteis nos testes:
   --announce-interval S intervalo entre rondas de anúncios (default: 5 s)
   --route-ttl S       esquecer rotas sem anúncios há S segundos (default: 6 x intervalo)
   --stats SEGUNDOS    escreve periodicamente os vizinhos e o RTT de cada um
+  --subscribe S:F     subscreve o fluxo F do servidor S (repetível)
+  --gui               mostra o vídeo da primeira subscrição numa janela
+  --status-file F     escreve o estado do nó (vizinhos, rotas, fluxos, eventos) em JSON, para o ottctl
 
 Os endereços têm o formato HOST ou HOST:PORTA.
 """
@@ -17,7 +20,9 @@ import argparse
 import logging
 import math
 import os
+import signal
 import socket
+import threading
 import time
 
 from .bootstrapper import BootstrapService
@@ -25,7 +30,8 @@ from .forwarding import OverlayForwarder
 from .node import OverlayNode
 from .protocol import DEFAULT_PORT
 from .routing import AnnouncementPublisher, RoutingTable
-from .streaming.client import StreamReceiver
+from .status import StatusWriter
+from .streaming.client import StreamReceiver, run_gui
 from .streaming.server import DATA_PORT, StreamSource
 
 
@@ -70,8 +76,28 @@ def build_parser():
                    help="imagens por segundo para cada fluxo publicado")
     p.add_argument("--data-port", type=int, default=DATA_PORT,
                    help="porta UDP do plano de dados (default: 6000)")
+    p.add_argument("--gui", action="store_true",
+                   help="mostrar o vídeo da primeira subscrição numa janela (precisa de Tkinter e Pillow)")
+    p.add_argument("--status-file", metavar="FICHEIRO",
+                   help="escrever o estado do nó em JSON neste ficheiro (usado pelo ottctl e pelo painel web)")
+    p.add_argument("--status-interval", type=float, default=1.0, metavar="S",
+                   help="intervalo entre escritas do estado (default: 1 s)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
+
+
+def _install_signal_handlers():
+    """SIGTERM (``kill``, ottctl) sai como o Ctrl+C: com BYE aos vizinhos e o estado final escrito.
+
+    Também repõe o SIGINT, que um processo lançado em segundo plano por uma shell não interativa herda ignorado.
+    """
+    def stop(_signum, _frame):
+        raise KeyboardInterrupt
+    try:
+        signal.signal(signal.SIGTERM, stop)
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+    except ValueError:   # fora da thread principal (por exemplo nos testes)
+        pass
 
 
 def main(argv=None):
@@ -92,8 +118,13 @@ def main(argv=None):
         if not separator or not server_id or not flow:
             raise SystemExit(f"--subscribe inválido: {value!r}; usa SERVIDOR:FLUXO")
         subscriptions.append((server_id, flow))
+    if args.gui and not subscriptions:
+        raise SystemExit("--gui precisa de pelo menos uma --subscribe")
     if len(set(subscriptions)) != len(subscriptions):
         raise SystemExit("--subscribe não pode repetir o mesmo servidor e fluxo")
+    if not math.isfinite(args.status_interval) or args.status_interval <= 0:
+        raise SystemExit("--status-interval tem de ser finito e maior que zero")
+    _install_signal_handlers()
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format=f"%(asctime)s [{args.id}] %(levelname)s %(message)s")
@@ -121,7 +152,7 @@ def main(argv=None):
             node.stop()
             raise SystemExit("não foi possível obter vizinhos do bootstrapper")
 
-    forwarder = OverlayForwarder(node, routing_table, port=args.data_port).start()
+    forwarder = OverlayForwarder(node, routing_table, port=args.data_port, bind=args.bind).start()
     receivers = {}
     for origin, flow in subscriptions:
         receiver = StreamReceiver(origin, flow, port=args.data_port, listen=False)
@@ -136,11 +167,19 @@ def main(argv=None):
                for flow in args.publish_flow]
     pending_subscriptions = set(subscriptions)
     active_subscriptions = set()
+    status = None
+    if args.status_file:
+        status = StatusWriter(args.status_file, node, routing_table, forwarder, receivers,
+                              published=args.publish_flow,
+                              subscriptions=lambda: (set(pending_subscriptions), set(active_subscriptions)),
+                              interval=args.status_interval).start()
 
     log = logging.getLogger("ott.cli")
-    try:
-        while True:
-            time.sleep(args.stats or 1)
+    stop = threading.Event()
+
+    def loop():
+        while not stop.is_set():
+            stop.wait(args.stats or 1)
             for origin, flow in tuple(pending_subscriptions):
                 if routing_table.get(origin, flow) is not None and routing_table.activate(
                         node, origin, flow, subscriber_id=args.subscriber_id):
@@ -155,9 +194,20 @@ def main(argv=None):
                 log.info("dados UDP: recebidos=%d encaminhados=%d descartados=%d (RPF=%d)",
                          forwarder.received, forwarder.forwarded, forwarder.dropped,
                          forwarder.rpf_dropped)
+    try:
+        if args.gui:
+            worker = threading.Thread(target=loop, daemon=True, name="ott-cli-loop")
+            worker.start()
+            origin, flow = subscriptions[0]
+            run_gui(receivers[(origin, flow)], f"OTT {args.id} - {origin}:{flow}")
+        else:
+            loop()
     except KeyboardInterrupt:
         pass
     finally:
+        stop.set()
+        if status is not None:
+            status.stop()
         for source in sources:
             source.stop()
         for source in sources:

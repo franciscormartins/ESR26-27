@@ -195,7 +195,7 @@ receber e encaminhar os datagramas. `--stats S` mostra estatísticas de receçã
 
 ### 3.7 Escolha do caminho e reação a falhas (Etapa 2)
 
-**Métrica (D30).** A rota escolhe-se pela **menor latência acumulada** até ao servidor; o
+**Métrica (D34).** A rota escolhe-se pela **menor latência acumulada** até ao servidor; o
 número de saltos só desempata. Cada nó guarda, por rota, o último `ANNOUNCE` de cada vizinho
 (época, saltos e atraso anunciados). O custo via um vizinho é
 `(delay + custo da ligação, metric + 1)`. O custo da ligação é metade do RTT medido pelo
@@ -210,7 +210,7 @@ São candidatos válidos os vizinhos com a época atual e, para o montante atual
 época anterior: numa ronda nova, a primeira cópia a chegar não derruba o montante antes de
 este enviar a sua. Um vizinho que está nos destinos a jusante nunca é candidato.
 
-**Condição de viabilidade (D30, contra ciclos).** Cada nó guarda o melhor
+**Condição de viabilidade (D34, contra ciclos).** Cada nó guarda o melhor
 `(atraso, saltos)` que anunciou na época mais recente que anunciou. Só servem candidatos
 de uma época mais recente, ou da mesma época com `(atraso, saltos)` anunciados
 **estritamente menores**. Ao longo de um caminho `(atraso, saltos)` cresce sempre (cada
@@ -321,7 +321,7 @@ clientes ──ACTIVATE──> ... ──> S1                                   
 - Rotas (Etapa 2): a métrica é só a latência (RTT/2 por ligação, medida por TCP): perdas,
   jitter e largura de banda não contam; depois de anunciar uma época, um caminho mais rápido
   mas que anunciou mais do que este nó nessa época só é adotado na época seguinte (condição de
-  viabilidade, D30); uma troca de montante provoca uma falha curta no vídeo (RPF estrito); depois de um `WITHDRAW` sem
+  viabilidade, D34); uma troca de montante provoca uma falha curta no vídeo (RPF estrito); depois de um `WITHDRAW` sem
   alternativa, os ramos só reabrem quando o caminho é reaprendido (até um intervalo de
   anúncio); todos os nós têm de usar o mesmo `--announce-interval`; `ACTIVATE`/`DEACTIVATE`
   não têm confirmação; o servidor não conhece os clientes individuais (subscrições agregadas).
@@ -342,7 +342,7 @@ Cada entrada é identificada por `(servidor, fluxo)` e contém:
 | `flow` | identificador do conteúdo/stream multimédia transmitido (por exemplo, `filme_a` ou `camera_sala`) |
 | `metric` | número de saltos até ao servidor (desempate); `inf` quando a rota está sem caminho |
 | `delay` | latência acumulada estimada (s), soma do custo de cada ligação (RTT/2); métrica principal; `inf` se desconhecida |
-| `feasibility` | melhor `(época, atraso, saltos)` anunciado por este nó na última época que anunciou; referência da condição de viabilidade (D30) |
+| `feasibility` | melhor `(época, atraso, saltos)` anunciado por este nó na última época que anunciou; referência da condição de viabilidade (D34) |
 | `upstream` | vizinho escolhido em direção ao servidor; `None` no servidor ou sem caminho |
 | `epoch` | ronda de anúncio mais recente conhecida para esta rota |
 | `candidates` | último anúncio (época, saltos, atraso) de cada vizinho; o montante é escolhido entre eles |
@@ -375,8 +375,8 @@ campos de `data`.
 |  | `flow` | identificador estável do conteúdo/stream anunciado |
 |  | `epoch` | inteiro positivo, crescente por servidor e fluxo a cada ronda de anúncio |
 |  | `metric` | número finito ≥ 0; o servidor anuncia 0 e cada salto acrescenta 1 |
-|  | `delay` (opcional) | número finito ≥ 0, em segundos; o servidor anuncia 0 e cada nó soma o custo da ligação por onde recebeu (RTT/2, mínimo 0,1 ms, 1 s sem RTT medido); ausente = desconhecido. É a métrica principal (D30) |
-|  | `epoch` (no reencaminhamento) | a época do anúncio do montante usado, que pode ser anterior à mais recente que o nó já viu (D30) |
+|  | `delay` (opcional) | número finito ≥ 0, em segundos; o servidor anuncia 0 e cada nó soma o custo da ligação por onde recebeu (RTT/2, mínimo 0,1 ms, 1 s sem RTT medido); ausente = desconhecido. É a métrica principal (D34) |
+|  | `epoch` (no reencaminhamento) | a época do anúncio do montante usado, que pode ser anterior à mais recente que o nó já viu (D34) |
 | `WITHDRAW` | `server_id`, `flow` | identificam a rota que o emissor deixou de conseguir alcançar |
 |  | `epoch` | inteiro positivo; última época conhecida pelo emissor (informativo) |
 | `ACTIVATE` | `server_id`, `flow` | identificam a rota pedida; o ramo é o do vizinho emissor |

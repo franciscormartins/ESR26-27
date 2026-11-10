@@ -1,0 +1,109 @@
+{
+  "_comment": "Cenário 4 (dois servidores, rede em teia): S1 publica filme_a e filme_b; S2 publica filme_c e filme_b (filme_b é uma réplica). S1 e S2 estão ligados entre si: cada um é caminho de passagem dos fluxos do outro. O id overlay é igual ao nome do nó no CORE ('core'); 'host' = IP do host. O5 é um nó suplente (arrancar só nos testes de entrada de nós). Gerado por topologies/gerar_cenario4.py.",
+  "nodes": {
+    "S1": {
+      "host": "10.0.34.20",
+      "core": "S1",
+      "neighbors": [
+        "C1",
+        "O1",
+        "O2",
+        "S2"
+      ]
+    },
+    "S2": {
+      "host": "10.0.31.20",
+      "core": "S2",
+      "neighbors": [
+        "C2",
+        "O3",
+        "O4",
+        "S1"
+      ]
+    },
+    "O1": {
+      "host": "10.0.27.20",
+      "core": "O1",
+      "neighbors": [
+        "C1",
+        "C3",
+        "O2",
+        "O3",
+        "O5",
+        "S1"
+      ]
+    },
+    "O2": {
+      "host": "10.0.29.20",
+      "core": "O2",
+      "neighbors": [
+        "C3",
+        "O1",
+        "O4",
+        "S1"
+      ]
+    },
+    "O3": {
+      "host": "10.0.26.20",
+      "core": "O3",
+      "neighbors": [
+        "C2",
+        "C4",
+        "O1",
+        "O4",
+        "S2"
+      ]
+    },
+    "O4": {
+      "host": "10.0.30.20",
+      "core": "O4",
+      "neighbors": [
+        "C4",
+        "O2",
+        "O3",
+        "O5",
+        "S2"
+      ]
+    },
+    "O5": {
+      "host": "10.0.24.20",
+      "core": "O5",
+      "neighbors": [
+        "O1",
+        "O4"
+      ]
+    },
+    "C1": {
+      "host": "10.0.33.20",
+      "core": "C1",
+      "neighbors": [
+        "O1",
+        "S1"
+      ]
+    },
+    "C2": {
+      "host": "10.0.32.20",
+      "core": "C2",
+      "neighbors": [
+        "O3",
+        "S2"
+      ]
+    },
+    "C3": {
+      "host": "10.0.28.20",
+      "core": "C3",
+      "neighbors": [
+        "O1",
+        "O2"
+      ]
+    },
+    "C4": {
+      "host": "10.0.25.20",
+      "core": "C4",
+      "neighbors": [
+        "O3",
+        "O4"
+      ]
+    }
+  }
+}

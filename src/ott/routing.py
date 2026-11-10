@@ -68,7 +68,7 @@ class RouteEntry:
         feasibility: Melhor anúncio feito por este nó na época mais recente
             que anunciou, ``(época, atraso, saltos)``, ou ``None`` se ainda não
             anunciou (ou se retirou a rota). É a referência da condição de
-            viabilidade (D30): só servem candidatos de uma época mais recente
+            viabilidade (D34): só servem candidatos de uma época mais recente
             ou da mesma época com ``(atraso, saltos)`` estritamente menor.
     """
     flow: str
@@ -102,7 +102,7 @@ class RoutingTable:
     a jusante) e ``DEACTIVATE`` quando volta a zero.
 
     O montante é escolhido entre os candidatos viáveis (último anúncio de cada
-    vizinho) pela menor latência acumulada (D30); latências praticamente iguais
+    vizinho) pela menor latência acumulada (D34); latências praticamente iguais
     desempatam por menos saltos e depois pelo ID do vizinho. Só se troca de
     montante por latência se a melhoria passar a histerese (``delay_hysteresis``
     relativo e ``delay_min_gain`` absoluto, em s); ver ``_select``.
@@ -447,7 +447,7 @@ class RoutingTable:
 
     @staticmethod
     def _feasible(route, candidate):
-        """Condição de viabilidade (D30), como no Babel.
+        """Condição de viabilidade (D34), como no Babel.
 
         Serve um candidato de uma época mais recente do que a última anunciada
         por este nó, ou da mesma época com ``(atraso, saltos)`` anunciados
@@ -481,7 +481,7 @@ class RoutingTable:
         return max(self.delay_min_gain, self.delay_hysteresis * delay) / 2
 
     def _select(self, node, route):
-        """Escolhe o montante entre os candidatos válidos e viáveis (D30).
+        """Escolhe o montante entre os candidatos válidos e viáveis (D34).
 
         1. ``D*`` é o menor atraso; contam como empatados os candidatos a menos
            de ``_tie_band(D*)`` dele (com ``D*`` infinito, todos). Entre estes,
@@ -529,7 +529,7 @@ class RoutingTable:
 
         Enquanto o montante atual só tem o anúncio da época anterior, o nó
         continua a anunciar essa época e só propaga a nova quando o caminho
-        escolhido a trouxer (D30). Anunciar a época nova com o caminho antigo
+        escolhido a trouxer (D34). Anunciar a época nova com o caminho antigo
         tornava esse montante inviável (``_feasible``) e obrigava a trocar
         para a primeira cópia a chegar, a oscilação que a D21 eliminou.
         """
