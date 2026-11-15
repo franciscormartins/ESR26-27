@@ -38,5 +38,26 @@ class GuiOptionTest(unittest.TestCase):
         self.assertFalse(cli.build_parser().parse_args([]).gui)
 
 
+class PublishFlowOptionTest(unittest.TestCase):
+    def assert_rejected(self, *argv):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            cli.main(list(argv))
+
+    def test_empty_flow_or_video_is_rejected(self):
+        self.assert_rejected("--publish-flow", "=filme.Mjpeg")
+        self.assert_rejected("--publish-flow", "filme_a=")
+
+    def test_same_flow_twice_is_rejected(self):
+        self.assert_rejected("--publish-flow", "filme_a", "--publish-flow", "filme_a=outro")
+
+    def test_missing_video_file_is_rejected(self):
+        self.assert_rejected("--publish-flow", "filme_b=/nao/existe.Mjpeg")
+
+    def test_flow_with_video_is_accepted_by_the_parser(self):
+        args = cli.build_parser().parse_args(
+            ["--publish-flow", "filme_a", "--publish-flow", "filme_b=b.Mjpeg"])
+        self.assertEqual(args.publish_flow, ["filme_a", "filme_b=b.Mjpeg"])
+
+
 if __name__ == "__main__":
     unittest.main()

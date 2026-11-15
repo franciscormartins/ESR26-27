@@ -50,7 +50,7 @@ node.rtt(id)                               # RTT em segundos (média móvel) ou 
 ```
 
 Opções úteis: `--min-neighbors X` (pede substitutos se ficar com menos de X vizinhos),
-`--stats S` (vizinhos, RTT e estatísticas UDP), `--publish-flow ID` (pode repetir-se),
+`--stats S` (vizinhos, RTT e estatísticas UDP), `--publish-flow ID[=VIDEO]` (pode repetir-se; cada fluxo pode ter o seu ficheiro MJPEG, p.ex. `filme_b=/tmp/b.Mjpeg`; `tools/gerar_video_teste.py` gera um segundo vídeo de teste) e `--gui` (janela com o vídeo do primeiro `--subscribe`),
 `--subscribe SERVIDOR:FLUXO` (pode repetir-se), `--video FICHEIRO`, `--fps N`,
 `--announce-interval S` (5 s; usar o mesmo em todos os nós) e `--route-ttl S` (esquecer
 caminhos sem anúncios há S segundos; por omissão 6 × o intervalo).

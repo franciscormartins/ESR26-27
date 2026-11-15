@@ -6,7 +6,8 @@
 
 Opções úteis nos testes:
   --min-neighbors X   pede substitutos ao bootstrapper se ficar com menos de X vizinhos
-  --publish-flow ID   anuncia periodicamente um fluxo originado neste nó (repetível)
+  --publish-flow ID[=VIDEO]  anuncia e emite um fluxo originado neste nó (repetível);
+                      VIDEO é o ficheiro MJPEG desse fluxo (por omissão, --video)
   --announce-interval S intervalo entre rondas de anúncios (default: 5 s)
   --route-ttl S       esquecer rotas sem anúncios há S segundos (default: 6 x intervalo)
   --stats SEGUNDOS    escreve periodicamente os vizinhos e o RTT de cada um
@@ -58,7 +59,7 @@ def build_parser():
                    help="segundos com vizinhos a menos antes de pedir substitutos")
     p.add_argument("--stats", type=float, default=0, metavar="S",
                    help="escrever vizinhos e RTT a cada S segundos (0 = nunca)")
-    p.add_argument("--publish-flow", action="append", default=[], metavar="ID",
+    p.add_argument("--publish-flow", action="append", default=[], metavar="ID[=VIDEO]",
                    help="anunciar este fluxo periodicamente (opção repetível)")
     p.add_argument("--announce-interval", type=float, default=5.0, metavar="S",
                    help="intervalo entre rondas de anúncios (default: 5 s); "
@@ -110,6 +111,17 @@ def main(argv=None):
         raise SystemExit("--route-ttl tem de ser finito e maior que --announce-interval")
     if args.publish_flow and (not math.isfinite(args.fps) or args.fps <= 0):
         raise SystemExit("--fps tem de ser finito e maior que zero")
+    published = []                      # (fluxo, ficheiro de vídeo)
+    for value in args.publish_flow:
+        flow, separator, video = value.partition("=")
+        if not flow or (separator and not video):
+            raise SystemExit(f"--publish-flow inválido: {value!r}; usa ID ou ID=FICHEIRO")
+        published.append((flow, video if separator else args.video))
+    if len({flow for flow, _ in published}) != len(published):
+        raise SystemExit("--publish-flow não pode repetir o mesmo fluxo")
+    for flow, video in published:
+        if not os.path.isfile(video):
+            raise SystemExit(f"vídeo do fluxo {flow} não encontrado: {video}")
     if not 1 <= args.data_port <= 65535:
         raise SystemExit("--data-port tem de estar entre 1 e 65535")
     subscriptions = []
@@ -135,9 +147,10 @@ def main(argv=None):
                        replace_interval=args.replace_after)
     routing_table = RoutingTable(route_ttl=route_ttl)
     routing_table.attach(node)
-    publisher = (AnnouncementPublisher(node, args.publish_flow, args.announce_interval,
+    publisher = (AnnouncementPublisher(node, [flow for flow, _ in published],
+                                       args.announce_interval,
                                        routing_table=routing_table)
-                 if args.publish_flow else None)
+                 if published else None)
     node.start()
     status = None
     if args.status_file:   # logo ao arrancar: um nó à espera do bootstrapper também aparece no painel
@@ -169,9 +182,9 @@ def main(argv=None):
     if publisher:
         publisher.start()
 
-    sources = [StreamSource(node.id, flow, args.video, forwarder.send,
+    sources = [StreamSource(node.id, flow, video, forwarder.send,
                             fps=args.fps, loop=True).start()
-               for flow in args.publish_flow]
+               for flow, video in published]
     pending_subscriptions = set(subscriptions)
     active_subscriptions = set()
     if status is not None:
