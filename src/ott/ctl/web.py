@@ -10,6 +10,7 @@ import json
 import os
 import threading
 import time
+from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import scenarios as sc
@@ -58,6 +59,12 @@ def do_action(orch, body):
         else:
             orch.link_state(node, iface, bool(body.get("up")))
         return f"{action}: {node} {iface}"
+    if action in ("router_down", "router_up"):
+        node = _text(body.get("node"))
+        if not node:
+            raise BackendError("indica o router")
+        orch.router_set(node, action == "router_up")
+        return f"{action}: {node}"
     if action in ("link_netem", "link_clear", "link_set"):
         ends = [_text(body.get(k)) for k in ("a", "ia", "b", "ib")]
         if not all(ends):
@@ -300,6 +307,38 @@ def make_handler(controller):
             self.end_headers()
             self.wfile.write(raw)
 
+        def _video(self, c):
+            """Vídeo de um cliente como MJPEG (multipart/x-mixed-replace): o browser mostra-o num <img>."""
+            q = parse_qs(urlsplit(self.path).query)
+            node, flow = (q.get("node") or [""])[0], (q.get("flow") or [""])[0]
+            origin, _, name = flow.partition(":")
+            spec = c.orch.plan.nodes.get(node) if c.orch else None
+            if spec is None or flow not in spec.subscribe or not name:
+                return self._send(404, {"error": "esse cliente não subscreve esse fluxo"})
+            path = c.orch.frame_path(node, origin, name)
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            last = None
+            try:
+                while True:
+                    try:
+                        mtime = os.stat(path).st_mtime_ns
+                        if mtime != last:
+                            with open(path, "rb") as f:
+                                data = f.read()
+                            self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(data)
+                                             + data + b"\r\n")
+                            self.wfile.flush()
+                            last = mtime
+                    except OSError as e:
+                        if isinstance(e, (BrokenPipeError, ConnectionResetError)):
+                            return
+                    time.sleep(0.05)
+            except (BrokenPipeError, ConnectionResetError):
+                return
+
         def do_GET(self):
             if not self._host_ok():
                 return self._send(403, {"error": "host não permitido"})
@@ -317,6 +356,12 @@ def make_handler(controller):
                 except ValueError:
                     since = 0.0
                 return self._send(200, {"samples": c.samples_since(since)})
+            if self.path.startswith("/api/paths"):
+                raw = (parse_qs(urlsplit(self.path).query).get("pairs") or [""])[0]
+                pairs = [tuple(p.split(">", 1)) for p in raw.split(",") if ">" in p][:60]
+                return self._send(200, c.orch.paths(pairs) if c.orch else {})
+            if self.path.startswith("/api/video"):
+                return self._video(c)
             if self.path == "/api/tests":
                 return self._send(200, c.tests())
             if self.path == "/api/demo":
@@ -349,7 +394,7 @@ def make_handler(controller):
             c, action = controller, body.get("action")
             if action == "select":
                 session = body.get("session")
-                return c.select(str(body.get("scenario")), str(body.get("backend") or "local"),
+                return c.select(str(body.get("scenario")), str(body.get("backend") or "core"),
                                 int(session) if str(session or "").isdigit() else None)
             if action == "tests_run":
                 return c.run_tests(body.get("ids") or [], body.get("repeat"))

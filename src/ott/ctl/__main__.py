@@ -76,7 +76,7 @@ def parser():
     db = sub.add_parser("dashboard", help="painel web (http://127.0.0.1:PORTA); o cenário também se escolhe na página")
     db.add_argument("scenario", nargs="?")
     db.add_argument("--port", type=int, default=8080, help="porta do painel")
-    db.add_argument("--backend", choices=["local", "core"], default="local")
+    db.add_argument("--backend", choices=["local", "core"], default="core")
     db.add_argument("--session", type=int, help="sessão do CORE")
     db.add_argument("--node-port", type=int, default=5000, help="porta TCP dos nós (modo local)")
     db.add_argument("--node-data-port", type=int, default=6000, help="porta UDP dos nós (modo local)")

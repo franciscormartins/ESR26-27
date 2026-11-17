@@ -6,23 +6,22 @@ lança ou sinaliza processos. Detalhes técnicos em `docs/OTTCTL.md`.
 ## 1. Arrancar
 
 ```sh
-make dashboard                  # modo local: todos os nós nesta máquina (127.0.0.N)
-make dashboard-core SESSION=2   # modo CORE: liga-se a uma sessão já iniciada (Start)
+make dashboard                  # liga-se à sessão do CORE mais recente (já com Start)
+make dashboard SESSION=2        # escolhe a sessão
 make dashboard PORT=9000        # outra porta
 ```
 
 Abre o endereço que aparece (`http://127.0.0.1:8080`). Se a porta estiver ocupada, usa a seguinte (8081, …).
-Equivalente sem `make`: `./bin/ottctl dashboard cenario4 --backend local --port 8080`.
+Equivalente sem `make`: `./bin/ottctl dashboard cenario4 --backend core --port 8080`.
 
-**Modo local** – lança os nós como processos, com vídeo real; permite parar, matar, congelar e ver rotas. **Não** consegue pôr atraso,
-perdas nem cortar ligações (precisa de root). **Modo CORE** – os nós correm dentro das máquinas do CORE: abre o cenário
-(`topologies/cenarioN.xml`), faz *Start*, e só depois abre o painel. Ativa também o separador *Rede*.
+O painel trabalha só com o **CORE**: abre o cenário (`topologies/cenarioN.xml`), faz *Start*, espera ≈ 20 s e só depois abre o painel.
+(O modo local continua disponível na linha de comandos `ottctl --backend local`, para os testes automáticos.)
 
 ## 2. Cabeçalho
 
 | Controlo | Para que serve |
 |---|---|
-| **Cenário** / **Modo** / **Abrir** | escolhe o cenário (1–4) e o modo (local ou CORE) e carrega-o; o painel liga-se ao que já estiver a correr |
+| **Cenário** / **Abrir** | escolhe o cenário (1–4) e liga-se à sessão do CORE que o tem aberto |
 | **Lançar tudo** / **Parar tudo** | arranca os nós (servidores primeiro) ou pára-os todos |
 | **Apresentação** | letra maior para projetar (tecla `p`) |
 | etiquetas | modo atual, e "a trabalhar…" enquanto corre um teste ou um passo da demonstração |
@@ -34,7 +33,12 @@ perdas nem cortar ligações (precisa de root). **Modo CORE** – os nós correm
   cada fluxo (`✗` se parou).
 - **Setas coloridas** = a árvore de cada fluxo (uma cor por fluxo). Traço cheio = ramo ativo; tracejado = rota conhecida mas ainda sem
   subscritores. **Fluxo**: filtra para ver só a árvore de um fluxo.
-- **underlay**: mostra os routers do CORE por baixo do overlay. Ligações com atraso/perdas ficam a laranja e as cortadas a vermelho.
+- **Vista**: *topologia do CORE + fluxos* (por defeito) desenha o mesmo que o CORE (routers `r1`–`r13`, hosts e ligações, lidos do `.xml`)
+  com os nós OTT nos seus hosts; a árvore de cada fluxo segue o **caminho IP verdadeiro** (o painel pergunta a cada router, com `ip route get`,
+  qual é o salto seguinte, de 3 em 3 s), por isso se vê a rota mudar quando se mexe numa ligação. Enquanto o primeiro cálculo não chega,
+  desenha o caminho mais curto do desenho.
+  **Clicar numa ligação** abre o separador *Rede* com ela escolhida (atraso, perdas, cortar). A laranja as ligações com efeito, a
+  vermelho as cortadas. Funciona nos cenários 1–4; no 3 os switches aparecem como losangos e os efeitos de rede nas ligações a switches aplicam-se só ao extremo do nó. *Só overlay* mostra apenas os nós OTT.
 - **Clicar num nó** escolhe-o para os separadores.
 
 ## 4. Separadores (direita)
@@ -43,6 +47,13 @@ perdas nem cortar ligações (precisa de root). **Modo CORE** – os nós correm
 Estado do nó escolhido: botões **Lançar / Parar (limpo) / Matar / Congelar / Retomar** (SIGTERM com BYE, SIGKILL, SIGSTOP, SIGCONT),
 vizinhos com RTT, tabela de rotas, fluxos recebidos (img/s, perdas, jitter, parado ou a chegar), contadores do plano de dados UDP
 (recebidos, reencaminhados, descartados, RPF) e, no servidor de bootstrap, os nós registados.
+
+### Vídeo
+Mosaico com **o vídeo que cada cliente está a receber**, ao vivo. Cada mosaico diz o cliente e o fluxo, as img/s, as perdas, o jitter e
+**por que nó chega agora o fluxo** (`via O3`). Por baixo estão os botões Lançar / Parar / Matar / Congelar / Retomar do nó escolhido no
+grafo, para se ver o efeito sem mudar de separador. Se o fluxo pára (ou o cliente está parado) o mosaico escurece com «sem imagens». Cada
+cliente guarda a imagem mais recente em `/tmp/ottctl/<cenário>/frames/<nó>/` (`--frame-dir`, no máximo 10 por segundo); o painel serve-a
+como MJPEG em `/api/video?node=C1&flow=S1:filme_a`.
 
 ### Rotas — tabelas de encaminhamento
 É a tabela pedida no enunciado, **uma linha por fluxo**:
@@ -71,9 +82,14 @@ Roteiro guiado para a apresentação: cada passo tem um texto, foca o grafo nos 
 congelar o S2, entrar o O5, atrasar uma ligação…), mostrando depois o que foi medido. **Seguinte / Anterior / Recomeçar**.
 Teclas: `espaço` ou `→` seguinte, `←` anterior, `p` modo apresentação, `f` ecrã inteiro. Endereço direto: `/#demo,present`.
 
-### Rede (só modo CORE)
+### Routers (vista da topologia do CORE)
+Os routers (`r1`…) são **clicáveis** no grafo: abre o separador *Rede* com o router escolhido. **Desligar router** põe em baixo todas as
+suas interfaces (como se tivesse morrido: o OSPF recalcula e os nós OTT mudam de caminho); **Ligar router** repõe-nas. Um router desligado fica
+a vermelho. Por baixo estão as ligações do router (um botão por vizinho): escolhe uma e muda-lhe o atraso, as perdas ou corta-a.
+
+### Rede
 Escolhe uma **ligação do underlay** e aplica **atraso, jitter, perdas e débito** (`tc netem`, nos dois extremos: 30 ms por lado dá ≈ 60 ms
-de RTT). Botões de **perdas rápidas** (1, 5, 10, 20, 30 %) usam também os valores escritos nos outros campos. **Aplicar**, **Limpar**,
+de RTT). Botões de **atraso rápido** (20, 50, 100, 200 ms) e de **perdas rápidas** (1, 5, 10, 20, 30 %) usam também os valores escritos nos outros campos. **Aplicar**, **Limpar**,
 **Cortar** (link down) e **Repor**. Os efeitos ativos ficam listados, com **Repor toda a rede**. Nota: 10 % de perda de pacotes dá ≈ 45 %
 de imagens perdidas, porque cada imagem vai em vários fragmentos IP e basta perder um.
 
@@ -92,6 +108,7 @@ de imagens perdidas, porque cada imagem vai em vários fragmentos IP e basta per
 | ver o que acontece quando um nó cai | **Nó** → **Matar** num nó intermédio; acompanho *Eventos* e o gráfico de img/s; **Lançar** para o repor |
 | testar perdas numa ligação | modo CORE → **Rede** → escolho a ligação → **10%** → vejo as perdas e o jitter nos clientes |
 | medir o tempo de recuperação | **Testes** → A1 com repetições → **Copiar** |
+| ver o vídeo e testar uma falha | separador **Vídeo** → clico num nó do grafo (ex.: `O3`) → **Matar** → vejo o `via` mudar e o vídeo continuar; **Lançar** para o repor |
 | apresentar | **Apresentação**, separador **Demonstração**, `espaço` para avançar |
 
 ## 7. Segurança e limitações

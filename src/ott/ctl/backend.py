@@ -97,6 +97,8 @@ class Backend:
             a += ["--publish-flow", flow]
         for sub in spec.subscribe:
             a += ["--subscribe", sub]
+        if spec.subscribe:   # a imagem mais recente de cada fluxo, para o painel mostrar o vídeo
+            a += ["--frame-dir", os.path.join(os.path.dirname(status_path), "frames", spec.id)]
         a += self.neighbor_args(spec)
         a += spec.extra + list(extra)
         if verbose:

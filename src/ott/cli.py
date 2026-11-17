@@ -39,7 +39,7 @@ from .node import OverlayNode
 from .protocol import DEFAULT_PORT
 from .routing import AnnouncementPublisher, RoutingTable
 from .status import StatusWriter
-from .streaming.client import StreamReceiver, run_gui
+from .streaming.client import FrameSaver, StreamReceiver, run_gui
 from .streaming.server import DATA_PORT, StreamSource
 
 
@@ -99,6 +99,8 @@ def build_parser():
                         "esconde os logs de rotas (exceto com -v)")
     p.add_argument("--log-dir", metavar="PASTA",
                    help="gravar também o log em PASTA/ott-<ID>.log (a pasta é criada)")
+    p.add_argument("--frame-dir", metavar="PASTA",
+                   help="guardar aqui a imagem mais recente de cada subscrição (SERVIDOR_FLUXO.jpg), para o painel web mostrar o vídeo")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -226,7 +228,9 @@ def main(argv=None):
         node.on_neighbor_down(traffic_on_down)
     receivers = {}
     for origin, flow in subscriptions:
-        receiver = StreamReceiver(origin, flow, port=args.data_port, listen=False)
+        receiver = StreamReceiver(origin, flow, port=args.data_port, listen=False,
+                                  on_frame=FrameSaver(os.path.join(args.frame_dir, f"{origin}_{flow}.jpg"))
+                                  if args.frame_dir else None)
         receivers[(origin, flow)] = receiver
         forwarder.set_local_receiver(origin, flow, receiver)
 

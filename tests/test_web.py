@@ -77,6 +77,28 @@ class WebTest(unittest.TestCase):
         self.assertEqual({n["health"] for n in state["nodes"].values()}, {"off"})
         self.assertEqual(self.request("GET", "/nada")[0], 404)
 
+    def test_video_stream_serves_the_clients_latest_frame(self):
+        import os
+        spec = next(n for n in self.orch.plan.nodes.values() if n.subscribe)
+        flow = spec.subscribe[0]
+        origin, _, name = flow.partition(":")
+        path = self.orch.frame_path(spec.id, origin, name)
+        os.makedirs(os.path.dirname(path))
+        with open(path, "wb") as f:
+            f.write(b"\xff\xd8JPEGFALSO\xff\xd9")
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", f"/api/video?node={spec.id}&flow={flow}", headers={"Host": f"127.0.0.1:{self.port}"})
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 200)
+        self.assertIn("multipart/x-mixed-replace", resp.getheader("Content-Type"))
+        self.assertIn(b"JPEGFALSO", resp.fp.read1(4096) if hasattr(resp.fp, "read1") else resp.read(60))
+        conn.close()
+
+    def test_video_rejects_unknown_nodes_and_flows(self):
+        for q in ("node=../../etc&flow=S:x", "node=S&flow=S:x", "node=C&flow=../x:y", "node=C"):
+            self.assertEqual(self.request("GET", "/api/video?" + q)[0], 404, q)
+        self.assertEqual(self.request("GET", "/api/video?node=C&flow=S:x", headers={"Host": "evil.com"})[0], 403)
+
     def test_requests_for_another_host_are_refused(self):
         self.assertEqual(self.request("GET", "/api/state", headers={"Host": "evil.example.com"})[0], 403)
         self.assertEqual(self.post({"action": "down"}, Host="evil.example.com")[0], 403)
@@ -96,6 +118,14 @@ class WebTest(unittest.TestCase):
         self.assertEqual(self.post({"action": "stop", "nodes": ["A", "C"]})[0], 200)
         self.assertEqual(self.post({"action": "down"})[0], 200)
         self.assertEqual(self.orch.calls, [("kill", ["S"]), ("stop", ["A", "C"]), ("down",)])
+
+    def test_router_actions_reach_the_orchestrator(self):
+        seen = []
+        self.orch.router_set = lambda name, up: seen.append((name, up))
+        self.assertEqual(self.post({"action": "router_down", "node": "r4"})[0], 200)
+        self.assertEqual(self.post({"action": "router_up", "node": "r4"})[0], 200)
+        self.assertEqual(self.post({"action": "router_down"})[0], 400)
+        self.assertEqual(seen, [("r4", False), ("r4", True)])
 
     def test_invalid_actions_are_errors_not_crashes(self):
         for payload in ({"action": "formatar"}, {"action": "kill"}, {"action": "kill", "nodes": "S"},

@@ -93,3 +93,22 @@ class StatusPhaseAndGapTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnderlayDeTodosOsCenariosTest(unittest.TestCase):
+    """O painel desenha a topologia do CORE: tem de funcionar em todos os cenários (o 3 tem switches em <networks>)."""
+
+    def test_todos_os_nos_overlay_tem_ligacoes(self):
+        from ott.ctl.plan import available, load_plan, underlay_of
+        for name in available():
+            plan = load_plan(name)
+            under = underlay_of(plan)
+            ligados = {end for l in under["links"] for end in (l["a"], l["b"])}
+            for node in plan.nodes.values():
+                self.assertIn(node.core, ligados, f"{name}: {node.core} sem ligações")
+
+    def test_cenario3_marca_ligacoes_a_switches(self):
+        from ott.ctl.plan import load_plan, underlay_of
+        under = underlay_of(load_plan("cenario3"))
+        self.assertTrue(any(n["type"] == "switch" for n in under["nodes"]))
+        self.assertTrue(any(l.get("sw") for l in under["links"]))

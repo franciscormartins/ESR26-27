@@ -30,6 +30,9 @@ class Orchestrator:
     def status_path(self, node_id):
         return os.path.join(self.rundir, f"{node_id}.json")
 
+    def frame_path(self, node_id, origin, flow):
+        return os.path.join(self.rundir, "frames", node_id, f"{origin}_{flow}.jpg")
+
     def log_path(self, node_id):
         return os.path.join(self.rundir, f"{node_id}.log")
 
@@ -274,6 +277,74 @@ class Orchestrator:
         if _key is None:
             self.record(f"interface {node}:{iface} {'ligada' if up else 'desligada'}", "link")
             self._effect(self._end_key(node, iface), a=node, ia=iface, b=None, ib=None, down=not up)
+
+    def ip_path(self, src, dst, max_hops=14):
+        """Caminho que os pacotes IP seguem mesmo de ``src`` para ``dst`` (nós do CORE), perguntando às tabelas de rotas (``ip route get``).
+
+        Devolve a lista de nós do CORE, ou None se não for possível (ex.: sem CORE). É o caminho verdadeiro, depois do OSPF e dos
+        efeitos de rede, ao contrário de um caminho "mais curto" adivinhado a partir do desenho.
+        """
+        if not isinstance(self.backend, CoreBackend):
+            return None
+        under = self.underlay()
+        owner, ips = {}, {}
+        for l in under["links"]:
+            for node, ip in ((l["a"], l.get("ipa")), (l["b"], l.get("ipb"))):
+                if ip:
+                    owner[ip] = node
+                    ips.setdefault(node, ip)
+        if dst not in ips or src not in ips:
+            return None
+        target, path, cur = ips[dst], [src], src
+        while cur != dst and len(path) < max_hops:
+            rc, out = self.backend.execute(cur, ["ip", "route", "get", target])
+            if rc != 0:
+                return None
+            words = out.split()
+            nxt = owner.get(words[words.index("via") + 1]) if "via" in words else dst
+            if nxt is None or nxt in path:
+                return None
+            path.append(nxt)
+            cur = nxt
+        return path if cur == dst else None
+
+    def paths(self, pairs, ttl=3.0):
+        """{"A>B": [nós do CORE]} para pares de nós overlay (com cache de alguns segundos)."""
+        cache, now, out = self.__dict__.setdefault("_paths", {}), time.time(), {}
+        for a, b in pairs:
+            if a not in self.plan.nodes or b not in self.plan.nodes:
+                continue
+            key = f"{a}>{b}"
+            if key not in cache or now - cache[key][0] > ttl:
+                try:
+                    path = self.ip_path(self.plan.nodes[a].core, self.plan.nodes[b].core)
+                except BackendError:
+                    path = None
+                cache[key] = (now, path)
+            if cache[key][1]:
+                out[key] = cache[key][1]
+        return out
+
+    def router_set(self, name, up):
+        """Desliga (ou volta a ligar) um router do CORE: põe em baixo todas as suas interfaces, como se tivesse morrido.
+
+        O OSPF dá pela falta dos vizinhos e recalcula; os nós overlay vêem os caminhos mudar.
+        """
+        node = next((u for u in self.underlay()["nodes"] if u["name"] == name and u["type"] == "router"), None)
+        if node is None:
+            raise BackendError(f"não é um router do CORE: {name}")
+        ifaces = [l["ia"] for l in self.underlay()["links"] if l["a"] == name] + \
+                 [l["ib"] for l in self.underlay()["links"] if l["b"] == name]
+        failed = []
+        for iface in ifaces:
+            try:
+                self.link_state(name, iface, up, _key=True)
+                self._effect(self._end_key(name, iface), a=name, ia=iface, b=None, ib=None, down=not up)
+            except BackendError as exc:
+                failed.append(str(exc))
+        self.record(f"router {name} {'ligado' if up else 'desligado'} ({len(ifaces)} interfaces)", "link")
+        if failed:
+            raise BackendError("; ".join(failed))
 
     def clear_network(self):
         """Remove todos os efeitos de rede aplicados por este orquestrador (netem e cortes)."""

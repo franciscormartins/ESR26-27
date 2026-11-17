@@ -124,17 +124,27 @@ def underlay_of(plan):
         return {"nodes": [], "links": []}
     root = ET.parse(plan.xml_path).getroot()
     names, nodes = {}, []
-    for d in root.find("devices"):
-        p = d.find("position")
-        names[d.get("id")] = d.get("name")
-        nodes.append({"name": d.get("name"), "type": d.get("type"), "x": float(p.get("x")), "y": float(p.get("y"))})
+    switches = set()
+    for tag in ("devices", "networks"):   # os switches (cenário 3) estão em <networks>
+        section = root.find(tag)
+        for d in (section if section is not None else []):
+            p = d.find("position")
+            names[d.get("id")] = d.get("name")
+            if tag == "networks":
+                switches.add(d.get("name"))
+            nodes.append({"name": d.get("name"), "type": "switch" if tag == "networks" else d.get("type"),
+                          "x": float(p.get("x")), "y": float(p.get("y"))})
     links = []
     for link in root.find("links"):
         i1, i2 = link.find("iface1"), link.find("iface2")
         if i1 is None or i2 is None:
             continue
-        links.append({"a": names[link.get("node1")], "ia": i1.get("name"), "b": names[link.get("node2")],
-                      "ib": i2.get("name")})
+        a, b = names[link.get("node1")], names[link.get("node2")]
+        entry = {"a": a, "ia": i1.get("name"), "b": b, "ib": i2.get("name"),
+                 "ipa": i1.get("ip4"), "ipb": i2.get("ip4")}
+        if a in switches or b in switches:   # um switch não tem espaço de nomes: o efeito aplica-se só ao extremo do nó
+            entry["sw"] = "a" if a in switches else "b"
+        links.append(entry)
     return {"nodes": nodes, "links": links}
 
 

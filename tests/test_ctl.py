@@ -106,6 +106,12 @@ class CoreBackendTest(unittest.TestCase):
         self.assertIn("--subscribe S1:filme_a --subscribe S2:filme_c", command)
         self.assertTrue(command.endswith("&"))
 
+    def test_clients_save_their_frames_for_the_dashboard(self):
+        be = self.backend(FakeRunner())
+        argv = be.argv(self.plan.nodes["C1"], "/tmp/x/C1.json")
+        self.assertEqual(argv[argv.index("--frame-dir") + 1], "/tmp/x/frames/C1")
+        self.assertNotIn("--frame-dir", be.argv(self.plan.nodes["S1"], "/tmp/x/S1.json"))
+
     def test_signals_use_pkill_inside_the_node(self):
         runner = FakeRunner()
         self.backend(runner).signal(self.plan.nodes["S1"], "STOP")
@@ -137,10 +143,50 @@ class CoreBackendTest(unittest.TestCase):
         orch.link_set("r4", "eth1", "r3", "eth2", False)
         self.assertEqual(runner.calls[n][4:], ["ip", "link", "set", "eth1", "down"])
 
+    def test_router_down_puts_every_interface_of_the_router_down_and_up_restores_them(self):
+        runner = FakeRunner()
+        orch = Orchestrator(self.plan, self.backend(runner), tempfile.mkdtemp(prefix="ottctl-"))
+        ifaces = len(routerlinks(orch, "r4"))
+        self.assertGreater(ifaces, 2)
+        orch.router_set("r4", False)
+        cmds = [c[4:] for c in runner.calls]
+        self.assertEqual(len(cmds), ifaces)
+        self.assertTrue(all(c[:3] == ["ip", "link", "set"] and c[-1] == "down" for c in cmds))
+        self.assertTrue(all(c[2].endswith("/r4") for c in runner.calls))
+        self.assertEqual(len([e for e in orch.net_effects.values() if e.get("down")]), ifaces)
+        orch.router_set("r4", True)
+        self.assertTrue(all(c[-1] == "up" for c in [c[4:] for c in runner.calls[ifaces:]]))
+        with self.assertRaises(BackendError):
+            orch.router_set("O1", False)          # um host não é um router
+        with self.assertRaises(BackendError):
+            orch.router_set("r99", False)
+
+    def test_ip_path_follows_the_routing_tables_hop_by_hop(self):
+        under = Orchestrator(self.plan, self.backend(FakeRunner()), tempfile.mkdtemp()).underlay()
+        # tabelas de rotas de brincar: cada nó sabe o vizinho (e o seu IP) a que deve entregar para chegar a cada destino
+        nbr = {}
+        for l in under["links"]:
+            nbr.setdefault(l["a"], {})[l["b"]] = l["ipb"]
+            nbr.setdefault(l["b"], {})[l["a"]] = l["ipa"]
+        wanted = ["C1", "r10", "r4", "O1"]       # caminho forçado: não é o mais curto do desenho
+        class Runner:
+            def __call__(self_, argv, timeout=20):
+                here, dst_ip = argv[2].rsplit("/", 1)[1], argv[-1]
+                nxt = wanted[wanted.index(here) + 1] if here in wanted else None
+                return 0, f"{dst_ip} via {nbr[here][nxt]} dev eth0 src 1.1.1.1 uid 0"
+        orch = Orchestrator(self.plan, self.backend(Runner()), tempfile.mkdtemp())
+        # o destino vê-se pelo IP: só o último salto é directo
+        self.assertEqual(orch.ip_path("C1", "O1")[:3], ["C1", "r10", "r4"])
+        self.assertIsNone(Orchestrator(self.plan, LocalBackend(self.plan), tempfile.mkdtemp()).ip_path("C1", "O1"))
+
     def test_the_local_mode_has_no_network_commands(self):
         orch = Orchestrator(load_plan(write_mini()), LocalBackend(load_plan(write_mini())), tempfile.mkdtemp())
         with self.assertRaises(BackendError):
             orch.netem("S", "eth0", delay="10ms")
+
+
+def routerlinks(orch, name):
+    return [l for l in orch.underlay()["links"] if name in (l["a"], l["b"])]
 
 
 class LocalScenarioTest(unittest.TestCase):

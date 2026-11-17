@@ -19,6 +19,7 @@ Uso isolado (sem overlay):
 """
 import argparse
 import logging
+import os
 import socket
 import threading
 import time
@@ -74,6 +75,33 @@ class StreamStats:
                 f"({self.loss_ratio():.1%}) descartados={self.late} "
                 f"jitter={self.jitter * 1000:.2f} ms"
                 + (f" reinicios={self.restarts}" if self.restarts else ""))
+
+
+class FrameSaver:
+    """Guarda a imagem mais recente de um fluxo num ficheiro JPEG (para o painel web mostrar o vídeo).
+
+    Escreve no máximo ``fps`` imagens por segundo, de forma atómica (ficheiro temporário + rename), para o painel nunca ler
+    uma imagem a meio.
+    """
+
+    def __init__(self, path, fps=10.0):
+        self.path = path
+        self.min_gap = 1.0 / fps
+        self._last = 0.0
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
+    def __call__(self, frame, rtp=None):
+        now = time.monotonic()
+        if now - self._last < self.min_gap:
+            return
+        self._last = now
+        tmp = self.path + ".tmp"
+        try:
+            with open(tmp, "wb") as f:
+                f.write(frame)
+            os.replace(tmp, self.path)
+        except OSError as e:
+            log.debug("não guardei a imagem: %s", e)
 
 
 class StreamReceiver:

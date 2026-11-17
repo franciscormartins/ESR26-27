@@ -135,3 +135,17 @@ class LoopbackTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FrameSaverTest(unittest.TestCase):
+    def test_writes_atomically_and_limits_the_rate(self):
+        import os
+        import tempfile
+        from ott.streaming.client import FrameSaver
+        path = os.path.join(tempfile.mkdtemp(), "sub", "S1_filme_a.jpg")
+        saver = FrameSaver(path, fps=1)
+        saver(b"um")
+        saver(b"dois")            # dentro do mesmo segundo: ignorada
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"um")
+        self.assertFalse(os.path.exists(path + ".tmp"))
