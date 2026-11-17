@@ -13,6 +13,11 @@ Opções úteis nos testes:
   --stats SEGUNDOS    escreve periodicamente os vizinhos e o RTT de cada um
   --subscribe S:F     subscreve o fluxo F do servidor S (repetível)
   --gui               mostra o vídeo da primeira subscrição numa janela
+  --live [S]          bloco fixo na consola, redesenhado a cada S s (default 2): por fluxo,
+                      pacotes recebidos e perdidos, vizinho de onde vêm (saltos), destinos e trocas
+  --log-dir PASTA     grava o log em PASTA/ott-<ID>.log (cria a pasta), sem precisar de tee
+  --log-traffic       ao desligar-se um vizinho (ou cliente), mostra por fluxo os pacotes
+                      recebidos, perdidos e de/para que vizinhos, em vez dos logs de rotas
   --status-file F     escreve o estado do nó (vizinhos, rotas, fluxos, eventos) em JSON, para o ottctl
 
 Os endereços têm o formato HOST ou HOST:PORTA.
@@ -23,11 +28,13 @@ import math
 import os
 import signal
 import socket
+import sys
 import threading
 import time
 
 from .bootstrapper import BootstrapService
 from .forwarding import OverlayForwarder
+from .live import LiveConsole, LiveView, TrafficView
 from .node import OverlayNode
 from .protocol import DEFAULT_PORT
 from .routing import AnnouncementPublisher, RoutingTable
@@ -83,6 +90,15 @@ def build_parser():
                    help="escrever o estado do nó em JSON neste ficheiro (usado pelo ottctl e pelo painel web)")
     p.add_argument("--status-interval", type=float, default=1.0, metavar="S",
                    help="intervalo entre escritas do estado (default: 1 s)")
+    p.add_argument("--log-traffic", action="store_true",
+                   help="quando um vizinho se desliga, escrever por fluxo os pacotes recebidos, "
+                        "perdidos e de/para que vizinhos; esconde os logs de rotas (exceto com -v)")
+    p.add_argument("--live", nargs="?", type=float, const=2.0, default=None, metavar="S",
+                   help="bloco fixo na consola, redesenhado a cada S s (default 2): por fluxo, "
+                        "pacotes recebidos e perdidos, vizinho de onde vêm (saltos), destinos e trocas; "
+                        "esconde os logs de rotas (exceto com -v)")
+    p.add_argument("--log-dir", metavar="PASTA",
+                   help="gravar também o log em PASTA/ott-<ID>.log (a pasta é criada)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -136,10 +152,36 @@ def main(argv=None):
         raise SystemExit("--subscribe não pode repetir o mesmo servidor e fluxo")
     if not math.isfinite(args.status_interval) or args.status_interval <= 0:
         raise SystemExit("--status-interval tem de ser finito e maior que zero")
+    if args.live is not None and (not math.isfinite(args.live) or args.live <= 0):
+        raise SystemExit("--live tem de ser finito e maior que zero")
     _install_signal_handlers()
+    console = file_handler = None
+    handlers = []
+    if args.live is not None:
+        console = LiveConsole(sys.stderr)
+        handlers.append(console)
+    if args.log_dir:
+        try:
+            os.makedirs(args.log_dir, exist_ok=True)
+            file_handler = logging.FileHandler(
+                os.path.join(args.log_dir, f"ott-{args.id}.log"), encoding="utf-8")
+        except OSError as e:
+            raise SystemExit(f"--log-dir: não foi possível criar o log ({e})")
+        handlers.append(file_handler)
+    if console is None:
+        handlers.append(logging.StreamHandler(sys.stderr))
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format=f"%(asctime)s [{args.id}] %(levelname)s %(message)s")
+        format=f"%(asctime)s [{args.id}] %(levelname)s %(message)s", handlers=handlers)
+    file_logger = None
+    if file_handler is not None:   # a linha do --live também fica no ficheiro, só lá
+        file_logger = logging.getLogger("ott.live.ficheiro")
+        file_logger.propagate = False
+        file_logger.setLevel(logging.INFO)
+        file_logger.addHandler(file_handler)
+    if (args.log_traffic or args.live is not None) and not args.verbose:
+        # as linhas da RoutingTable dão lugar ao resumo de tráfego
+        logging.getLogger("ott.routing").setLevel(logging.WARNING)
 
     service = BootstrapService.from_file(args.serve, args.id) if args.serve else None
     node = OverlayNode(args.id, args.bind, args.port, bootstrap_service=service,
@@ -173,6 +215,15 @@ def main(argv=None):
             raise SystemExit("não foi possível obter vizinhos do bootstrapper")
 
     forwarder = OverlayForwarder(node, routing_table, port=args.data_port, bind=args.bind).start()
+    log = logging.getLogger("ott.cli")
+    if args.log_traffic:
+        def traffic_on_down(_node, neighbor):
+            lines = forwarder.traffic.summary_lines(neighbor)
+            if not lines:
+                log.info("tráfego: nenhum pacote passou pelo vizinho %s", neighbor)
+            for line in lines:
+                log.info("tráfego (vizinho %s saiu): %s", neighbor, line)
+        node.on_neighbor_down(traffic_on_down)
     receivers = {}
     for origin, flow in subscriptions:
         receiver = StreamReceiver(origin, flow, port=args.data_port, listen=False)
@@ -192,7 +243,12 @@ def main(argv=None):
                     lambda: (set(pending_subscriptions), set(active_subscriptions)))
         status.phase = "a correr"
 
-    log = logging.getLogger("ott.cli")
+    live = None
+    if args.live is not None:
+        live = LiveView(TrafficView(node.id, forwarder, routing_table,
+                                    published=[flow for flow, _ in published],
+                                    subscriptions=subscriptions),
+                        console, interval=args.live, file_logger=file_logger).start()
     stop = threading.Event()
 
     def loop():
@@ -212,6 +268,9 @@ def main(argv=None):
                 log.info("dados UDP: recebidos=%d encaminhados=%d descartados=%d (RPF=%d)",
                          forwarder.received, forwarder.forwarded, forwarder.dropped,
                          forwarder.rpf_dropped)
+                if args.log_traffic:
+                    for line in forwarder.traffic.summary_lines():
+                        log.info("tráfego: %s", line)
     try:
         if args.gui:
             worker = threading.Thread(target=loop, daemon=True, name="ott-cli-loop")
@@ -224,6 +283,8 @@ def main(argv=None):
         pass
     finally:
         stop.set()
+        if live is not None:
+            live.stop()
         if status is not None:
             status.stop()
         for source in sources:

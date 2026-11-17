@@ -1,6 +1,7 @@
 # Executar a partir da raiz do projeto:
 # PYTHONPATH=src python3 -m unittest tests.test_routing -v
 
+import math
 import unittest
 import time
 import threading
@@ -88,6 +89,15 @@ class RoutingTableTest(unittest.TestCase):
 
     def test_get_missing_route_returns_none(self):
         self.assertIsNone(RoutingTable().get("S1", "filme_a"))
+
+    def test_path_info_reports_upstream_hops_and_delay(self):
+        table = RoutingTable()
+        self.assertIsNone(table.path_info("S1", "filme_a"))
+        route = table.put(RouteEntry(flow="filme_a", origin="S1", metric=3,
+                                     upstream="O3", delay=0.0012))
+        self.assertEqual(table.path_info("S1", "filme_a"), ("O3", 3, 0.0012))
+        route.upstream, route.metric, route.delay = None, math.inf, math.inf  # sem caminho
+        self.assertEqual(table.path_info("S1", "filme_a"), (None, None, None))
 
     def test_put_validates_entry_and_fields(self):
         table = RoutingTable()

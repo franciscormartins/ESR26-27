@@ -196,6 +196,36 @@ Exemplo: no servidor, acrescentar `--publish-flow filme_a`; no cliente, usar
 `--subscribe S1:filme_a`. Todos os nós intermédios têm de correr `ott` para encaminhar UDP.
 `--stats 2` mostra os vizinhos, as estatísticas RTP do cliente e os contadores do plano de dados.
 
+`--log-traffic` (2026-11-17) substitui os logs de rotas por um resumo de tráfego: quando um
+vizinho se desliga, o nó escreve, por cada fluxo que passou por esse vizinho, os pacotes
+recebidos e perdidos (buracos na sequência RTP dos pacotes aceites pelo RPF) e de/para que
+vizinhos foram, por exemplo:
+
+```
+tráfego (vizinho O7 saiu): S1:filme_a recebidos=1840 perdidos=3 (0.2%) | de: O2=1200, O7=640 | para: O8=1837
+```
+
+Os logs INFO de `ott.routing` ficam escondidos (voltam com `-v`); com `--stats`, o resumo de
+todos os fluxos sai também em cada intervalo. As perdas de uma troca de montante aparecem aqui.
+
+`--live` (2026-11-17) é a vista compacta para os ensaios: um bloco fixo, redesenhado a cada 2 s,
+com os recebidos, o ritmo, as perdas, o vizinho de onde vem cada fluxo (com os saltos e a
+latência até ao servidor), os destinos e a última troca de montante, por exemplo:
+
+```
+── O5 · 16:37:04 ─────────────────────────────
+O1:filme_a    1840 pacotes    20/s  0 perdidos
+   vem de O3 (3 saltos desde O1, 1.2 ms) → [O5] → O10, O11
+   mudou às 16:37:02 (antes vinha de O7, 3 saltos)
+O1:filme_b     900 pacotes    20/s  0 perdidos
+   vem de O7 (3 saltos desde O1, 1.1 ms) → [O5] → O11
+```
+
+Cada nó só conhece o vizinho de montante e a distância (`metric`, `delay` dos anúncios), não o
+caminho completo; o caminho reconstrói-se seguindo o `vem de` de nó em nó. Os eventos
+(vizinhos, `subscrito a`, `passa a vir de O3 ...`) aparecem por cima do bloco.
+`--log-dir PASTA` grava o log, com uma linha por fluxo em cada intervalo, em `PASTA/ott-<ID>.log`.
+
 ## Revisão de 2026-11-09: decisões e próximos passos
 
 Uma revisão do código face ao enunciado (pág. 2-4) encontrou o defeito acima e as lacunas

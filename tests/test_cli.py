@@ -29,6 +29,25 @@ class RouteTtlOptionTest(unittest.TestCase):
         self.assertEqual(args.announce_interval, 5.0)
 
 
+class LiveOptionTest(unittest.TestCase):
+    def test_live_defaults_to_two_seconds(self):
+        parser = cli.build_parser()
+        self.assertIsNone(parser.parse_args([]).live)
+        self.assertEqual(parser.parse_args(["--live"]).live, 2.0)
+        self.assertEqual(parser.parse_args(["--live", "0.5"]).live, 0.5)
+
+    def test_live_interval_is_validated(self):
+        for value in ("0", "-1", "nan", "inf"):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                cli.main(["--live", value])
+
+    def test_log_dir_number_can_be_the_last_argument(self):
+        args = cli.build_parser().parse_args(
+            ["-i", "O5", "-b", "10.0.18.20", "--live", "--log-dir", "/x/2026-11-17-3"])
+        self.assertEqual((args.live, args.log_dir, args.neighbors),
+                         (2.0, "/x/2026-11-17-3", []))
+
+
 class GuiOptionTest(unittest.TestCase):
     def test_gui_needs_a_subscription(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

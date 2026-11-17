@@ -189,6 +189,20 @@ class RoutingTable:
             route = self.routes.get((origin, flow))
             return None if route is None else route.upstream
 
+    def path_info(self, origin, flow):
+        """Resumo só de leitura da rota: ``(montante, saltos, atraso)`` ou ``None``.
+
+        ``saltos`` é a distância em saltos overlay desde a origem e ``atraso``
+        a latência acumulada (s); ambos ``None`` quando a rota não tem caminho.
+        """
+        with self._lock:
+            route = self.routes.get((origin, flow))
+            if route is None:
+                return None
+            hops = route.metric if math.isfinite(route.metric) else None
+            delay = route.delay if math.isfinite(route.delay) else None
+            return route.upstream, (None if hops is None else int(hops)), delay
+
     def has_local_subscription(self, origin, flow):
         """Indica se este nó tem um cliente local subscrito ao fluxo."""
         with self._lock:

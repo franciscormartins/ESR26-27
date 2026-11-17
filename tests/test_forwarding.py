@@ -3,7 +3,7 @@
 import socket
 import unittest
 
-from ott.forwarding import OverlayForwarder
+from ott.forwarding import OverlayForwarder, TrafficStats
 from ott.routing import ACTIVE, RouteEntry, RoutingTable
 from ott.streaming.client import StreamReceiver
 from ott.streaming.rtp import RtpPacket, pack_data, unpack_data, unpack_data_hop
@@ -116,6 +116,43 @@ class StrictRpfTest(unittest.TestCase):
         self.send_from("U", 1, origin="A")
         self.assertTrue(wait_for(lambda: self.forwarder.rpf_dropped == 1))
         self.assertEqual(self.forwarder.forwarded, 0)
+
+    def test_traffic_counts_per_flow_and_neighbor(self):
+        self.send_from("X", 1)   # descartado por RPF
+        for seq in (1, 2, 5):    # 3 e 4 perdidos
+            self.send_from("U", seq)
+            self.assertEqual(self.received_at_downstream(), seq)
+        entry = self.forwarder.traffic.flows[("S1", "filme_a")]
+        self.assertEqual((entry.stats.received, entry.stats.lost), (3, 2))
+        self.assertEqual(entry.from_neighbor, {"U": 3})
+        self.assertEqual(entry.rpf_from, {"X": 1})
+        self.assertEqual(entry.sent_to, {"D": 3})
+        self.assertEqual(len(self.forwarder.traffic.summary_lines("D")), 1)
+
+
+class TrafficStatsTest(unittest.TestCase):
+    """Contadores de ``--log-traffic`` sem rede."""
+
+    def rtp(self, seq):
+        return RtpPacket(seq, 0, b"", ssrc=7)
+
+    def test_loss_from_sequence_gaps_and_sources(self):
+        traffic = TrafficStats()
+        for seq, nb in ((10, "U"), (11, "U"), (14, "X")):   # troca U->X perde 12 e 13
+            traffic.accepted("S1", "f", nb, self.rtp(seq), 0.0)
+        traffic.sent("S1", "f", "D")
+        traffic.rpf_dropped("S1", "f", "U")
+        [line] = traffic.summary_lines()
+        self.assertEqual(line, "S1:f recebidos=3 perdidos=2 (40.0%) | de: U=2, X=1 "
+                               "| para: D=1 | descartados RPF: U=1")
+
+    def test_summary_for_neighbor_only_lists_flows_through_it(self):
+        traffic = TrafficStats()
+        traffic.accepted("S1", "a", "U", self.rtp(1), 0.0)
+        traffic.accepted("S2", "b", "X", self.rtp(1), 0.0)
+        traffic.sent("S2", "b", "D")
+        self.assertEqual([l.split()[0] for l in traffic.summary_lines("D")], ["S2:b"])
+        self.assertEqual(traffic.summary_lines("Z"), [])
 
 
 if __name__ == "__main__":
