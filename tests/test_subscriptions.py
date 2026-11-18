@@ -137,6 +137,43 @@ class ManagerTest(unittest.TestCase):
         self.assertEqual(self.mgr.tick(), [(FLOW, "S2", "S1", "mais perto")])
         self.assertEqual((self.subscribers("S2"), self.subscribers("S1")), (set(), {self.node.id}))
 
+    def test_first_choice_waits_while_a_known_server_has_an_unmeasured_delay(self):
+        # CORE, cenário 5 (2026-11-18): a rota do S1 ainda trazia a ligação sem RTT (1 s) quando a do S2 já tinha sido
+        # recalculada; o C5 passou para o S2 (4 saltos, 1,4 ms) e ficou lá com o S1 a 0,6 ms.
+        del self.node.rtts["N1"]
+        self.learn("N1", "S1", delay=0.0003)                        # S1: 1 s + 0,3 ms (ligação por medir)
+        self.learn("N2", "S2", delay=0.0004)                        # S2: 1,4 ms, medido
+        sub = self.mgr.add(None, FLOW, self.rx)
+        self.assertEqual(self.mgr.tick(), [])                       # não escolhe o S2 por engano
+        self.assertIsNone(sub.current)
+        self.node.rtts["N1"] = 0.0006
+        self.learn("N1", "S1", epoch=2, delay=0.0003)               # S1: 0,6 ms, já medido
+        self.assertEqual(self.mgr.tick(), [(FLOW, None, "S1", "primeira escolha")])
+
+    def test_first_choice_happens_anyway_after_the_settle_time(self):
+        self.node.rtts = {}
+        self.learn("N1", "S1", delay=0.001)
+        self.learn("N2", "S2", delay=0.002)
+        sub = self.mgr.add(None, FLOW, self.rx)
+        self.assertEqual(self.mgr.tick(), [])                       # t = 0: nada medido
+        self.clock.now = self.mgr.settle
+        self.assertEqual(self.mgr.tick(), [(FLOW, None, "S1", "primeira escolha")])
+        self.assertEqual(sub.current, "S1")
+
+    def test_no_switch_for_a_closer_server_while_a_delay_is_unmeasured(self):
+        self.learn("N1", "S1", delay=0.010)
+        sub = self.mgr.add(None, FLOW, self.rx)
+        self.mgr.tick()
+        self.assertEqual(sub.current, "S1")                         # S1 a 11 ms, medido
+        del self.node.rtts["N1"]
+        self.learn("N1", "S1", epoch=2, delay=0.010)               # a rota do S1 fica com 1 s por medir
+        self.learn("N2", "S2", delay=0.001)                         # S2 a 2 ms
+        self.clock.now = 100
+        self.assertEqual(self.mgr.tick(), [])                       # 1 s não é uma medição: não troca
+        self.node.rtts["N1"] = 0.002
+        self.learn("N1", "S1", epoch=3, delay=0.010)               # S1 medido de novo: 11 ms
+        self.assertEqual(self.mgr.tick(), [(FLOW, "S1", "S2", "mais perto")])
+
     def test_fixed_subscription_waits_for_its_route(self):
         rx = StreamReceiver("S1", FLOW, listen=False)
         sub = self.mgr.add("S1", FLOW, rx)

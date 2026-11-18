@@ -197,10 +197,13 @@ receber e encaminhar os datagramas. `--stats S` mostra estatísticas de receçã
 mais do que um servidor (uma réplica, como o `filme_c` do cenário 5). Não há mensagens novas: as rotas continuam por
 `(servidor, fluxo)` e o cliente ativa **uma** delas com o `ACTIVATE` habitual. A escolha é local, no cliente
 (`src/ott/subscriptions.py`, `SubscriptionManager`), a partir de `RoutingTable.sources_of(fluxo)`: os servidores com
-caminho, do de menor latência acumulada para o pior (depois menos saltos e ID). O cliente escolhe o primeiro; se esse
+caminho, do de menor latência acumulada para o pior (depois menos saltos e ID). O cliente escolhe o primeiro, mas só
+quando a latência de todos os servidores conhecidos já está medida (sem ligações a valer o `unknown_link_delay` de 1 s)
+ou ao fim de 10 s: no arranque, uma rota ainda calculada com uma ligação por medir parecia muito pior do que é. Se esse
 deixar de ter caminho (`WITHDRAW`, queda do montante sem alternativa, rota esquecida) e outro tiver, ativa a rota do outro,
 passa-lhe o recetor local e desativa a antiga (*failover*, sem esperar). Com os dois alcançáveis só troca se o outro for
-melhor acima da histerese da seleção de rotas (`RoutingTable.delay_better`) e se a última troca foi há pelo menos 5 s.
+melhor acima da histerese da seleção de rotas (`RoutingTable.delay_better`), com as duas latências medidas, e se a
+última troca foi há pelo menos 5 s.
 Sem nenhum alcançável, mantém o pedido ao último (pendente na tabela, retoma sozinho). O vídeo continua no mesmo recetor;
 o servidor novo tem outro SSRC, por isso a troca conta como um recomeço (`reinicios`) e não como perdas.
 

@@ -4,8 +4,8 @@
 > ler. O `filme_c` é publicado pelos dois servidores e o C1 e o C5 subscrevem-no **sem servidor fixo** (D38): cada um usa
 > o servidor mais perto e passa para o outro se esse deixar de ter caminho. Ficheiros: `topologies/cenario5.xml` (CORE), `topologies/cenario5.json` (overlay), `topologies/cenario5.plano.json`
 > (o que corre em cada nó, para o `ottctl`) e `topologies/gerar_cenario5.py` (gera os três; para mudar a topologia edita as
-> tabelas do programa e volta a corrê-lo). Coerência testada em `tests/test_topologias.py` (`Scenario5Test`). Ensaiado só
-> em localhost (nós reais, `ottctl --backend local`); **ainda não foi aberto no CORE**.
+> tabelas do programa e volta a corrê-lo). Coerência testada em `tests/test_topologias.py` (`Scenario5Test`). **Ensaiado no
+> CORE em 2026-11-18** (logs `ott-logs/cenario5/2026-11-18-2`): os 9 ensaios passaram; resultados em `docs/ETAPA2.md`.
 
 ## 1. Topologia
 
@@ -36,7 +36,7 @@ Caminhos esperados no CORE (métrica: latência acumulada; os 10 ms afastam o tr
 | `filme_c` (qualquer) | C5 | do **S1**, o mais perto: S1 → O1 → C5 |
 | `filme_c` (qualquer) | C1 | do S1 (S1 → O1 → O5) ou do S2 (S2 → O4 → O5): 2 saltos sem atraso nos dois, ganha o de menor RTT |
 | `S2:filme_d` | C3, C4 | S2 → O3 → O6 → C3, C4 (uma só cópia até ao O6) |
-| `filme_c` sem o S1 (ensaio 8) | C5 | S2 → O3 → O2 → O1 → C5 (4 saltos, evita os 10 ms do O4 → O1) |
+| `filme_c` sem o S1 (ensaio 8) | C5 | S2 → O4 → O5 → O1 → C5 ou S2 → O3 → O2 → O1 → C5 (4 saltos, evita os 10 ms do O4 → O1) |
 
 **Overlay** (14 nós, o id overlay é igual ao nome do nó no CORE):
 
@@ -152,11 +152,12 @@ Arrancar todos menos o O7; esperar 60 s.
 - Cada nó liga-se exatamente aos vizinhos da tabela da secção 1.
 - Os 5 clientes recebem os seus fluxos a 20/s (5 fluxos, de dois servidores; o `filme_c` existe nos dois).
 - Uma só cópia do `filme_a` no troço O1→O5, apesar de o C1 e o C2 o receberem; no **r7**:
-  `timeout 10 tcpdump -ni eth0 -q udp port 6000 2>/dev/null | wc -l` → ≈ 200 (um fluxo a 20/s).
+  `timeout --foreground 10 tcpdump -ni eth0 -q udp port 6000 2>/dev/null | wc -l` → ≈ 200 (um fluxo a 20/s).
 - Tabela de rotas: no painel (*Rotas*) ou no bloco `--live`; o S1 e o S2 mostram cada fluxo `ativo` com os seus destinos.
 
 ### 2. Réplica: cada cliente escolhe o servidor mais perto
-Só observar. No log do **C5**: `subscrito a filme_c: escolhido o servidor S1` (S1 → O1 → C5, 2 saltos, contra 4 até ao
+Só observar. A escolha espera que as latências estejam medidas (até ≈ 5–10 s depois de o cliente arrancar), por isso o
+`filme_c` do C1 e do C5 começa um pouco depois dos outros fluxos. No log do **C5**: `subscrito a filme_c: escolhido o servidor S1` (S1 → O1 → C5, 2 saltos, contra 4 até ao
 S2). No **C1**: o servidor escolhido para o `filme_c` (S1 ou S2: os dois a 2 saltos sem atraso; ganha o de menor RTT). No
 bloco `--live` de cada um, o `filme_c` aparece com o servidor em uso (`S1:filme_c` ou `S2:filme_c`). Só esse servidor emite
 o `filme_c` para esse cliente: o outro não lhe abre ramo.
@@ -209,15 +210,15 @@ Ctrl-C no **S1**; 30 s; relançar o S1 (mesmo comando); 60 s.
 Esperado:
 - o `filme_a` (C1, C2) e o `filme_b` (C3) param até o S1 voltar: só o S1 os publica;
 - o **C5 passa o `filme_c` para o S2** em ≈ 1 s e continua a ver o vídeo (1 recomeço, sem perdas). No bloco do **O1**, o
-  `S2:filme_c` vem **do O2** (S2 → O3 → O2 → O1, 3 saltos desde o S2, ≈ 1–2 ms) e não do O4 (2 saltos, mas 10 ms):
-  é a métrica de latência a escolher o caminho com mais saltos;
+  `S2:filme_c` vem **do O5** (S2 → O4 → O5 → O1) ou **do O2** (S2 → O3 → O2 → O1), 3 saltos sem atraso, e não do O4
+  (2 saltos, mas 10 ms): é a métrica de latência a escolher o caminho com mais saltos (no CORE veio do O5);
 - se o C1 recebia o `filme_c` do S1, passa também para o S2;
 - com o S1 de volta, o `filme_a` e o `filme_b` regressam em ≈ 1–3 s; o C5 fica no S2 se o ganho de voltar ao S1 for
   menor do que a histerese (1 ms), ou volta ao S1 se for maior (no mínimo 5 s depois da troca anterior).
 
 ### 9. Entrada dinâmica de um nó (suplente O7)
 Ctrl-C no **O1** e no **O4** (o O5 perde as duas subidas: C1, C2 e C5 sem vídeo); esperar 20 s.
-Arrancar o **O7** (no r9):
+Arrancar o **O7** (no host O7, ligado ao r9):
 ```sh
 cd /home/luis/uni/esr/tp2/ESR26-27 && ./bin/ott -i O7 -b 10.0.14.20 --live --log-traffic --log-dir /home/luis/uni/esr/tp2/ott-logs/cenario5/$(date +%F)-1
 ```

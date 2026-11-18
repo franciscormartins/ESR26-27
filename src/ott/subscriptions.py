@@ -5,13 +5,16 @@ conhecida, como sempre. Uma subscrição só ``FLUXO`` (o mesmo filme publicado 
 mais do que um servidor, por exemplo) escolhe o servidor:
 
 * o primeiro é o de menor latência entre os que têm caminho para o fluxo
-  (``RoutingTable.sources_of``);
+  (``RoutingTable.sources_of``), escolhido só quando a latência de todos os
+  servidores conhecidos já está medida (ou ao fim de ``settle`` segundos): no
+  arranque, uma rota ainda calculada com uma ligação sem RTT (1 s) parecia muito
+  pior do que é e o cliente escolhia o servidor errado (cenário 5 no CORE);
 * se o servidor escolhido deixa de ter caminho (``WITHDRAW``, rota esquecida) e
   outro tem, passa para esse (*failover*): ativa a rota nova, muda o recetor
   local e desativa a antiga;
-* com os dois servidores alcançáveis, só troca se o outro for melhor acima da
-  histerese da seleção de rotas e se a última troca foi há mais de ``min_hold``
-  segundos (evita oscilações);
+* com os dois servidores alcançáveis, só troca se as duas latências estiverem
+  medidas, se o outro for melhor acima da histerese da seleção de rotas e se a
+  última troca foi há mais de ``min_hold`` segundos (evita oscilações);
 * sem nenhum servidor alcançável, mantém o pedido ao último (a rota fica
   pendente na tabela e volta sozinha quando o caminho for reaprendido).
 
@@ -50,6 +53,7 @@ class Subscription:
         self.active = False            # o pedido está registado na tabela de rotas
         self.switches = 0
         self.last_switch = None
+        self.first_seen = None         # quando apareceu o primeiro servidor (espera pela primeira escolha)
         if not self.fixed:
             receiver.subscription = flow
 
@@ -62,13 +66,14 @@ class SubscriptionManager:
     """Mantém as subscrições locais de um nó; ``tick`` corre numa thread própria."""
 
     def __init__(self, node, routing_table, forwarder, subscriber_id=None, poll=0.25, min_hold=5.0,
-                 clock=time.monotonic):
+                 settle=10.0, clock=time.monotonic):
         self.node = node
         self.table = routing_table
         self.forwarder = forwarder
         self.subscriber_id = subscriber_id
         self.poll = poll
         self.min_hold = min_hold
+        self.settle = settle
         self.clock = clock
         self.subs = []
         self._lock = threading.RLock()
@@ -138,6 +143,10 @@ class SubscriptionManager:
             sub.active = True
             log.info("subscrito a %s:%s", sub.current, sub.flow)
 
+    def _measured(self, delay):
+        """A latência da rota já não inclui ligações sem RTT medido (que valem ``unknown_link_delay``)."""
+        return delay < getattr(self.table, "unknown_link_delay", float("inf"))
+
     def _tick_any(self, sub):
         sources = self.table.sources_of(sub.flow, node_id=self.node.id)
         if not sources:
@@ -145,10 +154,17 @@ class SubscriptionManager:
         best, best_delay, _hops = sources[0]
         reachable = {origin: delay for origin, delay, _h in sources}
         if sub.current is None:
+            now = self.clock()
+            if sub.first_seen is None:
+                sub.first_seen = now
+            if not all(self._measured(d) for d in reachable.values()) and now - sub.first_seen < self.settle:
+                return None                # espera que as latências deixem de ser provisórias
             return self._switch(sub, best, "primeira escolha")
         if sub.current not in reachable:
             return self._switch(sub, best, f"{sub.current} sem caminho")
-        if best != sub.current and self.table.delay_better(best_delay, reachable[sub.current]) \
+        current_delay = reachable[sub.current]
+        if best != sub.current and self._measured(best_delay) and self._measured(current_delay) \
+                and self.table.delay_better(best_delay, current_delay) \
                 and (sub.last_switch is None or self.clock() - sub.last_switch >= self.min_hold):
             return self._switch(sub, best, "mais perto")
         return None
