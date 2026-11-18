@@ -193,6 +193,17 @@ Na CLI, `--publish-flow ID` anuncia e publica o MJPEG desse fluxo; `--subscribe
 SERVIDOR:FLUXO` ativa a subscrição. Todos os nós do caminho têm de executar `ott` para
 receber e encaminhar os datagramas. `--stats S` mostra estatísticas de receção e encaminhamento.
 
+**Subscrição sem servidor fixo (D38).** `--subscribe FLUXO` (sem `SERVIDOR:`) pede um fluxo que pode ser publicado por
+mais do que um servidor (uma réplica, como o `filme_c` do cenário 5). Não há mensagens novas: as rotas continuam por
+`(servidor, fluxo)` e o cliente ativa **uma** delas com o `ACTIVATE` habitual. A escolha é local, no cliente
+(`src/ott/subscriptions.py`, `SubscriptionManager`), a partir de `RoutingTable.sources_of(fluxo)`: os servidores com
+caminho, do de menor latência acumulada para o pior (depois menos saltos e ID). O cliente escolhe o primeiro; se esse
+deixar de ter caminho (`WITHDRAW`, queda do montante sem alternativa, rota esquecida) e outro tiver, ativa a rota do outro,
+passa-lhe o recetor local e desativa a antiga (*failover*, sem esperar). Com os dois alcançáveis só troca se o outro for
+melhor acima da histerese da seleção de rotas (`RoutingTable.delay_better`) e se a última troca foi há pelo menos 5 s.
+Sem nenhum alcançável, mantém o pedido ao último (pendente na tabela, retoma sozinho). O vídeo continua no mesmo recetor;
+o servidor novo tem outro SSRC, por isso a troca conta como um recomeço (`reinicios`) e não como perdas.
+
 ### 3.7 Escolha do caminho e reação a falhas (Etapa 2)
 
 **Métrica (D34).** A rota escolhe-se pela **menor latência acumulada** até ao servidor; o
@@ -318,6 +329,9 @@ clientes ──ACTIVATE──> ... ──> S1                                   
 
 ## 6. Limitações conhecidas
 
+- Subscrição sem servidor fixo (D38): o cliente só troca de servidor quando o seu deixa de ter caminho na tabela de
+  rotas, por isso uma falha que não chega ao controlo (o servidor deixa de emitir mas continua a anunciar) não provoca a
+  troca; o vídeo dos dois servidores tem de ser o mesmo conteúdo com o mesmo nome de fluxo (o sistema não o verifica).
 - Cada nó tem **um só endereço** no ficheiro de topologia; um nó com várias interfaces (router) só
   é contactável pelo IP escolhido. Funciona porque basta um lado alcançar o outro.
 - O bootstrapper só sabe que um nó está vivo porque se registou ou pediu substitutos; não o expira.

@@ -8,7 +8,8 @@
       "serve": true,
       "publish": [
         "filme_a",
-        "filme_b"
+        "filme_b",
+        "filme_c"
       ]
     },
     "S2": {
@@ -30,7 +31,7 @@
     "C1": {
       "subscribe": [
         "S1:filme_a",
-        "S2:filme_c"
+        "filme_c"
       ]
     },
     "C2": {
@@ -51,7 +52,7 @@
     },
     "C5": {
       "subscribe": [
-        "S2:filme_c"
+        "filme_c"
       ]
     }
   }

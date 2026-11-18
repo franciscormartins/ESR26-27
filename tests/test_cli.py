@@ -78,5 +78,23 @@ class PublishFlowOptionTest(unittest.TestCase):
         self.assertEqual(args.publish_flow, ["filme_a", "filme_b=b.Mjpeg"])
 
 
+class SubscribeOptionTest(unittest.TestCase):
+    """``--subscribe SERVIDOR:FLUXO`` ou só ``FLUXO`` (D38); validado antes de abrir sockets."""
+
+    def assert_rejected(self, *argv):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            cli.main(list(argv))
+
+    def test_malformed_values_are_rejected(self):
+        for value in ("S1:", ":filme_a", "S1:a:b", "*", "*:filme_a"):
+            with self.subTest(value=value):
+                self.assert_rejected("--subscribe", value)
+
+    def test_repeated_or_overlapping_subscriptions_are_rejected(self):
+        self.assert_rejected("--subscribe", "S1:filme_a", "--subscribe", "S1:filme_a")
+        self.assert_rejected("--subscribe", "filme_c", "--subscribe", "filme_c")
+        self.assert_rejected("--subscribe", "filme_c", "--subscribe", "S2:filme_c")
+
+
 if __name__ == "__main__":
     unittest.main()

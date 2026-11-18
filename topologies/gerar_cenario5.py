@@ -47,7 +47,7 @@ HOSTS = {
     "O1": ("r3", (330, 140)), "O2": ("r4", (330, 610)),
     "O3": ("r5", (670, 610)), "O4": ("r6", (670, 140)),
     "O5": ("r7", (500, 95)), "O6": ("r8", (500, 655)), "O7": ("r9", (590, 375)),
-    "C1": ("r7", (400, 70)), "C2": ("r7", (600, 70)),
+    "C1": ("r7", (360, 70)), "C2": ("r7", (640, 70)),
     "C3": ("r8", (400, 690)), "C4": ("r8", (600, 690)),
     "C5": ("r3", (210, 150)),
 }
@@ -68,17 +68,18 @@ OVERLAY = [
     ("O7", "O5"), ("O7", "O6"),
     ("C1", "O5"), ("C2", "O5"), ("C3", "O6"), ("C4", "O6"), ("C5", "O1"),
 ]
-# o que corre em cada nó: dois servidores com dois fluxos distintos cada; os clientes cobrem os quatro fluxos e
-# partilham ramos (C1 e C2 o filme_a, C3 e C4 o filme_d)
+# o que corre em cada nó: dois servidores com pelo menos dois fluxos distintos cada; o filme_c é publicado pelos dois
+# (réplica) e o C1 e o C5 subscrevem-no sem servidor fixo (D38): cada um usa o servidor mais perto e passa para o
+# outro se esse cair. Os clientes partilham ramos (C1 e C2 o filme_a, C3 e C4 o filme_d).
 PLAN = {
-    "S1": {"serve": True, "publish": ["filme_a", "filme_b"]},
+    "S1": {"serve": True, "publish": ["filme_a", "filme_b", "filme_c"]},
     "S2": {"serve": True, "publish": ["filme_c", "filme_d"]},
     "O1": {}, "O2": {}, "O3": {}, "O4": {}, "O5": {}, "O6": {}, "O7": {"spare": True},
-    "C1": {"subscribe": ["S1:filme_a", "S2:filme_c"]},
+    "C1": {"subscribe": ["S1:filme_a", "filme_c"]},
     "C2": {"subscribe": ["S1:filme_a"]},
     "C3": {"subscribe": ["S1:filme_b", "S2:filme_d"]},
     "C4": {"subscribe": ["S2:filme_d"]},
-    "C5": {"subscribe": ["S2:filme_c"]},
+    "C5": {"subscribe": ["filme_c"]},
 }
 ORDER = ["S1", "S2", "O1", "O2", "O3", "O4", "O5", "O6", "O7", "C1", "C2", "C3", "C4", "C5"]
 
@@ -138,8 +139,8 @@ def overlay_json(ifaces):
         neighbors.setdefault(b, []).append(a)
     assert sorted(ORDER) == sorted(neighbors), "OVERLAY e a lista de nós não coincidem"
     return {
-        "_comment": ("Cenário 5 (dois servidores, anel com acessos): S1 publica filme_a e filme_b; S2 publica filme_c e "
-                     "filme_d. Anel O1-O2-O3-O4 com os servidores em lados opostos, acessos O5 (C1, C2) e O6 (C3, C4), "
+        "_comment": ("Cenário 5 (dois servidores, anel com acessos): S1 publica filme_a, filme_b e filme_c; S2 publica "
+                     "filme_c e filme_d (filme_c é uma réplica). Anel O1-O2-O3-O4 com os servidores em lados opostos, acessos O5 (C1, C2) e O6 (C3, C4), "
                      "C5 no O1 e O7 suplente entre O5 e O6. A ligação O1-O4 tem 10 ms no underlay. O id overlay é igual "
                      "ao nome do nó no CORE. Gerado por topologies/gerar_cenario5.py; ver docs/CENARIO5.md."),
         "nodes": {n: {"host": ifaces[n][0][1], "core": n, "neighbors": sorted(neighbors[n])} for n in ORDER},
@@ -217,8 +218,10 @@ def draw():
     """Escreve docs/img/cenario5-underlay.svg e docs/img/cenario5-overlay.svg."""
     img = os.path.join(os.path.dirname(HERE), "docs", "img")
     os.makedirs(img, exist_ok=True)
-    flows = {n: ", ".join(f.split(":")[-1] for f in (i.get("publish") or i.get("subscribe") or []))
-             for n, i in PLAN.items()}
+    flows = {}
+    for n, i in PLAN.items():
+        flows[n] = ", ".join(f if i.get("publish") else (f.split(":")[1] if ":" in f else f + " (qualquer)")
+                             for f in (i.get("publish") or i.get("subscribe") or []))
     hosts = {h: (x, y, "") for h, (_r, (x, y)) in HOSTS.items()}
     routers = {r: (x, y, "") for r, (_n, (x, y)) in ROUTERS.items()}
     under_edges = [(a, b, "10 ms" if d else "", "lento" if d else "normal") for a, b, d in ROUTER_LINKS]

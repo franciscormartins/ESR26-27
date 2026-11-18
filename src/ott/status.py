@@ -142,7 +142,8 @@ class StatusWriter:
         _pending, active = self.subscriptions()
         active = {tuple(k) for k in active}
         flows = []
-        for (origin, flow), rx in sorted(self.receivers.items()):
+        receivers = self.receivers() if callable(self.receivers) else self.receivers
+        for (origin, flow), rx in sorted(receivers.items()):
             st = rx.stats
             name = f"{origin}:{flow}"
             prev = self._prev_flows.get(name)
@@ -171,7 +172,8 @@ class StatusWriter:
                           "received": st.received, "lost": st.lost, "late": st.late,
                           "loss_pct": round(st.loss_ratio() * 100, 2), "jitter_ms": round(st.jitter * 1000, 2),
                           "restarts": st.restarts, "rate": round(rate, 1),
-                          "idle_s": round(now - prev["last_rx"], 1), "stalled": prev["stalled"]})
+                          "idle_s": round(now - prev["last_rx"], 1), "stalled": prev["stalled"],
+                          "subscription": getattr(rx, "subscription", None)})
         return flows
 
     def snapshot(self):

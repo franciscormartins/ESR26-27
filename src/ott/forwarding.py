@@ -117,9 +117,12 @@ class OverlayForwarder:
         self.traffic = TrafficStats()
 
     def set_local_receiver(self, origin, flow, receiver):
-        """Associa um consumidor local, por exemplo o descodificador RTP."""
+        """Associa um consumidor local, por exemplo o descodificador RTP; ``None`` retira-o."""
         with self._lock:
-            self._local_receivers[(origin, flow)] = receiver
+            if receiver is None:
+                self._local_receivers.pop((origin, flow), None)
+            else:
+                self._local_receivers[(origin, flow)] = receiver
 
     def start(self):
         if not self._thread.is_alive():

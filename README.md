@@ -52,7 +52,8 @@ node.rtt(id)                               # RTT em segundos (média móvel) ou 
 
 Opções úteis: `--min-neighbors X` (pede substitutos se ficar com menos de X vizinhos),
 `--stats S` (vizinhos, RTT e estatísticas UDP), `--live [S]` (bloco fixo redesenhado a cada S s, 2 por omissão: por fluxo, recebidos, ritmo, perdidos, vizinho de onde vem com saltos e latência, destinos e última troca), `--log-dir PASTA` (grava o log em `PASTA/ott-<ID>.log`), `--log-traffic` (ao sair um vizinho, pacotes recebidos/perdidos por fluxo e de/para que vizinhos, em vez dos logs de rotas), `--publish-flow ID[=VIDEO]` (pode repetir-se; cada fluxo pode ter o seu ficheiro MJPEG, p.ex. `filme_b=/tmp/b.Mjpeg`; `tools/gerar_video_teste.py` gera um segundo vídeo de teste) e `--gui` (janela com o vídeo do primeiro `--subscribe`),
-`--subscribe SERVIDOR:FLUXO` (pode repetir-se), `--video FICHEIRO`, `--fps N`,
+`--subscribe SERVIDOR:FLUXO` (pode repetir-se; só `--subscribe FLUXO` escolhe o servidor mais perto entre os que
+publicam esse fluxo e passa para outro se esse deixar de ter caminho, D38), `--video FICHEIRO`, `--fps N`,
 `--announce-interval S` (5 s; usar o mesmo em todos os nós) e `--route-ttl S` (esquecer
 caminhos sem anúncios há S segundos; por omissão 6 × o intervalo).
 Todos os nós do caminho overlay têm de executar `ott`; os dados usam UDP na porta 6000,

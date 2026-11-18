@@ -85,7 +85,8 @@ ações marcadas no tempo (histórico amostrado a 1 Hz no servidor, `/api/histor
    de rotas, os fluxos e os contadores do plano de dados, e uma lista de **eventos relevantes** (vizinho que cai ou volta, rota nova,
    montante que muda, rota sem caminho, `WITHDRAW`, fluxo que pára ou volta). Os nós do CORE partilham o sistema de ficheiros do
    anfitrião, por isso não é preciso rede para o ler.
-2. **O plano** (`topologies/<cenário>.plano.json`) diz o que corre em cada nó: servidor, fluxos publicados, subscrições, suplentes.
+2. **O plano** (`topologies/<cenário>.plano.json`) diz o que corre em cada nó: servidor, fluxos publicados, subscrições (`SERVIDOR:FLUXO`, ou só `FLUXO` para usar
+   qualquer servidor que o publique, D38), suplentes.
    O do cenário 4 sai do `gerar_cenario4.py`.
 3. **O orquestrador** (`src/ott/ctl/`) monta a linha de comandos do `ott` de cada nó e lança-a no modo escolhido.
 

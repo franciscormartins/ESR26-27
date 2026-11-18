@@ -203,6 +203,27 @@ class RoutingTable:
             delay = route.delay if math.isfinite(route.delay) else None
             return route.upstream, (None if hops is None else int(hops)), delay
 
+    def sources_of(self, flow, node_id=None):
+        """Servidores com caminho para ``flow``, do preferido para o pior (D38).
+
+        Devolve ``[(origem, atraso, saltos)]`` ordenado por menor latência
+        acumulada, depois menos saltos e depois ID; ``atraso`` é ``inf`` se a
+        rota ainda não o conhece. Só entram rotas com montante (um caminho
+        válido); ``node_id`` exclui os fluxos que este próprio nó publica.
+        Só leitura: serve para escolher o servidor de uma subscrição sem
+        servidor fixo.
+        """
+        with self._lock:
+            found = [(origin, route.delay, int(route.metric))
+                     for (origin, name), route in self.routes.items()
+                     if name == flow and origin != node_id and route.upstream is not None
+                     and math.isfinite(route.metric)]
+        return sorted(found, key=lambda s: (s[1], s[2], s[0]))
+
+    def delay_better(self, new, current):
+        """``new`` é melhor do que ``current`` acima da histerese da seleção (s)."""
+        return self._delay_better(new, current)
+
     def has_local_subscription(self, origin, flow):
         """Indica se este nó tem um cliente local subscrito ao fluxo."""
         with self._lock:

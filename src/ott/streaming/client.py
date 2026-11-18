@@ -109,8 +109,9 @@ class StreamReceiver:
 
     def __init__(self, origin, flow, port=DATA_PORT, bind="0.0.0.0", on_frame=None,
                  listen=True):
-        self.origin = origin
+        self.origin = origin       # servidor de onde se aceitam pacotes (None: nenhum, ainda)
         self.flow = flow
+        self.subscription = None   # nome da subscrição sem servidor fixo (D38), se for o caso
         self.on_frame = on_frame or (lambda frame, rtp: None)
         self.stats = StreamStats()
         self.sock = None

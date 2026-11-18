@@ -12,6 +12,8 @@ Opções úteis nos testes:
   --route-ttl S       esquecer rotas sem anúncios há S segundos (default: 6 x intervalo)
   --stats SEGUNDOS    escreve periodicamente os vizinhos e o RTT de cada um
   --subscribe S:F     subscreve o fluxo F do servidor S (repetível)
+  --subscribe F       subscreve o fluxo F de qualquer servidor que o publique: escolhe o mais perto
+                      e passa para outro se esse deixar de ter caminho (D38)
   --gui               mostra o vídeo da primeira subscrição numa janela
   --live [S]          bloco fixo na consola, redesenhado a cada S s (default 2): por fluxo,
                       pacotes recebidos e perdidos, vizinho de onde vêm (saltos), destinos e trocas
@@ -40,6 +42,7 @@ from .protocol import DEFAULT_PORT
 from .routing import AnnouncementPublisher, RoutingTable
 from .status import StatusWriter
 from .streaming.client import FrameSaver, StreamReceiver, run_gui
+from .subscriptions import SubscriptionManager, parse_subscription
 from .streaming.server import DATA_PORT, StreamSource
 
 
@@ -74,8 +77,9 @@ def build_parser():
     p.add_argument("--route-ttl", type=float, default=None, metavar="S",
                    help="tempo sem anúncios ao fim do qual um caminho é esquecido "
                         "(default: 6 x --announce-interval)")
-    p.add_argument("--subscribe", action="append", default=[], metavar="SERVIDOR:FLUXO",
-                   help="subscrever um fluxo anunciado por um servidor (opção repetível)")
+    p.add_argument("--subscribe", action="append", default=[], metavar="[SERVIDOR:]FLUXO",
+                   help="subscrever um fluxo (repetível); sem SERVIDOR escolhe o servidor mais perto que o "
+                        "publique e troca de servidor se ele deixar de ter caminho")
     p.add_argument("--subscriber-id", help="ID do cliente (por omissão usa o ID deste nó)")
     p.add_argument("--video", default=os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -100,7 +104,8 @@ def build_parser():
     p.add_argument("--log-dir", metavar="PASTA",
                    help="gravar também o log em PASTA/ott-<ID>.log (a pasta é criada)")
     p.add_argument("--frame-dir", metavar="PASTA",
-                   help="guardar aqui a imagem mais recente de cada subscrição (SERVIDOR_FLUXO.jpg), para o painel web mostrar o vídeo")
+                   help="guardar aqui a imagem mais recente de cada subscrição (SERVIDOR_FLUXO.jpg, ou any_FLUXO.jpg numa "
+                        "subscrição sem servidor), para o painel web mostrar o vídeo")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -142,16 +147,18 @@ def main(argv=None):
             raise SystemExit(f"vídeo do fluxo {flow} não encontrado: {video}")
     if not 1 <= args.data_port <= 65535:
         raise SystemExit("--data-port tem de estar entre 1 e 65535")
-    subscriptions = []
+    subscriptions = []                  # (servidor ou None, fluxo)
     for value in args.subscribe:
-        server_id, separator, flow = value.partition(":")
-        if not separator or not server_id or not flow:
-            raise SystemExit(f"--subscribe inválido: {value!r}; usa SERVIDOR:FLUXO")
-        subscriptions.append((server_id, flow))
+        try:
+            subscriptions.append(parse_subscription(value))
+        except ValueError as e:
+            raise SystemExit(f"--subscribe: {e}")
     if args.gui and not subscriptions:
         raise SystemExit("--gui precisa de pelo menos uma --subscribe")
-    if len(set(subscriptions)) != len(subscriptions):
-        raise SystemExit("--subscribe não pode repetir o mesmo servidor e fluxo")
+    for i, (server, flow) in enumerate(subscriptions):
+        for other, other_flow in subscriptions[:i]:
+            if flow == other_flow and (server is None or other is None or server == other):
+                raise SystemExit(f"--subscribe repete ou sobrepõe o fluxo {flow}")
     if not math.isfinite(args.status_interval) or args.status_interval <= 0:
         raise SystemExit("--status-interval tem de ser finito e maior que zero")
     if args.live is not None and (not math.isfinite(args.live) or args.live <= 0):
@@ -226,13 +233,13 @@ def main(argv=None):
             for line in lines:
                 log.info("tráfego (vizinho %s saiu): %s", neighbor, line)
         node.on_neighbor_down(traffic_on_down)
-    receivers = {}
-    for origin, flow in subscriptions:
-        receiver = StreamReceiver(origin, flow, port=args.data_port, listen=False,
-                                  on_frame=FrameSaver(os.path.join(args.frame_dir, f"{origin}_{flow}.jpg"))
+    manager = SubscriptionManager(node, routing_table, forwarder, subscriber_id=args.subscriber_id)
+    for server, flow in subscriptions:
+        frame = f"{server or 'any'}_{flow}.jpg"   # 'any': subscrição sem servidor fixo
+        receiver = StreamReceiver(server, flow, port=args.data_port, listen=False,
+                                  on_frame=FrameSaver(os.path.join(args.frame_dir, frame))
                                   if args.frame_dir else None)
-        receivers[(origin, flow)] = receiver
-        forwarder.set_local_receiver(origin, flow, receiver)
+        manager.add(server, flow, receiver)
 
     if publisher:
         publisher.start()
@@ -240,34 +247,27 @@ def main(argv=None):
     sources = [StreamSource(node.id, flow, video, forwarder.send,
                             fps=args.fps, loop=True).start()
                for flow, video in published]
-    pending_subscriptions = set(subscriptions)
-    active_subscriptions = set()
+    manager.start()
     if status is not None:
-        status.bind(forwarder, receivers, args.publish_flow,
-                    lambda: (set(pending_subscriptions), set(active_subscriptions)))
+        status.bind(forwarder, manager.receivers, args.publish_flow, manager.state)
         status.phase = "a correr"
 
     live = None
     if args.live is not None:
         live = LiveView(TrafficView(node.id, forwarder, routing_table,
                                     published=[flow for flow, _ in published],
-                                    subscriptions=subscriptions),
+                                    subscriptions=manager.keys),
                         console, interval=args.live, file_logger=file_logger).start()
     stop = threading.Event()
 
     def loop():
         while not stop.is_set():
             stop.wait(args.stats or 1)
-            for origin, flow in tuple(pending_subscriptions):
-                if routing_table.get(origin, flow) is not None and routing_table.activate(
-                        node, origin, flow, subscriber_id=args.subscriber_id):
-                    pending_subscriptions.discard((origin, flow))
-                    active_subscriptions.add((origin, flow))
-                    log.info("subscrito a %s:%s", origin, flow)
             if args.stats:
                 log.info("vizinhos: %s", node.describe_neighbors())
-                for key, receiver in receivers.items():
-                    if key in active_subscriptions:
+                _pending, active = manager.state()
+                for key, receiver in sorted(manager.receivers().items()):
+                    if key in active:
                         log.info("fluxo %s:%s: %s", key[0], key[1], receiver.stats)
                 log.info("dados UDP: recebidos=%d encaminhados=%d descartados=%d (RPF=%d)",
                          forwarder.received, forwarder.forwarded, forwarder.dropped,
@@ -279,8 +279,8 @@ def main(argv=None):
         if args.gui:
             worker = threading.Thread(target=loop, daemon=True, name="ott-cli-loop")
             worker.start()
-            origin, flow = subscriptions[0]
-            run_gui(receivers[(origin, flow)], f"OTT {args.id} - {origin}:{flow}")
+            first = manager.subs[0]
+            run_gui(first.receiver, f"OTT {args.id} - {first.name}")
         else:
             loop()
     except KeyboardInterrupt:
@@ -295,13 +295,11 @@ def main(argv=None):
             source.stop()
         for source in sources:
             source.join(timeout=2.0)
-        for origin, flow in active_subscriptions:
-            routing_table.deactivate(node, origin, flow,
-                                     subscriber_id=args.subscriber_id)
+        manager.stop()   # desativa as subscrições ativas
         if publisher:
             publisher.stop()
         forwarder.stop()
-        for receiver in receivers.values():
+        for receiver in (sub.receiver for sub in manager.subs):
             receiver.stop()
         routing_table.close()
         node.stop()

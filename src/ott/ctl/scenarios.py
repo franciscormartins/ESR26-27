@@ -33,7 +33,7 @@ def health(state, node):
 
 def flow(state, client, key):
     for f in status(state, client).get("flows", []):
-        if f"{f['origin']}:{f['flow']}" == key:
+        if f"{f['origin']}:{f['flow']}" == key or (f.get("subscription") and f["subscription"] == key):
             return f
     return None
 

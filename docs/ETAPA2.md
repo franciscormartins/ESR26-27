@@ -272,6 +272,9 @@ seguintes. Estado atual de cada uma:
 - [ ] 10. Segundo servidor (`S2`, 2 fluxos cada) em `cenario2.json` e `cenario3.json`.
   Alternativa (2026-11-18, D37): o cenário 5 (`docs/CENARIO5.md`) tem dois servidores com dois fluxos distintos cada e
   um ensaio por requisito mínimo; falta abri-lo no CORE.
+- [x] 14. Subscrição sem servidor fixo (D38, 2026-11-18): `--subscribe FLUXO` escolhe o servidor mais perto entre os que
+  publicam o fluxo e passa para outro se esse deixar de ter caminho. Testado em localhost (unitários e nós reais); falta o
+  CORE (ensaios 2, 7 e 8 do cenário 5).
 - [x] 12. Latência acumulada como métrica principal, com condição de viabilidade (D34,
   2026-11-10). Ensaios 4, 5, 6, 8 e 9 repetidos no CORE e ensaio 10 novo (`netem` torna mais
   rápido um caminho com mais saltos), todos passaram (2026-11-10, logs `2026-11-10-9` e

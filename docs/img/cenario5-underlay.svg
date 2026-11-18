@@ -26,8 +26,8 @@
 <line x1="500" y1="95" x2="500" y2="180" stroke="#555" stroke-width="2"/>
 <line x1="500" y1="655" x2="500" y2="570" stroke="#555" stroke-width="2"/>
 <line x1="590" y1="375" x2="500" y2="375" stroke="#888" stroke-width="2" stroke-dasharray="6 4"/>
-<line x1="400" y1="70" x2="500" y2="180" stroke="#555" stroke-width="2"/>
-<line x1="600" y1="70" x2="500" y2="180" stroke="#555" stroke-width="2"/>
+<line x1="360" y1="70" x2="500" y2="180" stroke="#555" stroke-width="2"/>
+<line x1="640" y1="70" x2="500" y2="180" stroke="#555" stroke-width="2"/>
 <line x1="400" y1="690" x2="500" y2="570" stroke="#555" stroke-width="2"/>
 <line x1="600" y1="690" x2="500" y2="570" stroke="#555" stroke-width="2"/>
 <line x1="210" y1="150" x2="330" y2="230" stroke="#555" stroke-width="2"/>
@@ -67,10 +67,10 @@
 <text x="500" y="660" font-size="15" font-weight="bold" text-anchor="middle" fill="#222">O6</text>
 <rect x="566" y="360" width="48" height="30" rx="5" fill="#f2f2f2" stroke="#888888" stroke-width="2" stroke-dasharray="5 3"/>
 <text x="590" y="380" font-size="15" font-weight="bold" text-anchor="middle" fill="#222">O7</text>
-<rect x="376" y="55" width="48" height="30" rx="5" fill="#dff3e0" stroke="#3a8d43" stroke-width="2"/>
-<text x="400" y="75" font-size="15" font-weight="bold" text-anchor="middle" fill="#222">C1</text>
-<rect x="576" y="55" width="48" height="30" rx="5" fill="#dff3e0" stroke="#3a8d43" stroke-width="2"/>
-<text x="600" y="75" font-size="15" font-weight="bold" text-anchor="middle" fill="#222">C2</text>
+<rect x="336" y="55" width="48" height="30" rx="5" fill="#dff3e0" stroke="#3a8d43" stroke-width="2"/>
+<text x="360" y="75" font-size="15" font-weight="bold" text-anchor="middle" fill="#222">C1</text>
+<rect x="616" y="55" width="48" height="30" rx="5" fill="#dff3e0" stroke="#3a8d43" stroke-width="2"/>
+<text x="640" y="75" font-size="15" font-weight="bold" text-anchor="middle" fill="#222">C2</text>
 <rect x="376" y="675" width="48" height="30" rx="5" fill="#dff3e0" stroke="#3a8d43" stroke-width="2"/>
 <text x="400" y="695" font-size="15" font-weight="bold" text-anchor="middle" fill="#222">C3</text>
 <rect x="576" y="675" width="48" height="30" rx="5" fill="#dff3e0" stroke="#3a8d43" stroke-width="2"/>

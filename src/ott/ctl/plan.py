@@ -5,12 +5,12 @@ CORE em ``<cenario>.xml``. Formato do plano::
 
     {"xml": "cenario4.xml", "overlay": "cenario4.json", "bootstrap": "S1",
      "nodes": {"S1": {"serve": true, "publish": ["filme_a"]},
-               "C1": {"subscribe": ["S1:filme_a"]},
+               "C1": {"subscribe": ["S1:filme_a", "filme_c"]},
                "O5": {"spare": true}},
      "free": ["L1", "L2"]}
 
 Campos de cada nó: ``core`` (nome do nó no CORE; por omissão o campo ``core`` do overlay ou o próprio id), ``serve``,
-``publish``, ``subscribe``, ``bootstrap`` (id do bootstrapper deste nó; por omissão o do plano; ``null`` = nenhum),
+``publish``, ``subscribe`` (``SERVIDOR:FLUXO`` ou só ``FLUXO``, qualquer servidor, D38), ``bootstrap`` (id do bootstrapper deste nó; por omissão o do plano; ``null`` = nenhum),
 ``neighbors`` (ids dos vizinhos, estratégia 1), ``core_bootstrap`` e ``core_neighbors`` (endereços a usar no CORE,
 quando o IP do ficheiro overlay não serve: ligações diretas sem rotas), ``spare`` (só arranca se pedido) e ``extra``
 (argumentos acrescentados à linha de comandos do ``ott``).
@@ -77,8 +77,11 @@ class Plan:
             raise PlanError(f"{self.name}: bootstrapper {self.bootstrap} não está no plano")
         for n in self.nodes.values():
             for sub in n.subscribe:
-                server, _, flow = sub.partition(":")
-                if flow not in publishes.get(server, ()):
+                server, sep, flow = sub.partition(":")
+                if not sep:   # só o fluxo (D38): basta um servidor publicá-lo
+                    if not any(sub in flows for flows in publishes.values()):
+                        raise PlanError(f"{self.name}: {n.id} subscreve {sub}, que ninguém publica")
+                elif flow not in publishes.get(server, ()):
                     raise PlanError(f"{self.name}: {n.id} subscreve {sub}, que ninguém publica")
             for peer in n.neighbors:
                 if peer not in self.nodes:

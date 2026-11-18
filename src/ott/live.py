@@ -103,7 +103,7 @@ class TrafficView:
         self.forwarder = forwarder
         self.table = routing_table
         self.published = list(published)
-        self.subscriptions = list(subscriptions)
+        self.subscriptions = subscriptions if callable(subscriptions) else list(subscriptions)
         self.clock = clock
         self.wall = wall
         self._rate = {}        # fluxo -> (contagem, instante)
@@ -111,7 +111,8 @@ class TrafficView:
         self._change = {}      # fluxo -> (hora, montante anterior, saltos anteriores)
 
     def _keys(self, counts):
-        keys = set(counts) | set(self.subscriptions)
+        subs = self.subscriptions() if callable(self.subscriptions) else self.subscriptions
+        keys = set(counts) | set(subs)
         keys |= {(self.node_id, flow) for flow in self.published}
         return sorted(keys)
 

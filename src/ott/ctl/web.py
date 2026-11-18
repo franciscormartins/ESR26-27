@@ -111,8 +111,9 @@ class Controller:
                 continue
             for f in st.get("flows", []):
                 if f["active"]:
-                    rates[f"{node['id']}|{f['origin']}:{f['flow']}"] = f["rate"]
-                    jitter[f"{node['id']}|{f['origin']}:{f['flow']}"] = f["jitter_ms"]
+                    key = f.get("subscription") or f"{f['origin']}:{f['flow']}"   # sem servidor fixo: pelo fluxo
+                    rates[f"{node['id']}|{key}"] = f["rate"]
+                    jitter[f"{node['id']}|{key}"] = f["jitter_ms"]
             for n in st.get("neighbors", []):
                 if n["rtt_ms"] is not None:
                     rtts[f"{node['id']}|{n['id']}"] = n["rtt_ms"]
@@ -311,7 +312,9 @@ def make_handler(controller):
             """Vídeo de um cliente como MJPEG (multipart/x-mixed-replace): o browser mostra-o num <img>."""
             q = parse_qs(urlsplit(self.path).query)
             node, flow = (q.get("node") or [""])[0], (q.get("flow") or [""])[0]
-            origin, _, name = flow.partition(":")
+            origin, sep, name = flow.partition(":")
+            if not sep:   # subscrição sem servidor fixo (D38): o nó grava any_FLUXO.jpg
+                origin, name = "any", flow
             spec = c.orch.plan.nodes.get(node) if c.orch else None
             if spec is None or flow not in spec.subscribe or not name:
                 return self._send(404, {"error": "esse cliente não subscreve esse fluxo"})

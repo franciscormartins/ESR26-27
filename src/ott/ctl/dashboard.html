@@ -137,7 +137,7 @@ function renderCharts() {
     out.push(chart(`RTT dos vizinhos de ${U.selected || "–"} (ms)`, peers.map((p, i) => ({label:p, color:PALETTE[i % 6], pts:H[`rtt|${U.selected}|${p}`] || []})), {ymax:5}));
   } else {
     for (const n of Object.values(S.nodes).filter(n => n.role === "cliente")) {
-      const keys = (n.subscribe || []).map((k, i) => ({label:k, color:PALETTE[S.flows.indexOf(k) % 6], pts:H[`${m}|${n.id}|${k}`] || []}));
+      const keys = (n.subscribe || []).map((k, i) => ({label:k, color:PALETTE[S.flows.indexOf(k) >= 0 ? S.flows.indexOf(k) % 6 : i % 6], pts:H[`${m}|${n.id}|${k}`] || []}));
       out.push(chart(`${n.id}: ${m === "rate" ? "imagens/s" : "jitter (ms)"}`, keys, {ymax:m === "rate" ? 24 : 2}));
     }
   }
@@ -352,11 +352,13 @@ function updateVideo() {
   if ($("v-sel") && sel) { $("v-sel").textContent = sel.id; $("v-health").textContent = LABELS[sel.health] || sel.health; $("v-health").style.background = COLORS[sel.health]; }
   document.querySelectorAll(".tile").forEach(el => {
     const n = S.nodes[el.dataset.n], st = (n && n.status) || {}, [o, fl] = el.dataset.f.split(":");
-    const f = (st.flows || []).find(x => x.origin === o && x.flow === fl), r = (st.routes || []).find(x => x.origin === o && x.flow === fl);
+    // sem ":" é uma subscrição sem servidor fixo (D38): o fluxo traz o servidor em uso
+    const f = (st.flows || []).find(x => fl === undefined ? x.subscription === o : x.origin === o && x.flow === fl);
+    const r = f && (st.routes || []).find(x => x.origin === f.origin && x.flow === f.flow);
     const ok = n && n.health === "up" && f && f.active && !f.stalled;
     el.classList.toggle("stalled", !ok);
     el.querySelector(".vstall").textContent = !n || n.health !== "up" ? "nó " + (LABELS[n && n.health] || "parado") : "sem imagens";
-    el.querySelector(".vinfo").innerHTML = f ? `· ${f.stalled ? "✗" : Math.round(f.rate) + " img/s"} · perdas ${fmt(f.loss_pct)}% · jitter ${fmt(f.jitter_ms, 1)} ms` + (r && r.upstream ? ` · via <b>${esc(r.upstream)}</b>` : "") : "";
+    el.querySelector(".vinfo").innerHTML = f ? `· ${f.stalled ? "✗" : Math.round(f.rate) + " img/s"} · perdas ${fmt(f.loss_pct)}% · jitter ${fmt(f.jitter_ms, 1)} ms` + (fl === undefined ? ` · de <b>${esc(f.origin)}</b>` : "") + (r && r.upstream ? ` · via <b>${esc(r.upstream)}</b>` : "") : "";
   });
 }
 const TABS = {node:["Nó", tabNode], video:["Vídeo", tabVideo], tests:["Testes", tabTests], demo:["Demonstração", tabDemo], routes:["Rotas", tabRoutes], net:["Rede", tabNet]};

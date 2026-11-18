@@ -205,9 +205,20 @@ class Scenario5Test(unittest.TestCase):
         servers = {n: set(i["publish"]) for n, i in self.plan.items() if i.get("serve")}
         self.assertEqual(sorted(servers), ["S1", "S2"])
         self.assertTrue(all(len(f) >= 2 for f in servers.values()))
-        self.assertFalse(servers["S1"] & servers["S2"])
-        wanted = {sub for i in self.plan.values() for sub in i.get("subscribe", [])}
-        self.assertEqual(wanted, {f"{s}:{f}" for s, fl in servers.items() for f in fl})
+        self.assertEqual(servers["S1"] & servers["S2"], {"filme_c"})          # a réplica (D38)
+        subs = [sub for i in self.plan.values() for sub in i.get("subscribe", [])]
+        for sub in subs:   # cada subscrição tem quem a sirva
+            server, sep, flow = sub.partition(":")
+            self.assertIn(flow if sep else sub, servers[server] if sep else servers["S1"] | servers["S2"], sub)
+        wanted = {sub.split(":")[-1] for sub in subs}
+        self.assertEqual(wanted, servers["S1"] | servers["S2"])           # todos os fluxos têm clientes
+
+    def test_replica_is_subscribed_without_fixed_server(self):
+        self.assertIn("filme_c", self.plan["C1"]["subscribe"])
+        self.assertEqual(self.plan["C5"]["subscribe"], ["filme_c"])
+        d1, d2 = distances(self.base, "S1"), distances(self.base, "S2")
+        self.assertLess(d1["C5"], d2["C5"])                               # o C5 está mais perto do S1
+        self.assertIn("C5", distances(without(self.base, {"S1"}), "S2"))   # sem o S1, o S2 continua a chegar-lhe
 
     def test_clients_share_branches(self):
         subs = {n: set(i.get("subscribe", [])) for n, i in self.plan.items()}

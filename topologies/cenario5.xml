@@ -129,13 +129,13 @@
       </services>
     </device>
     <device id="19" name="C1" icon="" canvas="1" type="PC" class="" image="" compose="" compose_name="">
-      <position x="400.0" y="70.0" lat="47.5785302998703" lon="-122.1269343561529" alt="2.0" />
+      <position x="360.0" y="70.0" lat="47.5785302998703" lon="-122.1274733681529" alt="2.0" />
       <services>
         <service name="DefaultRoute" />
       </services>
     </device>
     <device id="20" name="C2" icon="" canvas="1" type="PC" class="" image="" compose="" compose_name="">
-      <position x="600.0" y="70.0" lat="47.5785302998703" lon="-122.12423929615291" alt="2.0" />
+      <position x="640.0" y="70.0" lat="47.5785302998703" lon="-122.1237002841529" alt="2.0" />
       <services>
         <service name="DefaultRoute" />
       </services>
