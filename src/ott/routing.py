@@ -477,6 +477,14 @@ class RoutingTable:
         return (candidate.epoch == reference[0]
                 and (candidate.delay, candidate.metric) < reference[1:])
 
+    @staticmethod
+    def _only_neighbor(node, neighbor):
+        """``neighbor`` é o único vizinho ativo do nó (False se não se sabe)."""
+        neighbor_ids = getattr(node, "neighbor_ids", None)
+        if not callable(neighbor_ids):
+            return False
+        return list(neighbor_ids()) == [neighbor]
+
     def _delay_better(self, new, current):
         """Atraso ``new`` melhor do que ``current`` acima da histerese."""
         if math.isinf(new):
@@ -654,6 +662,13 @@ class RoutingTable:
                 route.epoch = epoch
                 route.candidates = {nb: c for nb, c in route.candidates.items()
                                     if c.epoch >= epoch - 1}
+            if neighbor == route.upstream and not self._feasible(route, candidate) \
+                    and self._only_neighbor(node, neighbor):
+                # L11: um nó cujo único vizinho é o montante não pode estar num
+                # ciclo (não tem a quem reencaminhar nem anunciar), por isso o
+                # anúncio pior do montante (por exemplo, depois de este reparar
+                # por um caminho mais lento) é aceite em vez de retirar a rota.
+                route.feasibility = None
             if neighbor == route.upstream and not self._feasible(route, candidate):
                 # O montante anuncia agora um caminho que pode passar por este
                 # nó (não melhor do que o que já anunciámos nesta época).

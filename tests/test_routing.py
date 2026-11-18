@@ -725,6 +725,36 @@ class FeasibilityTest(unittest.TestCase):
         self.assertIsNone(route.feasibility)
         self.assertEqual([m["type"] for m, _ in node.received_broadcasts], ["WITHDRAW"])
 
+    def single_neighbor_route(self, neighbors):
+        """Cliente que anunciou 1,0 ms (O5 a 0,7 ms + 0,3 ms) e está subscrito."""
+        table, node = RoutingTable(), self.Node()
+        node.neighbor_ids = lambda: list(neighbors)
+        node.rtts = {"O5": 0.0006}
+        route = self.feed(table, node, ("O5", 1, 3, 0.0007))
+        self.assertAlmostEqual(route.delay, 0.0010)
+        table.activate(node, "S1", "filme_a")
+        node.sent.clear()
+        node.received_broadcasts.clear()
+        return table, node, route
+
+    def test_single_neighbor_accepts_worse_update_from_upstream(self):
+        # L11 (CORE, cenário 3): o O5 repara por um caminho mais lento e anuncia
+        # na mesma época 1,1 ms, mais do que o 1,0 ms que o O11 anunciou; o O11,
+        # só com o O5, retirava a rota e ficava sem vídeo até à ronda seguinte.
+        table, node, route = self.single_neighbor_route(["O5"])
+        table.handle_announce(node, "O5", self.announce("O5", 1, 3, 0.0011))
+        self.assertEqual((route.upstream, route.metric, route.state), ("O5", 4, ACTIVE))
+        self.assertAlmostEqual(route.delay, 0.0014)
+        self.assertNotIn("WITHDRAW", [m["type"] for m, _ in node.received_broadcasts])
+        self.assertEqual(node.sent, [])                       # sem DEACTIVATE
+        self.assert_reference(route, 1, 0.0014, 4)            # nova referência
+
+    def test_node_with_other_neighbors_still_withdraws_on_unfeasible_update(self):
+        table, node, route = self.single_neighbor_route(["O5", "O6"])
+        table.handle_announce(node, "O5", self.announce("O5", 1, 3, 0.0011))
+        self.assertIsNone(route.upstream)
+        self.assertEqual([m["type"] for m, _ in node.received_broadcasts], ["WITHDRAW"])
+
     def test_repair_prefers_lowest_delay_among_feasible(self):
         table, node = RoutingTable(), self.Node()
         node.rtts = {"O1": 0.002, "O5": 0.040, "O6": 0.004}

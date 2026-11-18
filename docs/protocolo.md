@@ -218,7 +218,12 @@ ligação soma atraso e um salto), por isso um vizinho cujo caminho passe por es
 viável, mesmo que o RTT mude sem chegar nenhum anúncio. É a condição do Babel (RFC 8966).
 Sem ela, trocar só a ordem da seleção formava ciclos: o RTT para o montante sobe e um vizinho
 que nos usa parece de repente mais rápido. Se o próprio montante passar a anunciar, na mesma
-época, um caminho não viável, trata-se como perda do montante (ver abaixo).
+época, um caminho não viável, trata-se como perda do montante (ver abaixo), **exceto num nó
+cujo único vizinho é o montante** (D36): esse nó não pode estar num ciclo (não tem a quem
+reencaminhar nem anunciar), por isso aceita o anúncio pior e a referência de viabilidade
+recomeça. Sem esta exceção, um cliente cujo montante reparasse por um caminho ligeiramente
+mais lento (1,1 ms contra 1,0 ms anunciado pelo cliente, ensaio 6 no CORE em 2026-11-18)
+retirava a rota e ficava sem vídeo até à ronda seguinte (defeito L11).
 
 **Seleção** (sempre que chega um anúncio), entre os candidatos válidos e viáveis:
 
