@@ -23,6 +23,7 @@ relatório em `docs/relatorio/`.
 | `docs/ESTADO.md` | **ponto da situação**: o que está feito, decisões, como testar, pendentes, perguntas ao docente | – |
 | `docs/protocolo.md` | especificação das mensagens e interações | 1, 2 |
 | `docs/ETAPA2.md` | plano, decisões e testes da Etapa 2 | 2 |
+| `docs/AUDITORIA.md` | auditoria dos 10 requisitos mínimos e das Etapas 2 e 3, com melhorias priorizadas (2026-11-18) | 2, 3 |
 | `docs/testes-core.md` | comandos por nó e testes a fazer nos cenários 1–3 no CORE (**não está no repositório**) | – |
 
 Etapa 3 (PING de teste de caminhos): mensagem `ROUTE_TEST`, a tratar com um handler.
