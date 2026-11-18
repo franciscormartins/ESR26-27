@@ -13,7 +13,7 @@ from tests.support_ctl import write_mini
 
 class PlanTest(unittest.TestCase):
     def test_all_scenario_plans_load_and_are_consistent(self):
-        self.assertEqual(available(), ["cenario1", "cenario2", "cenario3", "cenario4"])
+        self.assertEqual(available(), ["cenario1", "cenario2", "cenario3", "cenario4", "cenario5"])
         for name in available():
             with self.subTest(plano=name):
                 plan = load_plan(name)
