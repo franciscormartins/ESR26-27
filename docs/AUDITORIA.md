@@ -281,3 +281,22 @@ Isto é **observação passiva do estado das rotas e do tráfego**, não uma men
 - Não reanalisei os logs do CORE. Todo o estado **[CORE]** vem da documentação do próprio repositório.
 - Não vi a interface do painel no browser.
 - Li `ETAPA2_NOTAS.md` e `CENARIO4.md` só por amostragem (títulos e secções relevantes).
+
+---
+
+# 6. Adenda de 2026-11-19: o que foi fechado desde esta auditoria
+
+| Item | Estado | Onde |
+|---|---|---|
+| M1, M8–M10, M12 — Etapa 3 mínima viável | **Feito**, com as recomendações de M8: controlo TCP, só a árvore ativa, disparo periódico (`ott --route-test S`). `ROUTE_TEST {server_id, flow, seq, path}`; aceita só do montante (RPF); descarta ciclos e caminhos com 64 ids; log por nó e caminho acumulado. **Não** tem `ts`, `max_hops`, cache de duplicados nem `ROUTE_TEST_REPLY`: o RPF e a árvore já impedem duplicados, e os relógios não estão sincronizados. Por ensaiar no CORE. | D39, `routetest.py`, `protocolo.md` §3.8, `tests/test_routetest.py` |
+| M11 — observabilidade | **Feito** (sem resposta ao servidor): `route_tests` no ficheiro de estado e um evento `route_test` quando o caminho muda. | `status.py` |
+| M2, M16 — documentação | **Feito**: `ESTADO.md`, `ETAPA2.md`, `README.md` e `AGENTS.md` atualizados; linhas datadas retiradas da tabela do §2; `protocolo.md` §3.7b explica a ausência de TTL de mensagem e a terminologia Origem/`upstream`. `CHECKPOINT1.md` e `testes-core.md` continuam fora do repositório (`.gitignore`), agora dito. | — |
+| M4 — 2 servidores × 2 fluxos | **Feito**: `TwoServersTwoFlowsTest` (rotas por `(servidor, fluxo)`, `ROUTE_TEST` e vídeo dos 4 fluxos; o relay recebe 4 × 15 imagens e reenvia 6 × 15). | `tests/test_routetest.py` |
+| M5 — ciclo de vida das rotas | **Feito** depois da retenção da D27 e sem subscritores nem ramos. | D40, `routing.py` (`expire`) |
+| M7 — `LoopFreedomTest` com folhas | **Feito** (D36 exercitada 93 vezes em 60 sementes). Reinícios do servidor continuam fora da rede simulada. | `tests/test_routing.py` |
+| M15 — log das trocas de montante | **Feito**: `rota S1:filme_a: montante O2 -> O3 (3 saltos, 1.2 ms)`. | `routing.py` |
+| M3 — matriz requisito → evidência | Por fazer: é do relatório. | — |
+| M6 — propagar só mudanças de latência | **Não feito, de propósito**: risco médio-alto (mais anúncios e repetir a prova de ausência de ciclos); fica como limitação documentada. | `ESTADO.md` §8 |
+| M7b — perdas na métrica | Não feito (opcional, esforço alto). | — |
+| M13 — logs do CORE no repositório | Não feito: decisão do grupo (tamanho). | — |
+| M14 — tabela no formato do enunciado | Não feito (o separador «Rotas» do painel já a mostra). | — |

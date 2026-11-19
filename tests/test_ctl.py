@@ -22,6 +22,38 @@ class PlanTest(unittest.TestCase):
                 for spec in plan.nodes.values():
                     self.assertIn(spec.id, plan.overlay)
 
+    def test_each_flow_has_its_own_video_and_the_same_flow_is_the_same_video(self):
+        plan = load_plan("cenario5")
+        videos = {f: plan.video_of(f) for f in plan.all_flows()}
+        self.assertIsNone(videos["filme_a"])                       # o filme real (progex/movie.Mjpeg)
+        self.assertEqual(plan.video_label("filme_a"), "movie.Mjpeg")
+        for flow in ("filme_b", "filme_c", "filme_d"):
+            self.assertTrue(videos[flow].endswith(f"videos{os.sep}{flow}.Mjpeg"), videos[flow])
+            self.assertTrue(os.path.isfile(videos[flow]))
+        self.assertEqual(len({v for v in videos.values() if v}), 3)   # todos diferentes
+        self.assertEqual(plan.publishers_of("filme_c"), ["S1", "S2"])  # replicado: o mesmo ficheiro nos dois
+        be = LocalBackend(plan)
+        be.rundir = tempfile.mkdtemp()
+        for server in ("S1", "S2"):
+            argv = be.argv(plan.nodes[server], "/tmp/x.json")
+            self.assertIn(f"filme_c={videos['filme_c']}", argv)
+
+    def test_servers_generate_route_tests_unless_the_plan_turns_them_off(self):
+        plan = load_plan("cenario1")
+        be = LocalBackend(plan)
+        be.rundir = tempfile.mkdtemp()
+        argv = be.argv(plan.nodes["S1"], "/tmp/x.json")
+        self.assertEqual(argv[argv.index("--route-test") + 1], "2")
+        self.assertNotIn("--route-test", be.argv(plan.nodes["C1"], "/tmp/x.json"))
+        plan.route_test = 0
+        self.assertNotIn("--route-test", be.argv(plan.nodes["S1"], "/tmp/x.json"))
+
+    def test_a_missing_video_in_the_plan_is_an_error(self):
+        plan = load_plan("cenario1")
+        plan.videos["filme_a"] = "videos/nao_existe.Mjpeg"
+        with self.assertRaises(PlanError):
+            plan.video_of("filme_a")
+
     def test_scenario4_has_two_servers_with_two_flows_each(self):
         plan = load_plan("cenario4")
         servers = {n.id: n.publish for n in plan.nodes.values() if n.serve}
@@ -179,6 +211,44 @@ class CoreBackendTest(unittest.TestCase):
         self.assertEqual(orch.ip_path("C1", "O1")[:3], ["C1", "r10", "r4"])
         self.assertIsNone(Orchestrator(self.plan, LocalBackend(self.plan), tempfile.mkdtemp()).ip_path("C1", "O1"))
 
+    def test_hop_link_picks_a_link_between_routers_on_the_real_ip_path(self):
+        under = Orchestrator(self.plan, self.backend(FakeRunner()), tempfile.mkdtemp()).underlay()
+        nbr = {}
+        for l in under["links"]:
+            nbr.setdefault(l["a"], {})[l["b"]] = l["ipb"]
+            nbr.setdefault(l["b"], {})[l["a"]] = l["ipa"]
+        wanted = ["C1", "r10", "r4", "O1"]
+
+        class Runner:
+            calls = []
+
+            def __call__(self_, argv, timeout=20):
+                if argv[-3:-1] == ["route", "get"]:
+                    here = argv[2].rsplit("/", 1)[1]
+                    nxt = wanted[wanted.index(here) + 1]
+                    return 0, f"{argv[-1]} via {nbr[here][nxt]} dev eth0"
+                self_.calls.append(argv)
+                return 0, ""
+        orch = Orchestrator(self.plan, self.backend(Runner()), tempfile.mkdtemp())
+        x, ix, y, iy, sw = orch.hop_link("C1", "O1")
+        self.assertEqual({x, y}, {"r10", "r4"})              # a ligação entre routers, não as dos hosts
+        self.assertIsNone(sw)
+        orch.hop_netem("C1", "O1", delay="50ms")
+        tc = [c for c in Runner.calls if "netem" in c]
+        self.assertEqual(len(tc), 2)                         # nos dois extremos
+        self.assertEqual({c[2].rsplit("/", 1)[1] for c in tc}, {"r10", "r4"})
+        orch.hop_set("C1", "O1", False)
+        self.assertEqual(orch.hop_link("C1", "O1"), (x, ix, y, iy, sw))   # a mesma ligação, mesmo que o OSPF desvie
+        self.assertEqual(orch.load()["hops"], {"C1>O1": [x, ix, y, iy, sw]})
+        orch.clear_network()
+        self.assertEqual(orch.hop_links, {})
+
+    def test_hop_obstacles_need_the_core(self):
+        plan = load_plan(write_mini())
+        orch = Orchestrator(plan, LocalBackend(plan), tempfile.mkdtemp())
+        with self.assertRaises(BackendError):
+            orch.hop_netem("S", "A", delay="10ms")
+
     def test_the_local_mode_has_no_network_commands(self):
         orch = Orchestrator(load_plan(write_mini()), LocalBackend(load_plan(write_mini())), tempfile.mkdtemp())
         with self.assertRaises(BackendError):
@@ -209,7 +279,8 @@ class LocalScenarioTest(unittest.TestCase):
 
     def test_up_streams_video_and_reacts_to_a_failure(self):
         self.assertEqual(self.orch.up(), ["S", "A", "C"])
-        state = self.wait(lambda s: any(f["rate"] > 5 for f in (s["nodes"]["C"]["status"] or {}).get("flows", [])))
+        state = self.wait(lambda s: any(f["rate"] > 5 for f in (s["nodes"]["C"]["status"] or {}).get("flows", []))
+                          and all(e["active"] for e in s["tree"].get("S:filme_a", [])) and len(s["tree"].get("S:filme_a", [])) == 2)
         self.assertEqual({k: v["health"] for k, v in state["nodes"].items()}, {"S": "up", "A": "up", "C": "up"})
         self.assertEqual(state["tree"]["S:filme_a"], [{"from": "S", "to": "A", "active": True},
                                                       {"from": "A", "to": "C", "active": True}])
@@ -226,6 +297,35 @@ class LocalScenarioTest(unittest.TestCase):
         self.orch.start(["A"])                                # o nó volta e o fluxo regressa
         self.wait(lambda s: s["nodes"]["A"]["health"] == "up" and
                   any(f["rate"] > 5 for f in (s["nodes"]["C"]["status"] or {}).get("flows", [])), timeout=25)
+
+    def test_route_tests_show_the_path_and_the_client_can_change_its_movies(self):
+        self.orch.up()
+        state = self.wait(lambda s: any(p["fresh"] for p in s["paths"]), timeout=20)
+        (path,) = state["paths"]
+        self.assertEqual((path["node"], path["key"], path["path"], path["hops"]), ("C", "S:filme_a", ["S", "A", "C"], 2))
+        self.assertEqual(state["route_test"], 2.0)
+        self.assertEqual(state["options"], [{"key": "S:filme_a", "flow": "filme_a", "server": "S",
+                                             "publishers": ["S"], "video": "movie.Mjpeg"}])
+        for bad in (["S:filme_x"], ["filme_a:S"], "S:filme_a", ["S:filme_a", "S:filme_a:b"]):
+            with self.assertRaises(BackendError):
+                self.orch.set_subscriptions("C", bad)
+        with self.assertRaises(BackendError):
+            self.orch.set_subscriptions("S", [])             # um servidor não subscreve
+
+        self.orch.set_subscriptions("C", [])                 # o cliente deixa de pedir o filme
+        state = self.wait(lambda s: s["nodes"]["C"]["health"] == "up" and not s["nodes"]["C"]["status"].get("flows"))
+        self.assertEqual(state["nodes"]["C"]["subscribe"], [])
+        self.assertEqual(state["subs_changed"], ["C"])
+        state = self.wait(lambda s: (s["nodes"]["S"]["status"]["routes"] or [{}])[0].get("state") == "inativa")
+        other = Orchestrator.attach(write_mini(self.dir), self.dir)   # outro processo vê a mudança
+        self.assertEqual(other.plan.nodes["C"].subscribe, [])
+
+        self.orch.set_subscriptions("C", ["S:filme_a"])      # e volta a pedi-lo
+        state = self.wait(lambda s: any(f["rate"] > 5 for f in (s["nodes"]["C"]["status"] or {}).get("flows", [])), timeout=25)
+        self.assertEqual(state["subs_changed"], [])
+        self.orch.set_subscriptions("C", [])
+        self.orch.reset_subscriptions()
+        self.assertEqual(self.orch.plan.nodes["C"].subscribe, ["S:filme_a"])
 
     def test_freeze_is_reported_and_thaw_recovers(self):
         self.orch.up()

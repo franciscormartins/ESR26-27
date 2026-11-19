@@ -39,6 +39,9 @@ contra uma sessão real do CORE 9.2.1 (cenário 4): lançamento dos nós, leitur
 | `ottctl stop\|kill\|freeze\|thaw\|start CEN NÓ…` | saída limpa (`SIGTERM`, com BYE), morte abrupta (`SIGKILL`), nó calado (`SIGSTOP`), retomar, (re)lançar |
 | `ottctl netem CEN NÓ IFACE --delay 30ms --jitter 10ms --loss 5 --rate 500kbit` | atraso/jitter/perdas/débito numa interface (só `core`); `NÓ` é um nó overlay ou do CORE (`r4`) |
 | `ottctl netem-clear CEN NÓ IFACE` · `ottctl link CEN NÓ IFACE up\|down` | remove o `netem`; liga/desliga uma interface |
+| `ottctl paths CEN` | caminho que o último `ROUTE_TEST` fez até cada cliente (`C1 S1:filme_a  S1 → O1 → O5 → C1`) |
+| `ottctl subs CEN [NÓ FLUXO…] [--reset]` | muda os fluxos que um nó subscreve (relança-o); sem argumentos lista as opções; `--reset` repõe as do plano |
+| `ottctl hop CEN A B [--delay 50ms --loss 10 \| --cut \| --restore \| --clear]` | obstáculo no troço overlay A→B, na ligação do underlay a meio do caminho IP verdadeiro (só `core`) |
 | `ottctl test CEN [IDS…] [--list] [--repeat N] [--md] [--json F]` | corre os testes automáticos do cenário (ver abaixo); `--repeat` dá mínimo/média/máximo, `--md` uma tabela para o relatório |
 | `ottctl dashboard [CEN] [--backend core\|local] [--session N] [--port 8080]` | painel web (sem `CEN` escolhe-se o cenário no próprio painel) |
 
@@ -60,11 +63,21 @@ O servidor só escuta em `127.0.0.1`; recusa pedidos cujo `Host` não seja local
 `make test-core`, `make test-md`, `make up|down|status|events`, `make unit` e `make help`. Variáveis: `CEN`, `PORT`, `BACKEND`,
 `SESSION`, `ARGS`. No separador *Rede* há botões de perdas rápidas (1, 5, 10, 20, 30 %) para a ligação escolhida.
 
+## Vídeos e ROUTE_TEST nos cenários
+
+O plano pode ter `"videos": {"filme_b": "videos/filme_b.Mjpeg"}` (MJPEG de cada fluxo) e `"route_test": 2` (segundos entre os `ROUTE_TEST` de cada
+servidor; 0 desliga). Sem `videos`, usa-se `videos/<fluxo>.Mjpeg` se existir e, senão, o filme real `progex/movie.Mjpeg`; por isso cada fluxo tem o seu
+vídeo e o mesmo fluxo publicado por dois servidores é o mesmo vídeo. Os vídeos de `videos/` fazem-se com `tools/gerar_video_teste.py` (precisa do Pillow;
+`tools/gerar_videos_dos_cenarios.sh`). Os servidores arrancam com `--publish-flow fluxo=ficheiro` e `--route-test 2`; cada nó escreve os testes que
+recebeu em `route_tests` no ficheiro de estado e o orquestrador junta-os em `state["paths"]`.
+
 ## Testes automáticos (`ottctl test` e separador *Testes*)
 
 Cada teste prepara a situação, provoca a falha, espera pela reação e **mede** (tempo até haver rota nova, interrupção do vídeo, RTT,
-perdas). Os de `G` servem qualquer cenário; os de `A` (falhas de nós), `C` (arranque, suplentes, bootstrapper) e `B` (rede: atraso,
-perdas, só no CORE) são do cenário 4. Os testes `B` põem e retiram o `netem` por si. Resultados medidos em local e no CORE estão em
+perdas). Os de `G` (G1–G9) servem qualquer cenário: arranque, queda de um nó, **de cada servidor**, nó congelado, cliente que sai e volta, **ROUTE_TEST**
+(o caminho é o da árvore e muda quando um nó cai), nó suplente, **réplica com failover**, **subscrições que mudam**. Os de `N` (N1–N4) são de rede e só
+correm no CORE, no caminho ativo de um cliente (atraso, corte de uma ligação, router de passagem desligado, perdas). Os de `A` (falhas de servidores),
+`C` (arranque, suplentes, bootstrapper) e `B` (rede em ligações concretas, só no CORE) são do cenário 4. Os testes `B` põem e retiram o `netem` por si. Resultados medidos em local e no CORE estão em
 `docs/ESTADO.md`. Duas observações que saíram daqui:
 
 - **B3**: com 10 % de perdas de pacotes perdem-se ≈ 44 % das imagens, porque cada imagem JPEG (≈ 8 KiB) vai num só datagrama UDP que

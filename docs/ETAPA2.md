@@ -13,7 +13,13 @@ até ao servidor.
 
 Esta escolha é compatível com as primitivas de overlay existentes (`send` e `broadcast`).
 
-**Ponto da situação (2026-11-09).** Os passos 0 a 9 do plano (ver "Revisão de 2026-11-09")
+**Ponto da situação (2026-11-19).** A etapa está feita e validada no CORE: ensaios 1 a 10 nos cenários 1, 2 e 3 (2026-11-09 a
+2026-11-18) e os 9 ensaios do cenário 5, com dois servidores e dois fluxos distintos cada (2026-11-18, ver "Cenário 5 no CORE"
+abaixo e `docs/CENARIO5.md`); a suite tem 280 testes. O texto a seguir é o histórico do que se ia fazendo e estava
+desatualizado em "falta": o passo 10 foi cumprido pelo cenário 5 (D37), o ensaio 7 também, e a Etapa 3 (`ROUTE_TEST`) foi
+implementada em 2026-11-19 (D39).
+
+**Histórico (2026-11-09).** Os passos 0 a 9 do plano (ver "Revisão de 2026-11-09")
 estão feitos e cobertos por testes automáticos, incluindo ensaios com nós reais em localhost
 (111 testes na suite). Falta o segundo servidor nas topologias (passo 10) e a maior parte dos
 ensaios no CORE (passo 11): em 2026-11-09 passaram os ensaios 1 e 2 (cenário 1) e 4 (cenário 2);
@@ -169,7 +175,7 @@ CORE.
   `--subscribe SERVIDOR:FLUXO` ativa a subscrição e recolhe estatísticas locais.
 - [x] Ensaiar a distribuição ponta a ponta em localhost com nós reais
   (`tests/test_integration.py`, 2026-11-09).
-- [ ] Ensaiar a distribuição ponta a ponta no CORE, incluindo falhas e recuperação.
+- [x] Ensaiar a distribuição ponta a ponta no CORE, incluindo falhas e recuperação (cenários 1, 2, 3 e 5, 2026-11-09 a 2026-11-18).
 
 **Defeito corrigido em 2026-11-09 (commit `e83e37b`).** `OverlayNode._dispatch` passava aos
 handlers o objeto `Neighbor` em vez do ID do vizinho. Com nós reais, `upstream` e os destinos
@@ -269,17 +275,19 @@ seguintes. Estado atual de cada uma:
 - [x] 7. Tempo de vida de rotas e candidatos.
 - [x] 8. Retirar `seen_announcements`.
 - [x] 9. Atualizar `protocolo.md`, este ficheiro e `ESTADO.md` com o comportamento final.
-- [ ] 10. Segundo servidor (`S2`, 2 fluxos cada) em `cenario2.json` e `cenario3.json`.
-  Alternativa (2026-11-18, D37): o cenário 5 (`docs/CENARIO5.md`) tem dois servidores com dois fluxos distintos cada e
-  um ensaio por requisito mínimo; falta abri-lo no CORE.
+- [x] 10. Segundo servidor (`S2`, 2 fluxos cada). Em vez de alterar `cenario2.json` e `cenario3.json`, criou-se o cenário 5
+  (2026-11-18, D37, `docs/CENARIO5.md`): dois servidores com dois fluxos distintos cada e um ensaio por requisito mínimo;
+  ensaiado no CORE (9 ensaios passaram).
 - [x] 14. Subscrição sem servidor fixo (D38, 2026-11-18): `--subscribe FLUXO` escolhe o servidor mais perto entre os que
-  publicam o fluxo e passa para outro se esse deixar de ter caminho. Testado em localhost (unitários e nós reais); falta o
-  CORE (ensaios 2, 7 e 8 do cenário 5).
+  publicam o fluxo e passa para outro se esse deixar de ter caminho. Testado em localhost (unitários e nós reais) e no CORE
+  (ensaios 2, 7 e 8 do cenário 5, 2026-11-18).
 - [x] 12. Latência acumulada como métrica principal, com condição de viabilidade (D34,
   2026-11-10). Ensaios 4, 5, 6, 8 e 9 repetidos no CORE e ensaio 10 novo (`netem` torna mais
   rápido um caminho com mais saltos), todos passaram (2026-11-10, logs `2026-11-10-9` e
   `-10`; ver "Resultados no CORE").
-- [ ] 11. Ensaios no CORE (lista abaixo).
+- [x] 11. Ensaios no CORE (lista abaixo; resultados em "Resultados no CORE").
+- [x] 15. Etapa 3 do enunciado: `ROUTE_TEST` (D39, 2026-11-19), em localhost; por ensaiar no CORE.
+- [x] 16. Rotas mortas removidas da tabela depois da retenção (D40, 2026-11-19).
 
 ## Plano de testes
 
@@ -468,7 +476,7 @@ PYTHONPATH=src python3 -m unittest tests.test_routing -v        # modelo (nós f
 PYTHONPATH=src python3 -m unittest tests.test_integration -v    # nós reais em localhost
 PYTHONPATH=src python3 -m unittest tests.test_forwarding -v     # RPF no plano de dados
 PYTHONPATH=src python3 -m unittest tests.test_cli -v            # opções da CLI
-PYTHONPATH=src python3 -m unittest discover -s tests -t .       # tudo (138 testes)
+PYTHONPATH=src python3 -m unittest discover -s tests -t .       # tudo (280 testes)
 ```
 
 `tests/test_integration.py` dá a cada nó um IP de loopback (127.0.0.1–4), porque todos os
@@ -484,7 +492,7 @@ caminhos conhecidos, e uma falha de vizinho provocar atualização da rota sem d
 preso em caminhos inválidos. Registar os resultados e limitações em `docs/ESTADO.md` e no
 relatório.
 
-**Estado face ao critério (2026-11-09):** os três pontos estão cobertos por testes automáticos
+**Estado face ao critério (2026-11-19):** os três pontos estão cobertos por testes automáticos
 em localhost (dois clientes num ramo partilhado, uma cópia por troço; queda de cliente, de
-montante e do servidor com recuperação). Só se dá a etapa como **validada** depois dos ensaios
-1 a 9 no CORE, com os resultados registados em `docs/ESTADO.md`.
+montante e do servidor com recuperação; dois servidores com dois fluxos distintos) e **validados no CORE**
+(ensaios 1 a 10 dos cenários 1, 2 e 3 e os 9 do cenário 5), com os resultados registados em `docs/ESTADO.md`.

@@ -94,7 +94,10 @@ class Backend:
                 host, port = self.address(boot)
                 a += ["-b", f"{host}:{port}"]
         for flow in spec.publish:
-            a += ["--publish-flow", flow]
+            video = self.plan.video_of(flow)
+            a += ["--publish-flow", f"{flow}={video}" if video else flow]
+        if spec.publish and self.plan.route_test:
+            a += ["--route-test", f"{self.plan.route_test:g}"]
         for sub in spec.subscribe:
             a += ["--subscribe", sub]
         if spec.subscribe:   # a imagem mais recente de cada fluxo, para o painel mostrar o vídeo
@@ -128,6 +131,19 @@ class Backend:
 
     def alive(self, spec):
         return None
+
+    def running(self, spec):
+        """O processo do nó ainda existe? (``alive`` só sabe dizê-lo no modo local; no CORE pergunta ao nó.)"""
+        return bool(self.alive(spec))
+
+    def wait_gone(self, spec, timeout=6.0):
+        """Espera que o ``ott`` do nó termine (para o poder relançar sem conflito de portas)."""
+        import time
+        end = time.time() + timeout
+        while self.running(spec):
+            if time.time() > end:
+                raise BackendError(f"{spec.id} não terminou em {timeout:.0f} s")
+            time.sleep(0.2)
 
     def execute(self, core_name, argv):
         raise BackendError(f"o modo {self.name} não executa comandos de rede (só no CORE)")
@@ -283,6 +299,10 @@ class CoreBackend(Backend):
             raise BackendError(f"{spec.id} não está a correr em {spec.core}")
         if rc != 0:
             raise BackendError(f"falhou o sinal {name} a {spec.id}: {out}")
+
+    def running(self, spec):
+        rc, _out = self.vcmd(spec.core, ["pgrep", "-f", "^python3 -m ott"])
+        return rc == 0
 
     def execute(self, core_name, argv):
         return self.vcmd(core_name, argv)

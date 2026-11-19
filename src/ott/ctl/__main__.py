@@ -66,6 +66,24 @@ def parser():
     ln.add_argument("node")
     ln.add_argument("iface")
     ln.add_argument("state", choices=["up", "down"])
+    pt = sub.add_parser("paths", help="caminho que o último ROUTE_TEST fez até cada cliente")
+    pt.add_argument("scenario")
+    sb = sub.add_parser("subs", help="muda os fluxos que um nó subscreve (relança-o); --reset repõe os do plano")
+    sb.add_argument("scenario")
+    sb.add_argument("node", nargs="?")
+    sb.add_argument("flows", nargs="*", help="SERVIDOR:FLUXO ou só FLUXO; sem nenhum, o nó deixa de subscrever")
+    sb.add_argument("--reset", action="store_true", help="repõe as subscrições do plano em todos os nós")
+    hp = sub.add_parser("hop", help="obstáculo no troço overlay A→B, na ligação do underlay a meio do caminho IP (só CORE)")
+    hp.add_argument("scenario")
+    hp.add_argument("a")
+    hp.add_argument("b")
+    hp.add_argument("--delay")
+    hp.add_argument("--jitter")
+    hp.add_argument("--loss")
+    hp.add_argument("--rate")
+    hp.add_argument("--cut", action="store_true", help="corta a ligação")
+    hp.add_argument("--restore", action="store_true", help="repõe a ligação cortada")
+    hp.add_argument("--clear", action="store_true", help="remove o atraso/perdas")
     ts = sub.add_parser("test", help="corre os testes automáticos do cenário (o cenário tem de estar lançado)")
     ts.add_argument("scenario")
     ts.add_argument("ids", nargs="*", help="testes a correr (por omissão todos); ver --list")
@@ -137,6 +155,27 @@ def run(args):
         print(render_routes(args.node, orch.read_status(args.node)))
     elif args.cmd in ("start", "stop", "kill", "freeze", "thaw"):
         getattr(orch, args.cmd)(args.nodes)
+    elif args.cmd == "paths":
+        for p in sorted(orch.state()["paths"], key=lambda p: (p["node"], p["key"])):
+            print(f"{p['node']:<4} {p['key']:<14} {' → '.join(p['path'])}  ({p['hops']} saltos, teste #{p['seq']} há {p['age']:.0f} s"
+                  + ("" if p["fresh"] else ", antigo") + ")")
+    elif args.cmd == "subs":
+        if args.reset:
+            orch.reset_subscriptions()
+        elif args.node:
+            orch.set_subscriptions(args.node, args.flows)
+        else:
+            print("\n".join(f"{o['key']:<14} {o['video']} (publicado por {', '.join(o['publishers'])})"
+                            for o in orch.subscription_options()))
+    elif args.cmd == "hop":
+        if args.cut:
+            orch.hop_set(args.a, args.b, False)
+        elif args.restore:
+            orch.hop_set(args.a, args.b, True)
+        elif args.clear:
+            orch.hop_clear(args.a, args.b)
+        else:
+            orch.hop_netem(args.a, args.b, delay=args.delay, jitter=args.jitter, loss=args.loss, rate=args.rate)
     elif args.cmd == "netem":
         orch.netem(args.node, args.iface, args.delay, args.jitter, args.loss, args.rate)
     elif args.cmd == "netem-clear":

@@ -322,6 +322,417 @@ def g2(ctx):
     ctx.measure(f"reentrada de {mid} (último vizinho)", back, expect=(0, 20))
 
 
+# ---------------------------------------------------------------- ajudas dos testes genéricos (qualquer cenário)
+
+def _split(sub):
+    """``"S1:filme_a"`` -> ``("S1", "filme_a")``; ``"filme_c"`` -> ``(None, "filme_c")``."""
+    server, sep, name = sub.partition(":")
+    return (server, name) if sep else (None, sub)
+
+
+def _servers(plan):
+    return [s for s in plan.nodes.values() if s.serve]
+
+
+def _clients(plan):
+    return [s for s in plan.nodes.values() if s.subscribe and not s.spare]
+
+
+def _mids(plan):
+    return [s for s in plan.nodes.values() if not s.serve and not s.spare and not s.subscribe]
+
+
+def client_paths(state, client):
+    """``{servidor:fluxo: [nós]}``: o caminho que o último ROUTE_TEST fez até ao cliente (só os recentes)."""
+    return {p["key"]: p["path"] for p in state.get("paths", []) if p["node"] == client and p["fresh"]}
+
+
+def tree_chain(state, key, client):
+    """Caminho do servidor ao cliente, seguindo os montantes de cada tabela de rotas (a árvore do painel)."""
+    up = {e["to"]: e["from"] for e in state["tree"].get(key, [])}
+    chain, cur = [client], client
+    while cur in up and len(chain) < 40:
+        cur = up[cur]
+        chain.append(cur)
+    return list(reversed(chain))
+
+
+def _all_paths_known(state, plan):
+    """Cada subscrição de cada cliente tem um caminho recente (ROUTE_TEST) e só falta saber se é o certo."""
+    for c in _clients(plan):
+        if len(client_paths(state, c.id)) < len(c.subscribe):
+            return False
+    return True
+
+
+def _depends_on(plan, server_id):
+    """(afetadas, com alternativa) pela queda de um servidor: subscrições (cliente, subscrição) que perdem o fluxo
+    e as que passam para outro servidor (subscrição sem servidor fixo com uma réplica)."""
+    lost, failover, kept = [], [], []
+    for c in _clients(plan):
+        for sub in c.subscribe:
+            server, name = _split(sub)
+            if server == server_id:
+                lost.append((c.id, sub))
+            elif server is None and server_id in plan.publishers_of(name):
+                (failover if len(plan.publishers_of(name)) > 1 else lost).append((c.id, sub))
+            else:
+                kept.append((c.id, sub))
+    return lost, failover, kept
+
+
+def _hops_of(path):
+    return list(zip(path, path[1:]))
+
+
+def _connected(plan, src, dst, dead):
+    """Há caminho overlay de ``src`` a ``dst`` sem passar pelos nós ``dead`` nem pelos suplentes?"""
+    adj = {}
+    for a, b in plan.edges():
+        if a in dead or b in dead or plan.nodes[a].spare or plan.nodes[b].spare:
+            continue
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+    seen, todo = {src}, [src]
+    while todo:
+        for nxt in adj.get(todo.pop(), ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                todo.append(nxt)
+    return dst in seen
+
+
+def _pick_failure(plan, state):
+    """``(cliente, chave, caminho, nó, há_alternativa)``: um nó intermédio de um caminho ativo para matar, de preferência
+    um que deixe o cliente com outro caminho (senão, o fluxo pára e só se vê isso)."""
+    best = None
+    for c in _clients(plan):
+        for key, path in client_paths(state, c.id).items():
+            for mid in path[1:-1]:
+                alt = _connected(plan, key.split(":")[0], c.id, {mid})
+                rank = (alt, len(path))
+                if best is None or rank > best[0]:
+                    best = (rank, (c.id, key, path, mid, alt))
+    return best[1] if best else None
+
+
+@test("G3", "Cai cada servidor e volta: os fluxos dos outros não param")
+def g3(ctx):
+    """Mata um servidor de cada vez. Os clientes que o usam deixam de receber (ou passam para a réplica); os outros fluxos
+    não podem parar. Volta a lançá-lo e mede quanto demora o cenário a normalizar."""
+    plan = ctx.plan
+    tested = 0
+    for server in _servers(plan):
+        lost, failover, kept = _depends_on(plan, server.id)
+        if not lost and not failover:
+            continue
+        tested += 1
+        st = ctx.settle()
+        # uma subscrição com réplica só depende deste servidor se for ele que a está a servir agora
+        failover, kept = ([x for x in failover if (flow(st, *x) or {}).get("origin") == server.id],
+                          kept + [x for x in failover if (flow(st, *x) or {}).get("origin") != server.id])
+        t0 = ctx.act(lambda: ctx.orch.kill([server.id]))
+        if lost:
+            dt, st = ctx.wait(lambda s: not any(receiving(s, c, k) for c, k in lost), 45,
+                              f"os clientes de {server.id} deixarem de receber ({', '.join(f'{c}:{k}' for c, k in lost)})")
+            ctx.measure(f"{server.id} morto: os clientes que só o têm param", dt, expect=(0, 20))
+        if failover:
+            dt, st = ctx.wait(lambda s: all(receiving(s, c, k) and (flow(s, c, k) or {}).get("origin") != server.id
+                                            for c, k in failover), 60,
+                              f"os clientes com réplica passarem para outro servidor ({failover})")
+            gap = max(interruption(st, c, k, t0) for c, k in failover)
+            ctx.measure(f"{server.id} morto: tempo até a réplica entregar ({failover[0][0]})", dt, expect=(0, 30))
+            ctx.measure(f"{server.id} morto: interrupção máxima do fluxo com réplica", gap, expect=(0, 30))
+        st = ctx.sleep(1.5)
+        stopped = [f"{c}:{k}" for c, k in kept if not receiving(st, c, k)
+                   and event_times(st, c, "fluxo_parou", route=k if ":" in k else None, after=t0)]
+        ctx.check(f"os fluxos que não dependem de {server.id} continuam a chegar", not stopped, ", ".join(stopped))
+        t1 = ctx.act(lambda: ctx.orch.start([server.id]))
+        dt, st = ctx.wait(lambda s: all_receiving(s, plan), 90, "todos os clientes a receber outra vez")
+        ctx.measure(f"{server.id} relançado: o cenário normaliza", dt, expect=(0, 70))
+    if not tested:
+        raise Skip("nenhum servidor tem clientes")
+
+
+@test("G4", "Falha silenciosa: um nó intermédio congelado (só o timeout o deteta)")
+def g4(ctx):
+    """SIGSTOP num intermédio: o TCP não fecha, por isso os vizinhos só o dão como caído ao fim do timeout do keepalive."""
+    st = ctx.settle()
+    cand = _mids(ctx.plan)
+    if not cand:
+        raise Skip("o cenário não tem nós intermédios")
+    mid = max(cand, key=lambda s: len(neighbors(st, s.id))).id
+    peers = neighbors(st, mid)
+    ctx.note(f"nó escolhido: {mid} (vizinhos {sorted(peers)})")
+    t0 = ctx.act(lambda: ctx.orch.freeze([mid]))
+    ctx.defer(lambda: ctx.orch.thaw([mid]))
+    ctx.wait(lambda s: any(event_times(s, p, "vizinho_down", peer=mid, after=t0) for p in peers), 25,
+             "algum vizinho dar o nó congelado como caído")
+    st = ctx.state()
+    first = min(min(event_times(st, p, "vizinho_down", peer=mid, after=t0)) for p in peers
+                if event_times(st, p, "vizinho_down", peer=mid, after=t0)) - t0
+    ctx.measure(f"primeiro vizinho dá {mid} como caído (por timeout)", first, expect=(3, 12))
+    ctx.orch.thaw([mid])
+    ctx.wait(lambda s: all(event_times(s, p, "vizinho_up", peer=mid, after=t0) for p in peers
+                           if event_times(s, p, "vizinho_down", peer=mid, after=t0)), 45, "os vizinhos religarem-se")
+    ctx.note("depois de descongelado, o nó regressa sozinho")
+
+
+@test("G5", "Um cliente sai e volta a entrar sem afetar os outros")
+def g5(ctx):
+    """Pára um cliente (BYE): os outros não perdem imagens e, se era o único a ver um fluxo, o servidor deixa de o emitir."""
+    plan = ctx.plan
+    st = ctx.settle()
+    clients = _clients(plan)
+    if not clients:
+        raise Skip("o cenário não tem clientes")
+    target = max(clients, key=lambda c: len(c.subscribe))
+    mine = client_paths(st, target.id)
+    others = [c.id for c in clients if c.id != target.id]
+    alone = [k for k in mine if not any(k in client_paths(st, o) for o in others)]
+    t0 = ctx.act(lambda: ctx.orch.stop([target.id]))
+    if alone:
+        dt, st = ctx.wait(lambda s: all((route(s, k.split(":")[0], k) or {}).get("state") == "inativa" for k in alone), 40,
+                          f"os servidores deixarem de emitir {alone}")
+        ctx.measure("fluxos que só ele via ficam inativos no servidor", dt, expect=(0, 30))
+    st = ctx.sleep(4)
+    ctx.check("os outros clientes não perdem imagens",
+              not any(event_times(st, o, "fluxo_parou", after=t0) for o in others))
+    t1 = ctx.act(lambda: ctx.orch.start([target.id]))
+    dt, st = ctx.wait(lambda s: all(receiving(s, target.id, k) for k in target.subscribe), 60, f"{target.id} a receber")
+    ctx.measure(f"{target.id} volta a receber os seus fluxos", dt, expect=(0, 45))
+
+
+@test("G6", "ROUTE_TEST: o caminho que cada cliente recebe é o da árvore e muda quando um nó cai")
+def g6(ctx):
+    """Etapa 3: cada servidor envia um ROUTE_TEST pela árvore ativa; cada cliente vê o caminho acumulado. Verifica que
+    começa no servidor, acaba no cliente, só usa ligações overlay e coincide com a árvore de rotas; depois mata um nó
+    do caminho e espera que o caminho mude."""
+    plan = ctx.plan
+    if not plan.route_test:
+        raise Skip("este cenário não gera ROUTE_TEST (route_test = 0)")
+    ctx.settle()
+    dt, st = ctx.wait(lambda s: _all_paths_known(s, plan), 40, "todos os clientes receberem um ROUTE_TEST por fluxo")
+    ctx.measure("até todos os clientes terem um caminho de teste", dt, expect=(0, 30))
+    edges = {frozenset(e) for e in plan.edges()}
+    bad = []
+    for c in _clients(plan):
+        for key, path in client_paths(st, c.id).items():
+            server = key.split(":")[0]
+            tree = tree_chain(st, key, c.id)
+            if path[0] != server or path[-1] != c.id:
+                bad.append(f"{c.id} {key}: {'>'.join(path)} não vai de {server} a {c.id}")
+            elif not all(frozenset(h) in edges for h in _hops_of(path)):
+                bad.append(f"{c.id} {key}: {'>'.join(path)} usa uma ligação que não é overlay")
+            elif path != tree and tree[0] == server:
+                bad.append(f"{c.id} {key}: ROUTE_TEST {'>'.join(path)} ≠ árvore {'>'.join(tree)}")
+    ctx.check("cada caminho vai do servidor ao cliente, só por ligações overlay, e coincide com a árvore", not bad, "; ".join(bad))
+    pick = _pick_failure(plan, st)
+    if pick is None:
+        raise Skip("nenhum caminho passa por um nó intermédio")
+    client, key, path, mid, alt = pick
+    ctx.note(f"caminho escolhido: {client} {key} = {'>'.join(path)}; mata-se {mid}"
+             + ("" if alt else " (sem alternativa neste cenário)"))
+    t0 = ctx.act(lambda: ctx.orch.kill([mid]))
+    try:
+        dt, st = ctx.wait(lambda s: (lambda p: bool(p) and mid not in p and receiving(s, client, key))(
+            client_paths(s, client).get(key)), 60 if alt else 15, f"{client} receber {key} por um caminho sem {mid}")
+        ctx.measure(f"o ROUTE_TEST do {client} passa a mostrar outro caminho", dt, expect=(0, 45))
+        ctx.note(f"novo caminho: {'>'.join(client_paths(st, client)[key])}")
+    except TestFailure:
+        if alt:
+            raise
+        ctx.note(f"{mid} é a única ligação deste cliente a {key}: sem alternativa, o fluxo pára (esperado nesta topologia)")
+
+
+@test("G7", "Entra um nó suplente e liga-se aos vizinhos do ficheiro overlay")
+def g7(ctx):
+    spares = [s for s in ctx.plan.nodes.values() if s.spare]
+    if not spares:
+        raise Skip("o cenário não tem nós suplentes")
+    ctx.settle()
+    for spec in spares:
+        expect = {b for a, b in _directed(ctx.plan) if a == spec.id and not ctx.plan.nodes[b].spare}
+        t0 = ctx.act(lambda s=spec.id: ctx.orch.start([s]))
+        ctx.defer(lambda s=spec.id: ctx.orch.stop([s]))
+        dt, st = ctx.wait(lambda s: neighbors(s, spec.id) == expect and all(spec.id in neighbors(s, p) for p in expect), 40,
+                          f"{spec.id} ligar-se a {sorted(expect)}")
+        ctx.measure(f"{spec.id} liga-se a {', '.join(sorted(expect))}", dt, expect=(0, 25))
+        st = ctx.sleep(4)
+        ctx.check(f"nenhum cliente perde imagens com a entrada de {spec.id}",
+                  not any(event_times(st, c.id, "fluxo_parou", after=t0) for c in _clients(ctx.plan)))
+
+
+@test("G8", "Réplica: um cliente sem servidor fixo passa para outro servidor quando o seu cai")
+def g8(ctx):
+    """D38: subscrever só o fluxo (sem servidor) escolhe o servidor mais perto e muda se ele cair."""
+    plan = ctx.plan
+    pairs = [(c.id, sub) for c in _clients(plan) for sub in c.subscribe
+             if ":" not in sub and len(plan.publishers_of(sub)) > 1]
+    if not pairs:
+        raise Skip("nenhum cliente subscreve um fluxo replicado sem servidor fixo")
+    client, key = pairs[0]
+    st = ctx.settle()
+    f0 = flow(st, client, key)
+    first = f0["origin"]
+    ctx.note(f"{client} recebe {key} de {first}")
+    t0 = ctx.act(lambda: ctx.orch.kill([first]))
+    dt, st = ctx.wait(lambda s: receiving(s, client, key) and (flow(s, client, key) or {}).get("origin") not in (None, first),
+                      60, f"{client} receber {key} de outro servidor")
+    ctx.measure(f"{client} passa para a réplica ({flow(st, client, key)['origin']})", dt, expect=(0, 30))
+    ctx.measure("interrupção do vídeo na troca", interruption(st, client, key, t0), expect=(0, 20))
+
+
+@test("G9", "O cliente escolhe os filmes: tira e volta a pôr subscrições")
+def g9(ctx):
+    """Muda as subscrições de um cliente (o painel relança-o): o servidor deixa de emitir o que ninguém vê e os outros clientes
+    não notam. Depois subscreve um fluxo novo e mede o tempo até à primeira imagem."""
+    plan = ctx.plan
+    st = ctx.settle()
+    clients = _clients(plan)
+    if not clients:
+        raise Skip("o cenário não tem clientes")
+    target = max(clients, key=lambda c: len(c.subscribe))
+    others = [c.id for c in clients if c.id != target.id]
+    original = list(target.subscribe)
+    ctx.defer(lambda: ctx.orch.set_subscriptions(target.id, original))
+    dropped = original[0]
+    t0 = ctx.act(lambda: ctx.orch.set_subscriptions(target.id, original[1:]))
+    st = ctx.sleep(3)
+    ctx.check(f"{target.id} deixa de pedir {dropped}", not any(f.get("subscription") == dropped or
+              f"{f['origin']}:{f['flow']}" == dropped for f in status(st, target.id).get("flows", []) if f["active"]))
+    ctx.check("os outros clientes não perdem imagens",
+              not any(event_times(st, o, "fluxo_parou", after=t0) for o in others))
+    new = [o["key"] for o in ctx.orch.subscription_options() if o["server"] is not None and o["key"] not in original
+           and not any(_split(x)[1] == o["flow"] for x in original[1:])]
+    t1 = ctx.act(lambda: ctx.orch.set_subscriptions(target.id, original[1:] + [new[0] if new else dropped]))
+    added = new[0] if new else dropped
+    dt, st = ctx.wait(lambda s: receiving(s, target.id, added), 60, f"{target.id} receber {added}")
+    ctx.measure(f"{target.id} começa a receber {added}", dt, expect=(0, 45))
+
+
+# ---------------------------------------------------------------- testes genéricos de rede (só no CORE)
+
+def _active_hop(ctx, st, prefer_mid=True):
+    """(cliente, chave, a, b): um troço overlay do caminho ativo de um cliente (o do meio, se houver)."""
+    best = None
+    for c in _clients(ctx.plan):
+        for key, path in client_paths(st, c.id).items():
+            hops = _hops_of(path)
+            if hops and (best is None or len(hops) > len(best[2])):
+                best = (c.id, key, hops)
+    if best is None:
+        raise TestFailure("não há nenhum caminho ativo (ROUTE_TEST) para escolher um troço")
+    client, key, hops = best
+    a, b = hops[len(hops) // 2] if prefer_mid else hops[0]
+    return client, key, a, b
+
+
+@test("N1", "Atraso de 50 ms no caminho ativo de um cliente: o RTT sobe e o caminho adapta-se", core=True)
+def n1(ctx):
+    ctx.need_core()
+    st = ctx.settle()
+    ctx.wait(lambda s: _all_paths_known(s, ctx.plan), 40, "caminhos de teste")
+    st = ctx.state()
+    client, key, a, b = _active_hop(ctx, st)
+    before = client_paths(st, client)[key]
+    base = rtt(st, a, b)
+    ctx.note(f"troço escolhido: {a}→{b} no caminho {'>'.join(before)} de {client} ({key}); RTT inicial {base} ms")
+    ctx.defer(lambda: ctx.orch.hop_clear(a, b))
+    ctx.orch.hop_netem(a, b, delay="50ms")
+    dt, st = ctx.wait(lambda s: (rtt(s, a, b) or 0) >= 90, 60, f"o RTT {a}–{b} subir")
+    ctx.measure(f"RTT {a}–{b} com 50 ms em cada sentido", rtt(st, a, b), "ms", expect=(90, 140))
+    st = ctx.sleep(12)
+    after = client_paths(st, client).get(key)
+    ctx.note(f"caminho depois: {'>'.join(after) if after else '(sem teste recente)'}"
+             + (" (mudou: há uma alternativa mais rápida)" if after and after != before else " (igual: não há alternativa melhor)"))
+    ctx.check(f"{client} continua a receber {key}", receiving(st, client, key))
+    ctx.orch.hop_clear(a, b)
+    dt, st = ctx.wait(lambda s: (rtt(s, a, b) or 99) < 30, 60, f"o RTT {a}–{b} voltar ao normal")
+    ctx.measure("tempo até o RTT voltar ao normal", dt, expect=(0, 45))
+
+
+@test("N2", "Corta a ligação do underlay no caminho ativo: o fluxo recupera", core=True)
+def n2(ctx):
+    ctx.need_core()
+    st = ctx.settle()
+    ctx.wait(lambda s: _all_paths_known(s, ctx.plan), 40, "caminhos de teste")
+    st = ctx.state()
+    client, key, a, b = _active_hop(ctx, st)
+    before = client_paths(st, client)[key]
+    ctx.note(f"troço cortado: {a}→{b} no caminho {'>'.join(before)} de {client} ({key})")
+    ctx.defer(lambda: ctx.orch.hop_set(a, b, True))
+    t0 = ctx.act(lambda: ctx.orch.hop_set(a, b, False))
+    time.sleep(2)
+    try:
+        dt, st = ctx.wait(lambda s: receiving(s, client, key), 80, f"{client} voltar a receber {key}")
+        ctx.measure(f"{client} volta a receber {key}", dt + 2, expect=(0, 60))
+        ctx.measure("interrupção do vídeo", interruption(st, client, key, t0), expect=(0, 60))
+        after = client_paths(st, client).get(key)
+        ctx.note(f"caminho depois: {'>'.join(after) if after else '(sem teste recente)'}")
+    finally:
+        ctx.orch.hop_set(a, b, True)
+
+
+@test("N3", "Desliga um router de passagem do caminho ativo (o OSPF recalcula)", core=True)
+def n3(ctx):
+    ctx.need_core()
+    st = ctx.settle()
+    ctx.wait(lambda s: _all_paths_known(s, ctx.plan), 40, "caminhos de teste")
+    st = ctx.state()
+    under = ctx.orch.underlay()
+    hosts = {s.core for s in ctx.plan.nodes.values()} | set(ctx.plan.free)
+    attached = {l["a"] for l in under["links"] if l["b"] in hosts} | {l["b"] for l in under["links"] if l["a"] in hosts}
+    for c in _clients(ctx.plan):
+        for key, path in client_paths(st, c.id).items():
+            for a, b in _hops_of(path):
+                ip = ctx.orch.ip_path(ctx.plan.nodes[a].core, ctx.plan.nodes[b].core) or []
+                transit = [r for r in ip[1:-1] if r not in attached and r.startswith("r")]
+                if transit:
+                    router, client, key = transit[len(transit) // 2], c.id, key
+                    break
+            else:
+                continue
+            break
+        else:
+            continue
+        break
+    else:
+        raise Skip("não há nenhum router só de passagem (todos têm um nó overlay ligado)")
+    ctx.note(f"router desligado: {router} (no caminho IP de {client}:{key})")
+    ctx.defer(lambda: ctx.orch.router_set(router, True))
+    t0 = ctx.act(lambda: ctx.orch.router_set(router, False))
+    time.sleep(2)
+    try:
+        dt, st = ctx.wait(lambda s: receiving(s, client, key), 90, f"{client} voltar a receber {key}")
+        ctx.measure(f"{client} volta a receber {key}", dt + 2, expect=(0, 70))
+        ctx.measure("interrupção do vídeo", interruption(st, client, key, t0), expect=(0, 70))
+    finally:
+        ctx.orch.router_set(router, True)
+
+
+@test("N4", "Perdas de 10 % no último troço do caminho de um cliente", core=True)
+def n4(ctx):
+    ctx.need_core()
+    st = ctx.settle()
+    ctx.wait(lambda s: _all_paths_known(s, ctx.plan), 40, "caminhos de teste")
+    st = ctx.state()
+    client, key, a, b = _active_hop(ctx, st, prefer_mid=False)
+    path = client_paths(st, client)[key]
+    a, b = _hops_of(path)[-1]
+    f0 = flow(st, client, key)
+    ctx.note(f"troço com perdas: {a}→{b} (caminho {'>'.join(path)})")
+    ctx.defer(lambda: ctx.orch.hop_clear(a, b))
+    ctx.orch.hop_netem(a, b, loss="10")
+    st = ctx.sleep(25)
+    f1 = flow(st, client, key)
+    got, lost = f1["received"] - f0["received"], f1["lost"] - f0["lost"]
+    pct = 100 * lost / max(1, got + lost)
+    ctx.measure(f"imagens perdidas no {client} ({key}) com 10 % de perdas de pacotes", pct, "%", expect=(15, 85))
+    ctx.note("cada imagem vai fragmentada em vários pacotes IP: basta perder um para perder a imagem (≈ 1 − 0,9^6 ≈ 47 %)")
+    ctx.check("o overlay não dá o vizinho por caído (o controlo TCP aguenta)", b in neighbors(st, a) or a in neighbors(st, b))
+
+
 # ---------------------------------------------------------------- cenário 4: falha de servidores
 
 C4 = ("cenario4",)
@@ -757,42 +1168,204 @@ def _demo4():
     ]
 
 
+def _fmt_paths(state, plan):
+    lines = []
+    for c in _clients(plan):
+        for key, path in sorted(client_paths(state, c.id).items()):
+            lines.append(f"{c.id} ← {key}: {' → '.join(path)}")
+    return "; ".join(lines) or "(ainda sem ROUTE_TEST)"
+
+
 def _demo_generic(plan):
+    """Guião que serve a qualquer cenário: constrói os textos a partir do plano (servidores, fluxos, clientes)."""
+    servers, clients, mids = _servers(plan), _clients(plan), _mids(plan)
+    flows = plan.all_flows()
+    shared = [f for f in flows if len(plan.publishers_of(f)) > 1]
+    content = "; ".join(f"{f} ({plan.video_label(f)}, de {'/'.join(plan.publishers_of(f))})" for f in flows)
+
     def start(ctx):
-        ctx.settle()
-        return "Todos os clientes estão a receber os seus fluxos."
+        st = ctx.settle()
+        ctx.wait(lambda s: _all_paths_known(s, plan), 30, "os caminhos de teste")
+        return "Caminhos medidos: " + _fmt_paths(ctx.state(), plan)
+
+    def show_paths(ctx):
+        return "Caminhos (último ROUTE_TEST de cada servidor): " + _fmt_paths(ctx.state(), plan)
+
+    def pick_path(st, need_mid=True):
+        best = None
+        for c in clients:
+            for key, path in client_paths(st, c.id).items():
+                if (not need_mid or len(path) > 2) and (best is None or len(path) > len(best[2])):
+                    best = (c.id, key, path)
+        return best
+
+    state = {}
 
     def kill_mid(ctx):
         st = ctx.settle()
-        cand = [s for s in plan.nodes.values() if not s.serve and not s.spare and not s.subscribe]
-        if not cand:
-            return "Este cenário não tem nós intermédios."
-        mid = max(cand, key=lambda s: len(neighbors(st, s.id))).id
-        peers = neighbors(st, mid)
+        ctx.wait(lambda s: _all_paths_known(s, plan), 30, "os caminhos de teste")
+        pick = _pick_failure(plan, ctx.state())
+        if pick is None:
+            return "Nenhum caminho passa por um nó intermédio neste cenário."
+        client, key, path, mid, _alt = pick
+        state["mid"] = mid
         t0 = ctx.act(lambda: ctx.orch.kill([mid]))
-        ctx.wait(lambda s: all(event_times(s, p, "vizinho_down", peer=mid, after=t0) for p in peers), 15, "deteção")
-        st = ctx.state()
-        detect = max(min(event_times(st, p, "vizinho_down", peer=mid, after=t0)) for p in peers) - t0
-        return f"Medido: os vizinhos de {mid} viram-no cair em {detect:.1f} s (o TCP fechou)."
+        try:
+            dt, st = ctx.wait(lambda s: (lambda p: bool(p) and mid not in p and receiving(s, client, key))(
+                client_paths(s, client).get(key)), 60 if _alt else 15, "novo caminho")
+            return (f"Medido: o caminho de {client} ({key}) era {' → '.join(path)}; com {mid} morto passou a "
+                    f"{' → '.join(client_paths(st, client)[key])} em {dt:.1f} s.")
+        except TestFailure:
+            return (f"Medido: {mid} era o único caminho de {client} para {key}: sem alternativa, o fluxo parou "
+                    f"(os outros clientes não foram afetados).")
 
     def back(ctx):
+        mid = state.get("mid")
+        if mid:
+            ctx.act(lambda: ctx.orch.start([mid]))
         ctx.finish()
-        return "O nó voltou e os vizinhos religaram-se sozinhos."
+        return "O nó voltou e os vizinhos religaram-se sozinhos; as rotas foram reconstruídas."
 
-    return [
-        {"title": "Arranque", "flow": None, "focus": [], "core": False, "run": start,
-         "text": "Os nós registam-se no bootstrapper, recebem os vizinhos e ligam-se. Os servidores anunciam os fluxos e os "
-                 "clientes ativam a rota pelo caminho inverso."},
-        {"title": "Cai um nó intermédio", "flow": None, "focus": [], "core": False, "run": kill_mid,
-         "text": "Matamos o nó intermédio com mais vizinhos e vemos como o overlay reage."},
-        {"title": "O nó volta", "flow": None, "focus": [], "core": False, "run": back,
-         "text": "Relançamos o nó: os vizinhos voltam a ligar-se e as rotas são reconstruídas."},
+    def kill_server(ctx):
+        ctx.settle()
+        pick = None
+        for srv in servers:
+            lost, failover, _kept = _depends_on(plan, srv.id)
+            if failover or lost:
+                if pick is None or (failover and not pick[2]):
+                    pick = (srv.id, lost, failover)
+        if pick is None:
+            return "Nenhum servidor tem clientes."
+        srv, lost, failover = pick
+        state["server"] = srv
+        t0 = ctx.act(lambda: ctx.orch.kill([srv]))
+        parts = []
+        if failover:
+            c, k = failover[0]
+            dt, st = ctx.wait(lambda s: receiving(s, c, k) and (flow(s, c, k) or {}).get("origin") != srv, 60, "a réplica")
+            parts.append(f"{c} passou a receber {k} de {flow(st, c, k)['origin']} em {dt:.1f} s "
+                         f"(interrupção {interruption(st, c, k, t0):.1f} s)")
+        if lost:
+            ctx.wait(lambda s: not any(receiving(s, c, k) for c, k in lost), 40, "os fluxos sem réplica pararem")
+            parts.append("os fluxos sem réplica pararam: " + ", ".join(f"{c}:{k}" for c, k in lost))
+        return "Medido: " + "; ".join(parts) + "."
+
+    def server_back(ctx):
+        srv = state.get("server")
+        if srv:
+            ctx.act(lambda: ctx.orch.start([srv]))
+        t0 = time.time()
+        ctx.settle()
+        return f"Medido: o servidor voltou e todos os clientes receberam de novo em {time.time() - t0:.1f} s."
+
+    def delay_hop(ctx):
+        ctx.need_core()
+        ctx.settle()
+        ctx.wait(lambda s: _all_paths_known(s, plan), 30, "os caminhos de teste")
+        client, key, a, b = _active_hop(ctx, ctx.state())
+        before = client_paths(ctx.state(), client)[key]
+        state["hop"] = (a, b)
+        ctx.orch.hop_netem(a, b, delay="80ms")
+        dt, st = ctx.wait(lambda s: (rtt(s, a, b) or 0) >= 120, 40, "o RTT subir")
+        ctx.sleep(8)
+        after = client_paths(ctx.state(), client).get(key)
+        return (f"Medido: o RTT {a}–{b} subiu para {rtt(st, a, b):.0f} ms. O caminho de {client} ({key}) era "
+                f"{' → '.join(before)} e agora é {' → '.join(after) if after else '(à espera de novo teste)'}"
+                + (" (mudou para fugir ao atraso)." if after and after != before else " (não há alternativa melhor)."))
+
+    def cut_hop(ctx):
+        ctx.need_core()
+        hop = state.get("hop")
+        st = ctx.settle()
+        ctx.wait(lambda s: _all_paths_known(s, plan), 30, "os caminhos de teste")
+        client, key, a, b = _active_hop(ctx, ctx.state())
+        before = client_paths(ctx.state(), client)[key]
+        ctx.orch.clear_network()
+        t0 = ctx.act(lambda: ctx.orch.hop_set(a, b, False))
+        try:
+            dt, st = ctx.wait(lambda s: receiving(s, client, key), 80, "o fluxo voltar")
+            after = client_paths(st, client).get(key)
+            return (f"Medido: ligação {a}–{b} cortada; {client} voltou a receber {key} em {dt:.1f} s (interrupção "
+                    f"{interruption(st, client, key, t0):.1f} s). Caminho: {' → '.join(before)} → "
+                    f"{' → '.join(after) if after else '(à espera de novo teste)'}.")
+        finally:
+            ctx.orch.hop_set(a, b, True)
+
+    def change_movie(ctx):
+        ctx.settle()
+        target = max(clients, key=lambda c: len(c.subscribe))
+        opts = [o["key"] for o in ctx.orch.subscription_options() if o["server"] is not None
+                and not any(_split(x)[1] == o["flow"] for x in target.subscribe)]
+        state["client"] = target.id
+        if not opts:
+            ctx.orch.set_subscriptions(target.id, target.subscribe[1:])
+            ctx.sleep(3)
+            return f"{target.id} deixou de pedir {target.subscribe[0] if target.subscribe else ''}: o servidor só o emite se alguém o pedir."
+        t0 = time.time()
+        ctx.orch.set_subscriptions(target.id, target.subscribe + [opts[0]])
+        dt, st = ctx.wait(lambda s: receiving(s, target.id, opts[0]), 60, "o filme novo")
+        return f"Medido: {target.id} passou a pedir também {opts[0]} e a primeira imagem chegou em {time.time() - t0:.1f} s."
+
+    def reset(ctx):
+        ctx.finish()
+        ctx.orch.reset_subscriptions()
+        return "Cenário reposto: nós todos a correr, subscrições do plano e rede sem atrasos."
+
+    steps = [
+        {"title": "Arranque e rotas", "flow": None, "focus": [s.id for s in servers], "core": False, "run": start, "tab": "paths",
+         "text": f"Cenário {plan.name}: {len(plan.nodes)} nós, servidores {', '.join(s.id for s in servers)}. Fluxos e conteúdo: {content}. "
+                 "Os servidores anunciam os fluxos, cada nó escolhe o montante de menor latência acumulada e os clientes ativam a rota "
+                 "pelo caminho inverso. Cada servidor envia também um ROUTE_TEST pela árvore ativa e cada cliente regista o caminho."},
+        {"title": "Cada fluxo é um filme diferente", "flow": None, "focus": [c.id for c in clients], "core": False, "run": None, "tab": "video",
+         "text": "Cada fluxo tem o seu vídeo (o filme_a é o filme real; os outros são vídeos com o nome do fluxo). "
+                 + (f"Os fluxos {', '.join(shared)} são publicados por mais do que um servidor: é o mesmo conteúdo, e um cliente que o "
+                    "subscreva sem indicar o servidor usa o mais perto e passa para o outro se esse cair. " if shared else "")
+                 + "Compara as janelas dos clientes no separador Vídeo."},
+        {"title": "O caminho de cada cliente", "flow": None, "focus": [], "core": False, "run": show_paths, "tab": "paths",
+         "text": "O separador Caminhos mostra o último ROUTE_TEST de cada subscrição: o servidor, os nós por onde passou e o cliente. "
+                 "É a prova de que os pacotes seguem as rotas da tabela. Clica numa linha para a ver desenhada no grafo."},
     ]
+    if mids:
+        steps += [
+            {"title": "Cai um nó do caminho", "flow": None, "focus": [m.id for m in mids], "core": False, "run": kill_mid, "tab": "paths",
+             "text": "Matamos um nó intermédio que faz parte de um caminho. Os vizinhos veem o TCP fechar, a rota é reparada (ou retirada com "
+                     "WITHDRAW) e o ROUTE_TEST seguinte mostra o caminho novo, se houver alternativa."},
+            {"title": "O nó volta", "flow": None, "focus": [], "core": False, "run": back, "tab": "node",
+             "text": "Relançamos o nó: regista-se no bootstrapper, os vizinhos religam-se e as rotas são reconstruídas."},
+        ]
+    if servers and clients:
+        steps += [
+            {"title": "Cai um servidor", "flow": None, "focus": [s.id for s in servers], "core": False, "run": kill_server, "tab": "video",
+             "text": "Matamos um servidor com clientes. O WITHDRAW percorre a árvore; o que tem réplica passa para o outro servidor e o resto "
+                     "pára (vê o vídeo)."},
+            {"title": "O servidor volta", "flow": None, "focus": [], "core": False, "run": server_back, "tab": "video",
+             "text": "As épocas dos anúncios recomeçam a partir da hora de arranque, por isso os nós aceitam o servidor reiniciado."},
+        ]
+    steps += [
+        {"title": "Atraso num troço do caminho", "flow": None, "focus": [], "core": True, "run": delay_hop, "tab": "paths",
+         "text": "Com o tc netem põe-se 80 ms em cada sentido numa ligação do caminho ativo. O RTT medido sobe e, se houver um caminho mais "
+                 "rápido, o cliente muda para ele (métrica de latência, com histerese para não oscilar)."},
+        {"title": "Corta uma ligação do caminho", "flow": None, "focus": [], "core": True, "run": cut_hop, "tab": "paths",
+         "text": "Cortamos a ligação (ip link down): o OSPF recalcula o underlay e/ou o overlay muda de caminho. Mede-se a interrupção."},
+        {"title": "O cliente muda de filme", "flow": None, "focus": [], "core": False, "run": change_movie, "tab": "clients",
+         "text": "O separador Clientes deixa escolher que fluxos cada cliente subscreve (o cliente é relançado). O servidor só emite o que "
+                 "alguém pede, e o ramo novo parte do cliente até ao servidor pelo caminho inverso."},
+        {"title": "Repor tudo", "flow": None, "focus": [], "core": False, "run": reset, "tab": "node",
+         "text": "Voltamos ao estado inicial: nós todos a correr, subscrições do plano e rede sem atrasos."},
+    ]
+    return steps
 
 
 def demo_for(plan):
     """Passos da demonstração guiada do cenário."""
-    return _demo4() if plan.name == "cenario4" else _demo_generic(plan)
+    generic = _demo_generic(plan)
+    if plan.name != "cenario4":
+        return generic
+    extra = {t: next(g for g in generic if g["title"] == t) for t in (
+        "O caminho de cada cliente", "Corta uma ligação do caminho", "O cliente muda de filme", "Repor tudo")}
+    steps = _demo4()[:-1]   # o guião do cenário 4 e depois os passos que servem a qualquer cenário
+    steps.insert(2, extra["O caminho de cada cliente"])
+    return steps + [extra["Corta uma ligação do caminho"], extra["O cliente muda de filme"], extra["Repor tudo"]]
 
 
 def run_demo_step(orch, step):

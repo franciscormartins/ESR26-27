@@ -9,6 +9,10 @@ CORE em ``<cenario>.xml``. Formato do plano::
                "O5": {"spare": true}},
      "free": ["L1", "L2"]}
 
+Campos opcionais do plano: ``videos`` (``{"filme_b": "videos/filme_b.Mjpeg"}``: ficheiro MJPEG de cada fluxo, relativo à raiz do
+repositório; sem isto usa ``videos/<fluxo>.Mjpeg`` se existir e, senão, o filme ``progex/movie.Mjpeg``; o mesmo fluxo publicado por
+dois servidores é o mesmo vídeo) e ``route_test`` (segundos entre os ``ROUTE_TEST`` que cada servidor gera, 2 por omissão; 0 = não).
+
 Campos de cada nó: ``core`` (nome do nó no CORE; por omissão o campo ``core`` do overlay ou o próprio id), ``serve``,
 ``publish``, ``subscribe`` (``SERVIDOR:FLUXO`` ou só ``FLUXO``, qualquer servidor, D38), ``bootstrap`` (id do bootstrapper deste nó; por omissão o do plano; ``null`` = nenhum),
 ``neighbors`` (ids dos vizinhos, estratégia 1), ``core_bootstrap`` e ``core_neighbors`` (endereços a usar no CORE,
@@ -24,6 +28,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 TOPOLOGIES = os.path.join(ROOT, "topologies")
 DEFAULT_PORT = 5000
 DEFAULT_DATA_PORT = 6000
+VIDEOS = os.path.join(ROOT, "videos")
+MOVIE = os.path.join(ROOT, "progex", "movie.Mjpeg")
 
 
 class PlanError(ValueError):
@@ -59,6 +65,10 @@ class Plan:
         self.base_dir = base_dir
         self.bootstrap = data.get("bootstrap")
         self.free = list(data.get("free", []))
+        self.videos = dict(data.get("videos", {}))
+        self.route_test = float(data.get("route_test", 2.0))
+        if self.route_test < 0:
+            raise PlanError(f"{name}: route_test não pode ser negativo")
         self.overlay_path = os.path.join(base_dir, data["overlay"])
         with open(self.overlay_path) as f:
             self.overlay = json.load(f)["nodes"]
@@ -90,6 +100,30 @@ class Plan:
             raise PlanError(f"{self.name}: o bootstrapper {self.bootstrap} tem de ter serve=true")
 
     # -- consultas -----------------------------------------------------
+
+    def video_of(self, flow):
+        """Ficheiro MJPEG que se emite neste fluxo, ou ``None`` (o ``ott`` usa então o filme por omissão)."""
+        path = self.videos.get(flow)
+        if path:
+            path = path if os.path.isabs(path) else os.path.join(ROOT, path)
+            if not os.path.isfile(path):
+                raise PlanError(f"{self.name}: o vídeo do fluxo {flow} não existe: {path}")
+            return path
+        path = os.path.join(VIDEOS, f"{flow}.Mjpeg")
+        return path if os.path.isfile(path) else None
+
+    def video_label(self, flow):
+        """Nome curto do vídeo de um fluxo (para o painel): ``movie.Mjpeg`` ou ``filme_b.Mjpeg``."""
+        path = self.video_of(flow)
+        return os.path.basename(path or MOVIE)
+
+    def publishers_of(self, flow):
+        """Servidores que publicam este fluxo."""
+        return sorted(n.id for n in self.nodes.values() if flow in n.publish)
+
+    def all_flows(self):
+        """Todos os fluxos publicados no cenário, por ordem alfabética."""
+        return sorted({f for n in self.nodes.values() for f in n.publish})
 
     def bootstrap_of(self, spec):
         return self.bootstrap if spec.bootstrap == "__plan__" else spec.bootstrap

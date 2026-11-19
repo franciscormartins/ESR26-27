@@ -41,6 +41,10 @@ class ProtocolTest(unittest.TestCase):
             make_msg(MsgType.ANNOUNCE, "A", server_id="S1", flow="filme_a", epoch=1,
                      metric=1, delay=0.0015),
             make_msg(MsgType.WITHDRAW, "O2", server_id="S1", flow="filme_a", epoch=3),
+            make_msg(MsgType.ROUTE_TEST, "S1", server_id="S1", flow="filme_a", seq=1,
+                     path=["S1"]),
+            make_msg(MsgType.ROUTE_TEST, "O2", server_id="S1", flow="filme_a", seq=7,
+                     path=["S1", "O1", "O2"]),
         ]
         for m in good:
             self.assertIs(proto.validate(m), m)
@@ -78,10 +82,30 @@ class ProtocolTest(unittest.TestCase):
                      metric=1, delay=float("inf")),
             make_msg(MsgType.WITHDRAW, "O2", server_id="S1", flow="filme_a"),   # falta epoch
             make_msg(MsgType.WITHDRAW, "O2", server_id="S1", flow="filme_a", epoch=0),
+            make_msg(MsgType.ROUTE_TEST, "S1", server_id="S1", flow="filme_a", seq=1),   # sem path
+            make_msg(MsgType.ROUTE_TEST, "S1", server_id="S1", flow="filme_a", path=["S1"]),  # sem seq
+            make_msg(MsgType.ROUTE_TEST, "S1", server_id="S1", flow="filme_a", seq=0, path=["S1"]),
+            make_msg(MsgType.ROUTE_TEST, "S1", server_id="S1", flow="filme_a", seq=1, path=[]),
+            make_msg(MsgType.ROUTE_TEST, "S1", server_id="S1", flow="filme_a", seq=1, path="S1"),
+            make_msg(MsgType.ROUTE_TEST, "S1", server_id="S1", flow="filme_a", seq=1, path=["S1", ""]),
+            make_msg(MsgType.ROUTE_TEST, "S1", server_id="S1", flow="filme_a", seq=1,
+                     path=["N%d" % i for i in range(proto.MAX_PATH + 1)]),
         ]
         for m in bad:
             with self.assertRaises(ProtocolError, msg=repr(m)):
                 proto.validate(m)
+
+    def test_route_test_roundtrip_and_truncated(self):
+        msg = make_msg(MsgType.ROUTE_TEST, "O1", server_id="S1", flow="filme_a", seq=3,
+                       path=["S1", "O1"])
+        a, b = socket.socketpair()
+        proto.send_msg(a, msg)
+        self.assertEqual(proto.recv_msg(b), msg)
+        raw = json.dumps(msg).encode()
+        a.sendall(struct.pack("!I", len(raw)) + raw[:len(raw) // 2])   # truncada
+        a.close()
+        self.assertIsNone(proto.recv_msg(b))
+        b.close()
 
     def test_send_refuses_invalid(self):
         a, b = socket.socketpair()

@@ -143,6 +143,25 @@ class WebTest(unittest.TestCase):
         self.assertEqual(self.orch.calls[-1], ("link_netem", "r4", "eth1", "r3", "eth2",
                                                {"delay": "30ms", "jitter": None, "loss": "5", "rate": None}))
 
+    def test_subscription_and_hop_actions_reach_the_orchestrator(self):
+        calls = []
+        self.orch.set_subscriptions = lambda node, subs: calls.append(("subs", node, subs))
+        self.orch.reset_subscriptions = lambda: calls.append(("reset",))
+        self.orch.hop_netem = lambda a, b, **p: calls.append(("hop_netem", a, b, p))
+        self.orch.hop_clear = lambda a, b: calls.append(("hop_clear", a, b))
+        self.orch.hop_set = lambda a, b, up: calls.append(("hop_set", a, b, up))
+        for body in ({"action": "subs", "node": "C", "subs": ["S:filme_a"]}, {"action": "subs_reset"},
+                     {"action": "hop_netem", "a": "S", "b": "A", "delay": "50ms"},
+                     {"action": "hop_netem", "a": "S", "b": "A", "loss": "10"},
+                     {"action": "hop_clear", "a": "S", "b": "A"}, {"action": "hop_set", "a": "S", "b": "A", "up": False}):
+            self.assertEqual(self.post(body)[0], 200, body)
+        self.assertEqual(calls, [("subs", "C", ["S:filme_a"]), ("reset",),
+                                 ("hop_netem", "S", "A", {"delay": "50ms", "jitter": None, "loss": None, "rate": None}),
+                                 ("hop_netem", "S", "A", {"delay": None, "jitter": None, "loss": "10", "rate": None}),
+                                 ("hop_clear", "S", "A"), ("hop_set", "S", "A", False)])
+        self.assertEqual(self.post({"action": "subs", "subs": []})[0], 400)          # falta o cliente
+        self.assertEqual(self.post({"action": "hop_set", "a": "S"})[0], 400)         # falta o outro nó do troço
+
     def test_do_action_rejects_bad_node_lists(self):
         with self.assertRaises(BackendError):
             do_action(self.orch, {"action": "kill", "nodes": [1, 2]})

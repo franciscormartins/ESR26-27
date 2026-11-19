@@ -2,7 +2,7 @@
 
 > Ficheiro vivo: é atualizado sempre que algo é feito. Serve para saber o ponto da situação,
 > relembrar as decisões e preparar as conversas com os docentes.
-> **Última atualização: 2026-11-18.**
+> **Última atualização: 2026-11-19 (painel para todos os cenários).**
 
 ## 1. Resumo em 30 segundos
 
@@ -11,28 +11,26 @@
   opcionalmente, pede vizinhos substitutos ao bootstrapper.
 - O overlay constrói-se de duas formas: **estratégia 2** (`ott -b <bootstrapper>`: o servidor lê um
   ficheiro de topologia e devolve os vizinhos) e **estratégia 1** (`ott viz1 viz2`: vizinhos à mão).
-- **Etapa 2 (estado em 2026-11-09):** anúncios periódicos por fluxo; montante escolhido pela
-  menor latência acumulada (RTT/2 por ligação, com histerese e condição de viabilidade contra
-  ciclos; saltos só desempatam, D34, 2026-11-10); subscrições agregadas por ramo; dados RTP/JPEG
-  por UDP pelos ramos ativos com RPF estrito; reparação rápida, `WITHDRAW` e tempo de vida das
-  rotas para falhas e reinício do servidor. Tudo coberto por 188 testes automáticos, incluindo
-  nós reais em localhost. Até 2026-11-09 a Etapa 2 só funcionava com nós falsos (handlers
-  recebiam o objeto `Neighbor`, corrigido em `e83e37b`). **Falta:** segundo servidor nas
-  topologias e todos os ensaios no CORE (ver `docs/ETAPA2.md`).
-  **Elemento 1 concluído:** todas as funcionalidades estão implementadas e foram ensaiadas no CORE (cenário 2 e
-  cenário 3 com 11 nós) e medidas com 10 repetições (secção 7). Os ensaios acharam e corrigiram 4 defeitos
-  (D17–D19 e o contador de défice); ver secção 7 e o registo de alterações.
-- Falta ainda, fora do E1: validação ponta a ponta da Etapa 2 no CORE e a interface de streaming/apresentação da Etapa 4.
-  Do E1 só depende de ti a revisão do texto do relatório (a atribuição overlay→CORE do cenário 3 foi decidida em 2026-11-09, D13).
+- **Etapa 2 (Estratégia 1 do enunciado), feita e ensaiada no CORE (cenários 1, 2, 3 e 5):** anúncios periódicos por
+  fluxo; montante escolhido pela menor latência acumulada (RTT/2 por ligação, com histerese e condição de viabilidade
+  contra ciclos; saltos só desempatam, D34); subscrições agregadas por ramo; dados RTP/JPEG por UDP pelos ramos ativos com
+  RPF estrito; reparação rápida, `WITHDRAW` e tempo de vida das rotas para falhas e reinício do servidor; subscrição sem
+  servidor fixo com failover (D38). O cenário 5 (D37) cumpre o requisito de **dois servidores com dois fluxos distintos**
+  e foi ensaiado no CORE (9 ensaios, 2026-11-18).
+- **Etapa 3 (teste dos percursos), feita em 2026-11-19 (D39):** `ott --route-test S` faz o servidor gerar um
+  `ROUTE_TEST` por fluxo; segue a árvore do fluxo, cada nó regista o caminho acumulado (`src/ott/routetest.py`,
+  `docs/protocolo.md` §3.8). Validada em localhost; **por ensaiar no CORE**.
+- **Etapa 4 (streaming):** RTP/MJPEG sobre UDP (`src/ott/streaming/`) e `ott --gui` (Tkinter) para ver o vídeo.
+- **Elemento 1 concluído** e medido com 10 repetições (secção 7). 
+- Testes automáticos: **280 testes**, incluindo nós reais em localhost e 2 servidores × 2 fluxos distintos em simultâneo
+  (`tests/test_routetest.py`).
+- **Falta:** o relatório (`docs/relatorio/`: só a secção do E1 está escrita), ensaiar o `ROUTE_TEST` no CORE e a revisão do
+  texto pelo grupo. Decisão em aberto: o cenário 2 tem 2 intermédios e o enunciado mostra 3 (ver §9).
 
 ## 2. O que está feito (elemento 1)
 
 | Tarefa do guião | Estado | Onde |
 |---|---|---|
-| 2026-11-17 | **Painel: rotas verdadeiras e atraso rápido.** `Orchestrator.ip_path`/`paths` descobrem o caminho IP real entre dois nós (`ip route get` em cada salto, `/api/paths`, cache de 3 s) e o painel desenha as árvores por esse caminho (antes: caminho mais curto do desenho, que podia não ser o do OSPF, e por isso mexer numa ligação «do desenho» não mudava nada). Botões de atraso rápido (20/50/100/200 ms) no separador Rede. Corrigido o clique nas ligações, que ficava tapado pelas linhas dos fluxos. Verificado com `ip_path` numa sessão real (cenário 3) e 1 teste novo; falta ver no browser. Merge com o `ott --live` feito (sem conflitos de código; só `cli.py` e `ESTADO.md` com acrescentos dos dois lados). |
-| 2026-11-17 | **Painel: routers clicáveis.** Os routers do CORE passaram a ser clicáveis no grafo (maiores, a vermelho se desligados); o separador Rede ganhou «Desligar/Ligar router» (`Orchestrator.router_set`: `ip link set … down` em todas as interfaces do router, ações `router_down`/`router_up`) e a lista das ligações do router para lhes mudar os parâmetros; as ligações têm uma zona de clique mais larga. 2 testes novos (200 no total). Falta ensaiar no CORE e ver no browser. |
-| 2026-11-17 | **Painel: separador Vídeo.** Novo `--frame-dir` no `ott` (`FrameSaver`: guarda a imagem mais recente de cada subscrição, ≤ 10/s, escrita atómica); o `ottctl` passa-o aos clientes; o painel serve-a como MJPEG em `/api/video` e mostra um mosaico com o vídeo de cada cliente, as métricas e o nó de onde vem o fluxo (`via`), com os botões de lançar/parar/matar/congelar. Verificado em local (cenário 1: o `/api/video` devolve JPEG); falta ensaiar no CORE e ver no browser. 3 testes novos. |
-| 2026-11-17 | **Topologia do CORE em todos os cenários.** `underlay_of` passou a ler também os switches (`<networks>`, cenário 3), que antes davam erro; as ligações a um switch levam `sw` e o painel aplica atraso/perdas/corte só ao extremo do nó (um switch não tem espaço de nomes). Verificado: cenários 1–4 sem nós overlay em falta ou isolados; 2 testes novos. Interface não verificada no browser. |
 | Biblioteca de mensagens com validação de campos | ✅ feito | `src/ott/protocol.py`, `tests/test_protocol.py` |
 | Documento de especificação das mensagens | ✅ feito (a rever pelo grupo) | `docs/protocolo.md` |
 | Aplicação `ott`: servidor TCP + ligações de saída, full-duplex, thread por ligação, HELLO | ✅ feito, ensaiado no CORE | `src/ott/node.py` |
@@ -91,6 +89,9 @@ underlay do cenário 3 a funcionar (routers FRR, OSPF; topologia redesenhada em 
 | D36 | Um nó cujo **único vizinho é o montante** aceita um anúncio não viável desse montante (a referência de viabilidade recomeça) em vez de o tratar como perda do montante (`RoutingTable._only_neighbor`, em `handle_announce`) (**implementado** em 2026-11-18) | Corrige o L11 (CORE, cenário 3, ensaio 6b): o O5 reparou por um caminho 0,1 ms mais lento e o O11 (só com o O5) retirou a rota, ficando ≈ 3,2 s sem vídeo e deixando o `filme_b` sem procura. Um nó com um só vizinho não reencaminha nem anuncia a ninguém, por isso não pode fechar um ciclo. Alternativas rejeitadas: aceitar o anúncio sempre que o nó não tem destinos (um vizinho sem procura ainda pode escolher-nos como montante e fechar um ciclo de controlo) e um pedido de época nova ao servidor como no Babel (mensagem nova; fica como hipótese para nós intermédios). Se o nó não souber os vizinhos (`neighbor_ids`), mantém o comportamento da D34. |
 | D37 | **Cenário 5** (`docs/CENARIO5.md`): dois servidores com dois fluxos **distintos** cada (`S1`: `filme_a`, `filme_b`; `S2`: `filme_c`, `filme_d`), anel O1–O2–O3–O4 com os servidores em lados opostos, acessos O5 (C1, C2) e O6 (C3, C4), C5 no O1 e suplente O7 entre O5 e O6. Underlay com um router FRR por nó de infraestrutura e uma ligação entre routers por cada ligação overlay; a r3–r6 (O1–O4) tem 10 ms de base. Gerado por `topologies/gerar_cenario5.py` | O cenário 4 é difícil de ler (teia simétrica, overlay muito diferente do underlay, réplica do `filme_b`, OSPF com caminhos de custo igual). No cenário 5 cada ligação overlay tem um caminho IP único, a latência escolhe logo à partida um caminho com mais saltos (o `filme_c` para o C5) e cada requisito mínimo tem um ensaio próprio. Não substitui o cenário 4. |
 | D38 | **Subscrição sem servidor fixo** (`--subscribe FLUXO`): o cliente escolhe, entre os servidores com caminho para esse fluxo, o de menor latência acumulada (`RoutingTable.sources_of`), passa para outro assim que o seu deixa de ter caminho (failover) e, com os dois alcançáveis, só troca acima da histerese da seleção e com pelo menos 5 s entre trocas. Novo `src/ott/subscriptions.py` (`SubscriptionManager`, também para as subscrições `SERVIDOR:FLUXO`, que funcionam como antes); a CLI só o compõe. No cenário 5, o `filme_c` passa a ser publicado pelo S1 e pelo S2 e o C1 e o C5 subscrevem-no assim (**implementado** em 2026-11-18) | Uma réplica só era útil se o cliente subscrevesse as duas (recebia e transportava o vídeo duas vezes, como o C3 do cenário 4). A escolha fica no cliente e usa só a interface pública da tabela: **sem mensagens novas** e com as rotas por `(servidor, fluxo)` (invariante). Alternativa rejeitada: rotas por fluxo, sem servidor (anycast no próprio encaminhamento): mudava o protocolo, a condição de viabilidade e as épocas, que são por servidor. Impacto: `status.py` acrescenta `subscription` a cada fluxo recebido e aceita os recetores como função; `live.py` aceita as subscrições como função; o `ottctl` e o painel aceitam `FLUXO` nos planos (`any_FLUXO.jpg` para o vídeo); `forwarding.set_local_receiver(..., None)` retira um recetor. Limitação: só troca quando a tabela de rotas deixa de ter caminho. |
+| D39 | **Etapa 3: `ROUTE_TEST`.** O servidor gera (com `--route-test S`, por omissão desligado) uma mensagem por fluxo que publica; segue a árvore ativa do fluxo e cada nó junta o seu id ao `path`, regista uma linha de log e guarda o resultado (`src/ott/routetest.py`, `RouteTester`; `protocolo.md` §3.8). Só aceita a mensagem do vizinho de montante (como o RPF) e descarta ciclos; só lê a `RoutingTable` (`upstream_of`, `active_destinations`, `has_local_subscription`) (**implementado** em 2026-11-19) | O enunciado pede uma mensagem de teste gerada pelo servidor e encaminhada pelas rotas, com log ou caminho acumulado em cada nó; fazemos as duas coisas. Não compara relógios (não estão sincronizados): valida o caminho, não o atraso. Alternativa rejeitada: um `path` também no `ANNOUNCE` (decisão do grupo de não o acrescentar; o `ROUTE_TEST` dá o caminho completo a pedido, sem aumentar o tráfego periódico). Impacto: tipo já existia em `protocol.py`, ganha campos obrigatórios `server_id`, `flow`, `seq`, `path`; um nó antigo ignora o tipo; nada muda nas outras mensagens. Custo: uma mensagem pequena por fluxo e por ramo em cada intervalo, e só onde há clientes. Validado em localhost; **por ensaiar no CORE**. |
+| D40 | As rotas **mortas** saem da tabela: sem montante, candidatos, ramos a jusante nem subscritores locais, e retiradas por este nó há mais de `route_ttl` (`RoutingTable.expire`) (**implementado** em 2026-11-19) | Apontado na auditoria (2026-11-18): as entradas nunca eram removidas e os servidores desaparecidos ficavam na tabela e no estado (`status.json`) para sempre. Só sai depois da retenção da D27 (que serve para recusar anúncios antigos), por isso a regra anti-ciclos fantasma não muda; passado esse tempo qualquer época volta a ser aceite, como já acontecia. Uma rota com subscritor local nunca é apagada (o pedido fica pendente). |
+| D41 | **Painel para todos os cenários e para a avaliação** (2026-11-19; ferramentas de teste, fora do enunciado, como a D31): (1) **cada fluxo tem o seu vídeo** (`videos/`, `plan.video_of`): o `filme_a` é o filme real e os outros são vídeos de cor diferente com o nome do fluxo; o mesmo fluxo em dois servidores é o mesmo vídeo; (2) os servidores arrancam com `--route-test 2` (`route_test` no plano) e o painel mostra o **caminho de cada subscrição** (separador *Caminhos*, `state["paths"]`); (3) **obstáculos por troço** (`Orchestrator.hop_netem/hop_set/hop_clear`: a ligação do underlay a meio do caminho IP verdadeiro entre dois nós overlay); (4) **subscrições dos clientes mudam em tempo real** (`set_subscriptions`: pára o nó com BYE e relança-o; persistem em `state.json`; separador *Clientes*, `ottctl subs`); (5) o painel continua **só com o CORE** (decisão do grupo: o modo local fica na linha de comandos, para os testes automáticos); (6) testes **G3–G9** (qualquer cenário) e **N1–N4** (rede, só CORE) que escolhem nós, clientes e troços a partir do caminho medido, e uma demonstração guiada por cenário (`_demo_generic`, cenário 4 com o seu guião mais os passos comuns) | O professor vai querer ver as rotas e como mudam com os obstáculos, o mesmo filme de um servidor e de outro, e todos os cenários, sem depender dos nomes dos nós do cenário 4. Alternativa rejeitada para as subscrições: um canal de controlo no `ott` (`--control-file`) para subscrever sem relançar: mexeria no núcleo; relançar mostra de qualquer forma o BYE e a entrada. O `ott` só ganhou `--route-test` (D39); o resto é `src/ott/ctl/`. Impacto: o plano ganha `videos` e `route_test` (opcionais); nenhum protocolo muda. **Validado só no modo local** (5 cenários, testes G e ensaio visual do painel no Firefox com a página alimentada pelos dados reais); **os obstáculos por troço e os testes N1–N4, que precisam do CORE, estão por ensaiar** (a lógica de escolha da ligação está coberta com um executor simulado). |
 
 ## 4. Arquitetura (resumo)
 
@@ -100,12 +101,14 @@ src/ott/node.py         OverlayNode: ligações, HELLO, PING/PONG, RTT, eventos,
 src/ott/bootstrapper.py BootstrapService: vizinhos e substitutos a partir do ficheiro JSON
 src/ott/cli.py          comando `ott` (-b, --serve, publish/subscribe, --stats ...)
 src/ott/routing.py      modelo de rotas, anúncios, subscrições e destinos ativos
+src/ott/subscriptions.py subscrições locais, com escolha de servidor e failover (D38)
+src/ott/routetest.py    ROUTE_TEST: teste dos percursos pela árvore dos fluxos (Etapa 3, D39)
 src/ott/forwarding.py   encaminhamento dos pacotes RTP/JPEG por UDP
 src/ott/streaming/      empacotamento RTP, emissor MJPEG e estatísticas do recetor
 src/ott/live.py         vista compacta na consola (ott --live)
 src/ott/status.py       estado de um nó em JSON (ott --status-file), para o ottctl e o painel
 src/ott/ctl/            ottctl: orquestração dos cenários e painel web (bin/ottctl); docs/OTTCTL.md
-topologies/             cenarios 1-3: .json (overlay) e .xml (CORE)
+topologies/             cenários 1-5: .json (overlay), .xml (CORE) e .plano.json (ottctl)
 docs/protocolo.md       especificação das mensagens e interações
 docs/ETAPA2.md          roadmap e checklist da implementação das rotas
 docs/testes-core.md     comandos por nó e testes a fazer no CORE
@@ -127,14 +130,13 @@ node.rtt(id) ; node.rtts()                            # segundos (média móvel)
 Definidos e validados os campos de `ANNOUNCE`, `ACTIVATE`, `DEACTIVATE` e `WITHDRAW` (ver
 `docs/protocolo.md` §7.1). `RoutingTable.attach(node)` regista os quatro handlers, os eventos
 de vizinhança e, com `route_ttl`, a thread do tempo de vida; `RoutingTable.close()` pára-a.
-Continuam pendentes o formato de `ROUTE_TEST` e os ensaios de integração e falhas da Etapa 2
-no CORE. O encaminhamento UDP está implementado em `src/ott/forwarding.py` e integrado na CLI.
+`RouteTester(node, table).attach()` regista o handler de `ROUTE_TEST` (Etapa 3, D39). O encaminhamento UDP está implementado em `src/ott/forwarding.py` e integrado na CLI.
 
 Os handlers recebem `fn(node, neighbor_id, msg)`, em que `neighbor_id` é uma string (D20).
 
 ## 6. Como testar
 
-**Suite completa (188 testes, ~45 s):**
+**Suite completa (280 testes, ~55 s):**
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -t .
@@ -269,7 +271,9 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - **Rota fantasma depois da queda do servidor (L9), corrigida pela D27 e validada no CORE (ensaio 9 repetido).** Uma rota sem caminho aceitava qualquer época (D22) e, por isso, também anúncios antigos ainda em trânsito depois do `WITHDRAW`. No ensaio 9 (CORE, cenário 3) formou-se um ciclo O6 ↔ O7 para o `filme_a` que só o tempo de vida (30 s) desfez; até lá, a época 1 do servidor reiniciado foi rejeitada e o fluxo voltou ≈ 10 s depois do servidor (o `filme_b`, sem ciclo, voltou em ≈ 1 s).
 - Depois de uma retirada, a rota só é reaprendida na ronda de anúncio seguinte (até `--announce-interval`), mesmo que um vizinho repare o caminho antes, porque os anúncios da mesma época são recusados (D27). Se o relógio do servidor recuar entre arranques, o servidor só é aceite ao fim de `--route-ttl`.
 - Até 2026-11-10 a origem dos datagramas UDP identificava-se pelo IP do *peer* TCP, o que falhou no CORE (cenário 3: o O5 descartou todo o vídeo do O7 depois da reparação rápida, porque o r5 envia o UDP com origem 10.0.5.1 e o O5 conhece o O7 como 10.0.4.2). **Corrigido (D26):** o vizinho de entrada passa a ser o id no campo `salto` do datagrama; validado no CORE no ensaio 6 (2026-11-10). O id não é autenticado.
-- `docs/testes-core.md` existe localmente (recriado em 2026-11-10) mas está no `.gitignore`; `docs/CHECKPOINT1.md` é citado mas não está no repositório.
+- `docs/testes-core.md` e `docs/CHECKPOINT1.md` existem só localmente (estão no `.gitignore`), por isso não estão no repositório.
+- `ROUTE_TEST` (D39): sem retransmissão nem relógios sincronizados; só mostra o caminho percorrido (não mede atraso) e ainda não foi ensaiado no CORE.
+- Limitações menores da Etapa 2 (auditoria 2026-11-18, por resolver): a propagação não reage a mudanças só de atraso com o mesmo montante e saltos (os vizinhos só veem a latência nova na ronda seguinte); um anúncio vindo de um vizinho que é destino a jusante é descartado antes de atualizar o candidato; `handle_activate` sobre uma rota desconhecida devolve `False` sem avisar quem pediu.
 
 ## 9. Por fazer
 
@@ -281,7 +285,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] Repetir no CORE o overlay completo do cenário 3 com a nova atribuição: os 11 nós com exatamente os vizinhos do JSON (2026-11-10, logs `2026-11-10-6`). Os resultados 3, 4, 8 e 11 da secção 7 continuam a ser os da atribuição anterior.
 - [x] Revisão cruzada do `routing.py` (`docs/REVISAO_E2.md`; achados todos resolvidos pelo E2) e testes de robustez do nó (D29), 2026-11-10.
 - [ ] **Grupo:** rever `docs/protocolo.md` (inclui o `BYE reason=duplicate`) e o texto `e1_overlay.tex`; o `babel` em português do `main.tex` não está instalado nesta máquina (compila noutra com `texlive-babel-portuguese`).
-- [ ] Decidir se refazemos o cenário 2 com 3 intermédios, como no enunciado.
+- [ ] Decidir se refazemos o cenário 2 com 3 intermédios, como no enunciado (exige redesenhar o XML no CORE e repetir os ensaios 4, 5 e 10; o cenário 3 e o 5 já cobrem topologias maiores). Recomendação: manter e justificá-lo no relatório.
 
 **Outros elementos (para saber o que depende de nós)**
 - [x] E2 (controlo): tabela de rotas, anúncios, ativação/desativação e reação local a alterações de vizinhos.
@@ -290,7 +294,7 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] E2: candidatos com desempate por RTT, `WITHDRAW` e reparação rápida (passos 5 e 6, 2026-11-09).
 - [x] E2: tempo de vida das rotas (passo 7, 2026-11-09).
 - [x] E2: retirar `seen_announcements` e revisão final da documentação (passos 8 e 9, 2026-11-09).
-- [ ] E2: segundo servidor `S2` nas topologias (passo 10). O cenário 4 novo (D30) já tem dois servidores com 2 fluxos cada e pode cumprir este passo; falta abri-lo no CORE e correr os ensaios (ver `docs/CENARIO4.md` §4).
+- [x] E2: segundo servidor nas topologias (passo 10): cumprido pelo cenário 5 (D37, dois servidores com dois fluxos distintos cada), ensaiado no CORE em 2026-11-18. O cenário 4 (D30) continua por abrir no CORE, mas já não é necessário para o requisito.
 - [x] E2: ensaios 1 e 2 no CORE (cenário 1: caminho básico e troço comum partilhado), 2026-11-09.
 - [x] E2: ensaio 4 no CORE (cenário 2: cada cliente usa o caminho mais curto), 2026-11-09.
 - [x] E2: ensaio 6 no CORE (cenário 3: reparação rápida na queda do O3), 2026-11-10, depois da correção D26.
@@ -298,11 +302,17 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 - [x] E2: ensaio 9 no CORE repetido com a correção D27: os dois fluxos voltam em ≈ 1–2 s, sem rota fantasma (2026-11-10). Ensaio 6 repetido também passou.
 - [x] E2: correção do L10 (D28) confirmada no CORE: três reinícios do servidor, clientes de volta em ≈ 1–2 s, `RPF=0` e sem cópias a mais no O5 (2026-11-10).
 - [x] E2: ensaios 3 (cenário 1, desativação dos clientes) e 5 (cenário 2, queda do link O2–S1: C1 sem vídeo ≈ 6,9 s, regresso ao caminho direto sem perdas) no CORE, 2026-11-10.
-- [ ] E2: ensaio 7 no CORE (dois servidores; depende do `S2` nas topologias).
+- [x] E2: ensaio 7 no CORE (dois servidores): feito no cenário 5, ver a linha seguinte.
 - [x] E2: cenário 5 no CORE, os 9 ensaios de `docs/CENARIO5.md` (2026-11-18, logs `cenario5/2026-11-18-2`): todos passaram; cobre o ensaio 7 (dois servidores com dois fluxos distintos cada) e a D38 (réplica do `filme_c`, troca de servidor sem perdas).
 - [x] E2: ensaios 4, 5, 6, 8 e 9 repetidos no CORE com a D34 e ensaio 10 novo (cenário 2, `netem` no S1 para o O2: o O2 passa para o caminho de 2 saltos via O1 uma só vez), 2026-11-10; todos passaram.
 - [ ] E2: perdas na métrica (sondas UDP por vizinho, custo estilo ETX em `_link_delay`); opcional.
-- [ ] E3: interface de apresentação do vídeo, cenários e medições de streaming.
+- [x] E3: interface de apresentação do vídeo (`ott --gui`, Tkinter) e painel com mosaico de vídeo (`--frame-dir`).
+- [ ] E3: medições de streaming (perdas e fragmentação UDP: 10 % de pacotes perdidos dão ≈ 44 % de imagens perdidas, achado B3).
+- [x] Etapa 3 (`ROUTE_TEST`): implementada e testada em localhost em 2026-11-19 (D39, `tests/test_routetest.py`, e ensaio com 3 processos `ott` em loopback).
+- [ ] Etapa 3: ensaiar o `ROUTE_TEST` no CORE (`--route-test 5` no servidor do cenário 3 ou 5; esperado: cada cliente regista `S1>...>Cn` igual ao caminho do `--live`).
+- [x] Requisito 9 com teste automático: 2 servidores × 2 fluxos distintos em simultâneo com nós reais (`TwoServersTwoFlowsTest`).
+- [x] Rotas mortas removidas da tabela (D40) e D36 coberta pelo teste de ausência de ciclos (folhas, 60 sementes).
+- [ ] **Relatório** (`docs/relatorio/`): só tem a secção do E1; deixado para o fim por decisão do grupo.
 - [x] E2: corrigir o L11 (D36, 2026-11-18): um nó com um só vizinho aceita o anúncio pior do montante em vez de retirar a rota. Confirmado no CORE no mesmo dia, forçando o caso com `netem delay 10ms` nas `eth0` e `eth1` do r9 antes de parar o O3 (logs `cenario3/2026-11-18-3`).
 
 ## 10. Perguntas para os docentes
@@ -319,6 +329,12 @@ foi feito no cenário 3 (com routers). Em localhost o tempo de substituto coinci
 
 | Data | O que mudou |
 |---|---|
+| 2026-11-19 | **Painel para todos os cenários (D41).** Vídeos diferentes por fluxo (`videos/filme_b|c|d.Mjpeg`, gerados por `tools/gerar_video_teste.py` com `--titulo` e `--matiz`; `filme_a` = filme real; `Plan.video_of`), `--route-test 2` nos servidores, separadores novos **Caminhos** (caminho de cada cliente a partir dos `ROUTE_TEST`, realce no grafo, obstáculos por nó e por troço) e **Clientes** (escolher os filmes de cada nó), vídeo agrupável por fluxo, `ottctl paths|subs|hop`, testes **G3–G9** e **N1–N4** e demonstração guiada nos 5 cenários. Corrigido: o seletor de nó do separador *Rotas* não atualizava (o `<select>` ficava com o foco e o painel não se redesenhava), e o teste `test_up_streams_video…` (corrida na árvore ativa). Ensaiado em modo local nos cenários 1, 3, 4 e 5 (G3–G9 passam; G6 sem alternativa no cenário 1 é esperado). **Por ensaiar no CORE:** obstáculos por troço (`hop_*`) e N1–N4. |
+| 2026-11-19 | **Etapa 3 (`ROUTE_TEST`, D39), rotas mortas (D40) e fecho das lacunas da auditoria.** Novo `src/ott/routetest.py`: o servidor gera um `ROUTE_TEST` por fluxo (`ott --route-test S`) que segue os destinos ativos; cada nó só o aceita do montante, junta o seu id ao `path`, regista `ROUTE_TEST S1:filme_a #4 caminho S1>O2>C1 (2 saltos): entregue ao cliente local` e guarda um `RouteTestResult`. `protocol.py`: campos obrigatórios `server_id`, `flow`, `seq`, `path` (1 a 64 ids). `routing.py`: `expire` apaga as rotas mortas depois da retenção (D40). Testes novos: `tests/test_routetest.py` (unitários sem rede, S1–A–{C1, C2} com nós reais e **2 servidores × 2 fluxos distintos em simultâneo**, com `ROUTE_TEST` e vídeo: relay A recebe 4 × 15 imagens e reenvia 6 × 15, uma cópia por troço), validação do protocolo (válidas, inválidas, truncada), opções da CLI, remoção de rotas mortas e uma rede simulada com folhas para a D36 no `LoopFreedomTest`. `status.py` passa a escrever `route_tests` e um evento `route_test` quando o caminho muda; `routing.py` regista as trocas de montante (`montante O2 -> O3`). Ensaio real com 3 processos `ott` em loopback (S1, A, C1): `S1>A>C1` a cada segundo. Atualizados `protocolo.md` (§2, §3.8, §5), README, `ETAPA2.md` e `AUDITORIA.md` (adenda). Validado só em localhost; `ROUTE_TEST` por ensaiar no CORE. Relatório por fazer. |
+| 2026-11-17 | **Painel: rotas verdadeiras e atraso rápido.** `Orchestrator.ip_path`/`paths` descobrem o caminho IP real entre dois nós (`ip route get` em cada salto, `/api/paths`, cache de 3 s) e o painel desenha as árvores por esse caminho (antes: caminho mais curto do desenho, que podia não ser o do OSPF, e por isso mexer numa ligação «do desenho» não mudava nada). Botões de atraso rápido (20/50/100/200 ms) no separador Rede. Corrigido o clique nas ligações, que ficava tapado pelas linhas dos fluxos. Verificado com `ip_path` numa sessão real (cenário 3) e 1 teste novo; falta ver no browser. Merge com o `ott --live` feito (sem conflitos de código; só `cli.py` e `ESTADO.md` com acrescentos dos dois lados). |
+| 2026-11-17 | **Painel: routers clicáveis.** Os routers do CORE passaram a ser clicáveis no grafo (maiores, a vermelho se desligados); o separador Rede ganhou «Desligar/Ligar router» (`Orchestrator.router_set`: `ip link set … down` em todas as interfaces do router, ações `router_down`/`router_up`) e a lista das ligações do router para lhes mudar os parâmetros; as ligações têm uma zona de clique mais larga. 2 testes novos (200 no total). Falta ensaiar no CORE e ver no browser. |
+| 2026-11-17 | **Painel: separador Vídeo.** Novo `--frame-dir` no `ott` (`FrameSaver`: guarda a imagem mais recente de cada subscrição, ≤ 10/s, escrita atómica); o `ottctl` passa-o aos clientes; o painel serve-a como MJPEG em `/api/video` e mostra um mosaico com o vídeo de cada cliente, as métricas e o nó de onde vem o fluxo (`via`), com os botões de lançar/parar/matar/congelar. Verificado em local (cenário 1: o `/api/video` devolve JPEG); falta ensaiar no CORE e ver no browser. 3 testes novos. |
+| 2026-11-17 | **Topologia do CORE em todos os cenários.** `underlay_of` passou a ler também os switches (`<networks>`, cenário 3), que antes davam erro; as ligações a um switch levam `sw` e o painel aplica atraso/perdas/corte só ao extremo do nó (um switch não tem espaço de nomes). Verificado: cenários 1–4 sem nós overlay em falta ou isolados; 2 testes novos. Interface não verificada no browser. |
 | 2026-11-18 | **Auditoria técnica** em `docs/AUDITORIA.md`: os 10 requisitos mínimos estão cumpridos no código (245 testes passam); Etapa 2 consolidada no código e nos testes, mas com a documentação de estado desatualizada (este ficheiro §1, §4, §6, §9 e `ETAPA2.md`); Etapa 3 só planeada (`ROUTE_TEST` é só uma constante). Melhorias M1–M16 priorizadas. |
 | 2026-11-18 | **Cenário 5 no CORE: os 9 ensaios passaram** (logs `ott-logs/cenario5/2026-11-18-2`). Uma só cópia por troço partilhado; escolha do servidor do `filme_c` correta com a correção do L12 (C5 no S1); atraso de 20 ms: uma troca, sem perdas; queda do O2: C3 ≈ 1,3 s sem vídeo (retirada e ronda seguinte); ligação r7–r6 em baixo: o OSPF desviou e o C1 trocou de servidor por latência, 1 imagem perdida; sem clientes o S1 deixa de emitir o `filme_a` em 0,3 s; queda do S2 não afeta os fluxos do S1; **queda do S1: o C5 e o C1 passam o `filme_c` para o S2 em 5 ms e 100 ms sem perder imagens** e o caminho escolhido evita a ligação de 10 ms; o suplente O7 devolve o vídeo ao C1 e ao C2 1,3–1,9 s depois de arrancar. Erros de execução sem impacto: uma segunda instância do O7 noutro nó (recusada como duplicada) e horas do `acoes.txt` escritas depois dos Ctrl-C. Detalhe em `docs/ETAPA2.md`. |
 | 2026-11-18 | **D38: escolha do servidor com latências provisórias (defeito L12, achado no CORE).** No cenário 5 (ensaio 1, logs `cenario5/2026-11-18-1`), o C5 escolheu o S1 às 21:23:20 com a rota ainda a 1000,4 ms (ligação O1–C5 sem RTT medido, que vale 1 s) e, 5 s depois, passou para o S2 "mais perto" (1,4 ms, 4 saltos), porque a rota do S2 já tinha sido recalculada com o RTT e a do S1 ainda não; com o S1 a 0,6 ms o ganho de voltar (0,8 ms) ficou abaixo da histerese e o C5 ficou no S2. O C1 fez a troca inversa. Correção em `subscriptions.py`: a primeira escolha espera que a latência de todos os servidores conhecidos esteja medida (abaixo de `unknown_link_delay`) ou 10 s (`settle`); a troca "mais perto" exige as duas latências medidas; o failover continua imediato. 3 testes de regressão em `test_subscriptions` (falhavam antes). Suite completa a passar. Os nós que já estavam a correr no CORE só usam a correção depois de relançados. |

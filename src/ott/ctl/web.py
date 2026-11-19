@@ -65,6 +65,26 @@ def do_action(orch, body):
             raise BackendError("indica o router")
         orch.router_set(node, action == "router_up")
         return f"{action}: {node}"
+    if action == "subs":
+        node, subs = _text(body.get("node")), body.get("subs")
+        if not node:
+            raise BackendError("indica o cliente")
+        orch.set_subscriptions(node, subs)
+        return f"{node} subscreve {', '.join(subs) or 'nada'}"
+    if action == "subs_reset":
+        orch.reset_subscriptions()
+        return "subscrições do plano repostas"
+    if action in ("hop_netem", "hop_clear", "hop_set"):
+        a, b = _text(body.get("a")), _text(body.get("b"))
+        if not a or not b:
+            raise BackendError("indica os dois nós do troço")
+        if action == "hop_netem":
+            orch.hop_netem(a, b, **params)
+        elif action == "hop_clear":
+            orch.hop_clear(a, b)
+        else:
+            orch.hop_set(a, b, bool(body.get("up")))
+        return f"{action}: troço {a} → {b}"
     if action in ("link_netem", "link_clear", "link_set"):
         ends = [_text(body.get(k)) for k in ("a", "ia", "b", "ib")]
         if not all(ends):
@@ -236,8 +256,8 @@ class Controller:
             return self.demo
         d = self.demo
         steps = sc.demo_for(self.orch.plan)
-        d["steps"] = [{"title": s["title"], "core": s["core"], "flow": s["flow"], "focus": s["focus"], "text": s["text"]}
-                      for s in steps]
+        d["steps"] = [{"title": s["title"], "core": s["core"], "flow": s["flow"], "focus": s["focus"], "text": s["text"],
+                       "tab": s.get("tab")} for s in steps]
         return d
 
     def demo_op(self, op):
@@ -408,7 +428,8 @@ def make_handler(controller):
             if not c.orch:
                 raise BackendError("escolhe primeiro um cenário")
             if c.busy and action in ("up", "down", "start", "stop", "kill", "freeze", "thaw", "netem", "netem_clear",
-                                     "link_netem", "link_clear", "link_set", "link_state", "clear_network"):
+                                     "link_netem", "link_clear", "link_set", "link_state", "clear_network", "subs",
+                                     "subs_reset", "hop_netem", "hop_clear", "hop_set", "router_down", "router_up"):
                 raise BackendError(f"ocupado: {c.busy} (espera ou pára)")
             return do_action(c.orch, body)
 

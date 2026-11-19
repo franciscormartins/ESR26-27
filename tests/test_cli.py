@@ -29,6 +29,22 @@ class RouteTtlOptionTest(unittest.TestCase):
         self.assertEqual(args.announce_interval, 5.0)
 
 
+class RouteTestOptionTest(unittest.TestCase):
+    def assert_rejected(self, *argv):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            cli.main(list(argv))
+
+    def test_off_by_default(self):
+        self.assertEqual(cli.build_parser().parse_args([]).route_test, 0)
+
+    def test_interval_is_validated(self):
+        for value in ("-1", "inf", "nan"):
+            self.assert_rejected("--route-test", value, "--publish-flow", "f")
+
+    def test_only_a_server_can_generate_tests(self):
+        self.assert_rejected("--route-test", "5")
+
+
 class LiveOptionTest(unittest.TestCase):
     def test_live_defaults_to_two_seconds(self):
         parser = cli.build_parser()

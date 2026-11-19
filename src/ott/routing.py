@@ -295,11 +295,18 @@ class RoutingTable:
         Se o candidato esquecido era o montante, trata-se como uma perda do
         montante (reparação rápida ou ``WITHDRAW``). Devolve o número de
         candidatos esquecidos. Sem ``route_ttl`` não faz nada.
+
+        Também apaga da tabela as rotas mortas: retiradas por este nó há mais
+        de ``route_ttl`` (acabou a retenção da D27), sem montante, sem
+        candidatos, sem ramos a jusante e sem subscritores locais. Assim os
+        servidores que desapareceram não ficam para sempre na tabela nem no
+        estado escrito pelo nó.
         """
         if self.route_ttl is None:
             return 0
         now = time.monotonic() if now is None else now
         expired = 0
+        touched = set()
         with self._transaction(node) as actions:
             for route in self.routes.values():
                 if route.origin == node.id:
@@ -308,6 +315,7 @@ class RoutingTable:
                          if now - c.seen_at > self.route_ttl]
                 if not stale:
                     continue
+                touched.add(route.key)
                 expired += len(stale)
                 upstream_stale = route.upstream in stale
                 for neighbor in stale:
@@ -319,6 +327,13 @@ class RoutingTable:
                     # o candidato do montante é retirado em _lose_upstream; a
                     # reparação só usa candidatos ainda dentro do tempo de vida
                     actions += self._lose_upstream(node, route, still_connected=True)
+            for key in [k for k, r in self.routes.items()
+                        if k not in touched and r.origin != node.id and r.upstream is None and not r.candidates
+                        and not r.destinations and not r.local_subscribers
+                        and r.withdrawn_at is not None and self._hold_down_over(r, now)]:
+                del self.routes[key]
+                log.info("rota %s:%s esquecida (sem caminho há mais de %.1f s)",
+                         key[0], key[1], self.route_ttl)
         return expired
 
     def _queue_neighbor_event(self, event, node, neighbor):
@@ -706,6 +721,10 @@ class RoutingTable:
             route.withdrawn_at = None
             self._refresh_state(route, node.id)
             moved = new_upstream != old_upstream
+            if moved and old_upstream is not None:
+                log.info("rota %s:%s: montante %s -> %s (%d saltos, %.1f ms)",
+                         route.origin, route.flow, old_upstream, new_upstream,
+                         route.metric, route.delay * 1000)
             if moved and self._has_demand(route):
                 # O ramo agregado muda de montante: um só DEACTIVATE/ACTIVATE.
                 if old_upstream is not None:

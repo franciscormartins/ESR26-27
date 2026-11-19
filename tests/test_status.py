@@ -95,6 +95,29 @@ class RouteEventsTest(unittest.TestCase):
                                          "withdraw", "rota_esquecida"])
         self.assertIn("A → B", w.events[1]["text"])
 
+    def test_route_tests_are_reported_and_a_new_path_is_an_event(self):
+        from ott.routetest import RouteTestResult
+        tester = mock.Mock()
+        tester.results = [RouteTestResult("S1", "filme_a", 1, ("S1", "A", "N"), True, (), 5.0)]
+        writer = StatusWriter(os.devnull, FakeNode(), RoutingTable(), route_tester=tester)
+        snap = writer.snapshot()
+        self.assertEqual(snap["route_tests"], [{
+            "origin": "S1", "flow": "filme_a", "seq": 1, "path": ["S1", "A", "N"], "hops": 2,
+            "delivered": True, "forwarded_to": [], "t": 5.0}])
+        json.dumps(snap)
+        events = [e for e in snap["events"] if e["kind"] == "route_test"]
+        self.assertEqual(len(events), 1)
+        # o mesmo caminho noutro teste não repete o evento; um caminho novo regista-o
+        tester.results.append(RouteTestResult("S1", "filme_a", 2, ("S1", "A", "N"), True, (), 6.0))
+        self.assertEqual(len([e for e in writer.snapshot()["events"] if e["kind"] == "route_test"]), 1)
+        tester.results.append(RouteTestResult("S1", "filme_a", 3, ("S1", "B", "N"), True, (), 7.0))
+        snap = writer.snapshot()
+        self.assertEqual(len([e for e in snap["events"] if e["kind"] == "route_test"]), 2)
+        self.assertEqual(snap["route_tests"][0]["seq"], 3)
+
+    def test_without_a_route_tester_route_tests_is_empty(self):
+        self.assertEqual(StatusWriter(os.devnull, FakeNode(), RoutingTable()).snapshot()["route_tests"], [])
+
     def test_neighbor_events_come_from_the_node_callbacks(self):
         w = writer()
         w.node.on_neighbor_up(w._on_up)

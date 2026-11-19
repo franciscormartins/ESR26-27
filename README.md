@@ -12,21 +12,27 @@ relatório em `docs/relatorio/`.
 | `src/ott/bootstrapper.py` | serviço que devolve os vizinhos (e substitutos) de cada nó a partir de um ficheiro | 1 |
 | `src/ott/cli.py` | comando `ott` | 1 |
 | `src/ott/routing.py` | tabela de rotas: anúncios, escolha do montante (latência acumulada, D34), subscrições agregadas, `WITHDRAW`, tempo de vida | 2 |
+| `src/ott/subscriptions.py` | subscrições locais: servidor fixo ou escolha do servidor mais perto com failover (D38) | 2 |
+| `src/ott/routetest.py` | `ROUTE_TEST`: o servidor testa os percursos e cada nó regista o caminho acumulado (`ott --route-test S`, D39) | 3 |
 | `src/ott/forwarding.py` | encaminhamento UDP pelos ramos ativos da árvore overlay (RPF estrito) | 2 |
 | `src/ott/live.py` | vista compacta na consola (`ott --live`): bloco fixo com recebidos, origem (vizinho e saltos), destinos e trocas de cada fluxo | apoio aos testes |
 | `src/ott/status.py` | estado de um nó em JSON (`ott --status-file`): vizinhos, tabela de rotas, fluxos e eventos relevantes | apoio aos testes |
-| `src/ott/ctl/`, `bin/ottctl` | orquestração dos cenários (lançar nós, falhas, atrasos) , testes automáticos (`ottctl test`) e painel web com modo de demonstração; ver `docs/OTTCTL.md` | apoio aos testes |
+| `src/ott/ctl/`, `bin/ottctl` | orquestração dos cenários 1–5 (lançar nós, falhas, atrasos, obstáculos nos troços, subscrições dos clientes), testes automáticos G/N (qualquer cenário) e A/B/C (cenário 4) e painel web com vídeo, caminhos (`ROUTE_TEST`), escolha de filmes e demonstração guiada; `make dashboard` (CORE); ver `docs/OTTCTL.md` e `docs/PAINEL.md` | apoio aos testes |
 | `src/ott/streaming/` | pacotes de vídeo (cabeçalho origem/fluxo/salto + RTP), emissor MJPEG e recetor UDP | 2/4 |
+| `videos/`, `tools/gerar_video_teste.py` | um vídeo MJPEG diferente por fluxo (`filme_b`, `filme_c`, `filme_d`; o `filme_a` é o filme real) para ver de que servidor vem cada janela do painel | apoio aos testes |
 | `progex/` | código de apoio do livro (Kurose) e `movie.Mjpeg`, só como referência | 4 |
-| `topologies/` | cenários 1–4 (`.json` do overlay e `.xml` do CORE); `aplicar_frr.py` repõe a config do FRR; `gerar_cenario4.py` gera o cenário 4 | – |
+| `topologies/` | cenários 1–5 (`.json` do overlay, `.xml` do CORE e `.plano.json` do `ottctl`); `aplicar_frr.py` repõe a config do FRR; `gerar_cenario4.py` e `gerar_cenario5.py` geram os cenários 4 e 5 | – |
 | `tests/` | testes automáticos (`python3 -m unittest discover -s tests -t .`) e `medicoes.py` (tempos em localhost, 10 repetições) | – |
 | `docs/ESTADO.md` | **ponto da situação**: o que está feito, decisões, como testar, pendentes, perguntas ao docente | – |
 | `docs/protocolo.md` | especificação das mensagens e interações | 1, 2 |
 | `docs/ETAPA2.md` | plano, decisões e testes da Etapa 2 | 2 |
 | `docs/AUDITORIA.md` | auditoria dos 10 requisitos mínimos e das Etapas 2 e 3, com melhorias priorizadas (2026-11-18) | 2, 3 |
-| `docs/testes-core.md` | comandos por nó e testes a fazer nos cenários 1–3 no CORE (**não está no repositório**) | – |
+| `docs/CENARIO4.md`, `docs/CENARIO5.md` | cenários 4 (teia) e 5 (dois servidores com dois fluxos distintos, o que cumpre o requisito mínimo): nós, IPs e ensaios | 2 |
+| `docs/testes-core.md` | comandos por nó e testes a fazer nos cenários 1–3 no CORE (local: está no `.gitignore`, **não está no repositório**) | – |
 
-Etapa 3 (PING de teste de caminhos): mensagem `ROUTE_TEST`, a tratar com um handler.
+Etapa 3 (teste dos percursos): `ott --publish-flow filme_a --route-test 5` faz o servidor enviar um `ROUTE_TEST` por
+fluxo a cada 5 s pelos ramos ativos; cada nó regista no log, por exemplo,
+`ROUTE_TEST S1:filme_a #4 caminho S1>O2>C1 (2 saltos): entregue ao cliente local` (ver `docs/protocolo.md` §3.8).
 
 ## Como as outras etapas se ligam ao nó
 

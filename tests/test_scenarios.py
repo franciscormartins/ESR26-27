@@ -50,10 +50,44 @@ class ScenarioTestsTest(unittest.TestCase):
         self.assertEqual(scenarios.run_test(orch, t)["status"], "ignorado")
 
     def test_demo_steps_exist_for_every_scenario(self):
-        for name in ("cenario4", "cenario1"):
+        for name in ("cenario1", "cenario2", "cenario3", "cenario4", "cenario5"):
             steps = scenarios.demo_for(load_plan(name))
-            self.assertGreaterEqual(len(steps), 3)
+            titles = [s["title"] for s in steps]
+            self.assertGreaterEqual(len(steps), 8, name)
             self.assertTrue(all("title" in s and "text" in s for s in steps))
+            for wanted in ("O caminho de cada cliente", "O cliente muda de filme", "Repor tudo"):
+                self.assertIn(wanted, titles, name)
+            self.assertEqual(titles[-1], "Repor tudo")
+            self.assertTrue(all(s["tab"] in (None, "node", "video", "paths", "clients") for s in steps if "tab" in s), name)
+
+    def test_every_scenario_has_the_generic_tests_and_the_network_ones_need_the_core(self):
+        for name in ("cenario1", "cenario2", "cenario3", "cenario4", "cenario5"):
+            plan = load_plan(name)
+            local = {t["id"]: t for t in scenarios.tests_for(plan, "local")}
+            core = {t["id"]: t for t in scenarios.tests_for(plan, "core")}
+            self.assertTrue({f"G{i}" for i in range(1, 10)} <= set(local), name)
+            for n in ("N1", "N2", "N3", "N4"):
+                self.assertFalse(local[n]["runs_here"], name)
+                self.assertTrue(core[n]["runs_here"], name)
+            self.assertEqual("A1" in local, name == "cenario4")
+
+    def test_failure_helpers_use_the_overlay_graph(self):
+        plan = load_plan("cenario5")
+        self.assertTrue(scenarios._connected(plan, "S1", "C1", {"O2"}))          # há outro caminho
+        self.assertFalse(scenarios._connected(plan, "S1", "C1", {"O5"}))         # o O5 é o único acesso do C1
+        mini = load_plan(write_mini())
+        self.assertFalse(scenarios._connected(mini, "S", "C", {"A"}))
+        state = {"paths": [{"node": "C", "key": "S:filme_a", "path": ["S", "A", "C"], "fresh": True, "hops": 2, "seq": 1, "age": 1}],
+                 "tree": {"S:filme_a": [{"from": "S", "to": "A"}, {"from": "A", "to": "C"}]}}
+        self.assertEqual(scenarios.client_paths(state, "C"), {"S:filme_a": ["S", "A", "C"]})
+        self.assertEqual(scenarios.tree_chain(state, "S:filme_a", "C"), ["S", "A", "C"])
+        self.assertEqual(scenarios._pick_failure(mini, state), ("C", "S:filme_a", ["S", "A", "C"], "A", False))
+        state["paths"][0]["fresh"] = False                                       # um teste antigo já não conta
+        self.assertEqual(scenarios.client_paths(state, "C"), {})
+        d = scenarios._depends_on(plan, "S1")
+        self.assertIn(("C2", "S1:filme_a"), d[0])                                 # perde o fluxo
+        self.assertIn(("C1", "filme_c"), d[1])                                    # tem réplica no S2
+        self.assertIn(("C4", "S2:filme_d"), d[2])                                 # não depende do S1
 
 
 class ControllerTest(unittest.TestCase):

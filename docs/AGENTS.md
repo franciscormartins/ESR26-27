@@ -144,6 +144,7 @@ de texto ou de documentação dispensam os passos 2 e 4.
 | Pacote RTP/MJPEG, emissor ou recetor | `tests/test_streaming.py` |
 | Opções, validação ou composição da linha de comando | `tests/test_cli.py` |
 | Contratos entre overlay, routing e plano de dados | `tests/test_integration.py` |
+| `ROUTE_TEST` (Etapa 3) e 2 servidores × 2 fluxos | `tests/test_routetest.py` |
 
 Executa os testes relevantes para a alteração. Para a tabela de rotas:
 

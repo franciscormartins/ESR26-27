@@ -32,8 +32,10 @@ class StatusWriter:
     """Escreve o estado de um nó num ficheiro JSON e mantém os seus eventos recentes."""
 
     def __init__(self, path, node, routing_table, forwarder=None, receivers=None, published=(),
-                 subscriptions=None, interval=1.0, max_events=200):
+                 subscriptions=None, interval=1.0, max_events=200, route_tester=None):
         self.path = path
+        self.route_tester = route_tester   # RouteTester (Etapa 3), opcional
+        self._prev_test_paths = {}
         self.node = node
         self.table = routing_table
         self.forwarder = forwarder
@@ -51,6 +53,26 @@ class StatusWriter:
         self._stop = threading.Event()
         self._thread = None
         self._lock = threading.Lock()
+
+    def _route_tests(self):
+        """Último ``ROUTE_TEST`` por (servidor, fluxo); regista um evento quando o caminho muda."""
+        tester = self.route_tester
+        if tester is None:
+            return []
+        latest = {}
+        for result in list(tester.results):    # por ordem: o último de cada chave fica
+            latest[(result.server_id, result.flow)] = result
+        out = []
+        for (origin, flow), r in sorted(latest.items()):
+            path = ">".join(r.path)
+            if self._prev_test_paths.get((origin, flow)) != path:
+                self._prev_test_paths[(origin, flow)] = path
+                self.event("route_test", f"ROUTE_TEST {origin}:{flow}: caminho {path} ({r.hops} saltos)",
+                           route=f"{origin}:{flow}")
+            out.append({"origin": origin, "flow": flow, "seq": r.seq, "path": list(r.path),
+                        "hops": r.hops, "delivered": r.delivered,
+                        "forwarded_to": list(r.forwarded_to), "t": round(r.at, 3)})
+        return out
 
     def bind(self, forwarder=None, receivers=None, published=None, subscriptions=None):
         """Liga o que só existe depois do registo no bootstrapper (plano de dados, fluxos)."""
@@ -199,6 +221,7 @@ class StatusWriter:
         service = getattr(self.node, "bootstrap_service", None)
         pending, active = self.subscriptions()
         flows = self._flows(now)   # antes de copiar os eventos: gera os eventos dos fluxos desta fotografia
+        route_tests = self._route_tests()
         with self._lock:
             events = list(self.events)
         return {
@@ -212,6 +235,7 @@ class StatusWriter:
                               "active": sorted(f"{a}:{b}" for a, b in active)},
             "routes": sorted(routes.values(), key=lambda r: (r["origin"], r["flow"])),
             "flows": flows,
+            "route_tests": route_tests,
             "data": data,
             "events": events,
         }

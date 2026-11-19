@@ -6,6 +6,7 @@ import threading
 import time
 
 from .backend import BackendError, CoreBackend, LocalBackend, netem_command
+from ..subscriptions import parse_subscription
 from .plan import load_plan, underlay_of
 
 STALE_AFTER = 3.0   # segundos sem o nó atualizar o ficheiro de estado
@@ -21,6 +22,9 @@ class Orchestrator:
         self.flags = {}          # id -> {"frozen": bool, "killed": bool, "stopped": bool}
         self.actions = []        # [{t, text, kind}]: o que o orquestrador fez (marcas nos gráficos, medição de tempos)
         self.net_effects = {}    # "a:ia|b:ib" ou "nó:iface" -> {a, ia, b, ib, params, down}
+        self.sub_override = {}   # nó -> subscrições escolhidas no painel (em vez das do plano)
+        self.plan_subs = {n.id: list(n.subscribe) for n in plan.nodes.values()}   # as do plano, para as repor
+        self.hop_links = {}      # "a>b" -> ligação do underlay onde se pôs um obstáculo nesse troço overlay
         self._lock = threading.RLock()
         self._underlay = None
         os.makedirs(self.rundir, exist_ok=True)
@@ -43,7 +47,8 @@ class Orchestrator:
     def save(self, started=None):
         meta = {"scenario": self.plan.name, "backend": self.backend.name, "verbose": self.verbose, "flags": self.flags,
                 "pids": getattr(self.backend, "pids", {}), "started": started or self.load().get("started"),
-                "actions": self.actions[-200:], "net": self.net_effects}
+                "actions": self.actions[-200:], "net": self.net_effects, "subs": self.sub_override,
+                "hops": self.hop_links}
         if isinstance(self.backend, CoreBackend):
             meta["session"] = self.backend.session
         if isinstance(self.backend, LocalBackend):
@@ -80,6 +85,10 @@ class Orchestrator:
         orch.flags = meta.get("flags", {})
         orch.actions = meta.get("actions", [])
         orch.net_effects = meta.get("net", {})
+        orch.hop_links = meta.get("hops", {})
+        orch.sub_override = {k: v for k, v in meta.get("subs", {}).items() if k in plan.nodes}
+        for node_id, subs in orch.sub_override.items():
+            plan.nodes[node_id].subscribe = list(subs)
         return orch
 
     def record(self, text, kind="acao", short=None):
@@ -124,6 +133,13 @@ class Orchestrator:
             os.remove(self.status_path(spec.id))
         except FileNotFoundError:
             pass
+        frames = os.path.join(self.rundir, "frames", spec.id)   # imagens de uma execução anterior enganariam o painel
+        if os.path.isdir(frames):
+            for name in os.listdir(frames):
+                try:
+                    os.remove(os.path.join(frames, name))
+                except OSError:
+                    pass
         argv = self.backend.argv(spec, self.status_path(spec.id), self.verbose, extra=extra, bootstrap=bootstrap)
         self.backend.start(spec, argv, self.log_path(spec.id))
         self.flags.pop(spec.id, None)
@@ -196,6 +212,74 @@ class Orchestrator:
             self.flags = {}
             self.record("todos os nós parados", "down")
             self.save()
+
+    # -- subscrições dos clientes (o professor escolhe o que cada um vê) --------
+
+    def subscription_options(self):
+        """O que um cliente pode subscrever: ``[{key, flow, server, publishers, video}]``.
+
+        ``SERVIDOR:FLUXO`` pede esse servidor; só ``FLUXO`` (D38) usa o servidor mais perto e muda se ele cair (só se
+        mais do que um servidor publica o fluxo).
+        """
+        out = []
+        for flow in self.plan.all_flows():
+            pubs = self.plan.publishers_of(flow)
+            video = self.plan.video_label(flow)
+            out += [{"key": f"{s}:{flow}", "flow": flow, "server": s, "publishers": pubs, "video": video} for s in pubs]
+            if len(pubs) > 1:
+                out.append({"key": flow, "flow": flow, "server": None, "publishers": pubs, "video": video})
+        return out
+
+    def _check_subscriptions(self, subs):
+        if not isinstance(subs, list) or not all(isinstance(s, str) for s in subs):
+            raise BackendError("subscrições inválidas")
+        allowed = {o["key"] for o in self.subscription_options()}
+        parsed = []
+        for sub in subs:
+            try:
+                parsed.append(parse_subscription(sub))
+            except ValueError as exc:
+                raise BackendError(str(exc)) from None
+            if sub not in allowed:
+                raise BackendError(f"ninguém publica {sub} neste cenário")
+        for i, (server, flow) in enumerate(parsed):
+            for other, other_flow in parsed[:i]:
+                if flow == other_flow and (server is None or other is None or server == other):
+                    raise BackendError(f"o fluxo {flow} está repetido ou sobreposto")
+
+    def set_subscriptions(self, node_id, subs):
+        """Muda os fluxos que um nó subscreve: pára-o (BYE aos vizinhos) e relança-o com as subscrições novas.
+
+        Se o nó não estiver a correr, só muda o que lançará. ``subs`` vazio faz do nó um intermédio.
+        """
+        spec = self._spec(node_id)
+        if spec.serve:
+            raise BackendError(f"{node_id} é um servidor: só os outros nós subscrevem fluxos")
+        subs = list(dict.fromkeys(subs))
+        self._check_subscriptions(subs)
+        with self._lock:
+            running = self.backend.running(spec)
+            if running:
+                self.signal([node_id], "TERM", "stopped")
+                self.backend.wait_gone(spec)
+            spec.subscribe = subs
+            if subs == self._plan_subscriptions(node_id):
+                self.sub_override.pop(node_id, None)
+            else:
+                self.sub_override[node_id] = subs
+            self.record(f"{node_id} subscreve {', '.join(subs) or 'nada'}", "subs", short=f"subs {node_id}")
+            if running:
+                self._start(spec)
+                self.flags.pop(node_id, None)
+            self.save()
+
+    def _plan_subscriptions(self, node_id):
+        return list(self.plan_subs[node_id])
+
+    def reset_subscriptions(self):
+        """Repõe as subscrições do plano em todos os nós que as mudaram."""
+        for node_id in list(self.sub_override):
+            self.set_subscriptions(node_id, self._plan_subscriptions(node_id))
 
     # -- rede (só no CORE) --------------------------------------------
 
@@ -346,6 +430,62 @@ class Orchestrator:
         if failed:
             raise BackendError("; ".join(failed))
 
+    def hop_link(self, a, b):
+        """Ligação do underlay onde pôr um obstáculo no troço overlay ``a``→``b``: ``(x, ix, y, iy, sw)``.
+
+        Descobre o caminho IP verdadeiro entre os dois nós (``ip route get`` em cada salto) e escolhe a ligação entre dois
+        routers a meio dele; se não houver (os dois nós no mesmo router) usa a primeira. Só no CORE. O resultado fica
+        guardado, para repor a mesma ligação mesmo que o OSPF desvie o caminho depois de um corte.
+        """
+        key = f"{a}>{b}"
+        if key in self.hop_links:
+            return tuple(self.hop_links[key])
+        if not isinstance(self.backend, CoreBackend):
+            raise BackendError("os obstáculos na rede só existem com o CORE")
+        path = self.ip_path(self._spec(a).core, self._spec(b).core)
+        if not path or len(path) < 2:
+            raise BackendError(f"não consegui descobrir o caminho IP de {a} para {b}")
+        under = self.underlay()
+        routers = {u["name"] for u in under["nodes"] if u["type"] == "router"}
+        found = []
+        for x, y in zip(path, path[1:]):
+            for l in under["links"]:
+                if (l["a"], l["b"]) == (x, y):
+                    found.append((l["a"], l["ia"], l["b"], l["ib"], l.get("sw")))
+                    break
+                if (l["a"], l["b"]) == (y, x):
+                    found.append((l["b"], l["ib"], l["a"], l["ia"], l.get("sw")))
+                    break
+        if not found:
+            raise BackendError(f"o caminho {'>'.join(path)} não tem ligações no desenho do CORE")
+        between = [l for l in found if l[0] in routers and l[2] in routers and not l[4]]
+        choice = between[len(between) // 2] if between else found[0]
+        self.hop_links[key] = list(choice)
+        return choice
+
+    def hop_netem(self, a, b, **params):
+        """Atraso, jitter, perdas ou débito no troço overlay ``a``→``b`` (um só sentido do nó para o outro é igual: dois extremos)."""
+        x, ix, y, iy, sw = self.hop_link(a, b)
+        if sw:   # ligação a um switch (cenário 3): só o extremo do nó tem espaço de nomes
+            node, iface = (y, iy) if sw == "a" else (x, ix)
+            return self.netem(node, iface, **params)
+        return self.link_netem(x, ix, y, iy, **params)
+
+    def hop_clear(self, a, b):
+        x, ix, y, iy, sw = self.hop_link(a, b)
+        if sw:
+            node, iface = (y, iy) if sw == "a" else (x, ix)
+            return self.netem_clear(node, iface)
+        return self.link_clear(x, ix, y, iy)
+
+    def hop_set(self, a, b, up):
+        """Corta (``up=False``) ou repõe a ligação do underlay do troço overlay ``a``→``b``."""
+        x, ix, y, iy, sw = self.hop_link(a, b)
+        if sw:
+            node, iface = (y, iy) if sw == "a" else (x, ix)
+            return self.link_state(node, iface, up)
+        return self.link_set(x, ix, y, iy, up)
+
     def clear_network(self):
         """Remove todos os efeitos de rede aplicados por este orquestrador (netem e cortes)."""
         for entry in list(self.net_effects.values()):
@@ -359,6 +499,7 @@ class Orchestrator:
                 except BackendError:
                     pass
         self.net_effects = {}
+        self.hop_links = {}
         self.record("rede reposta (sem atrasos nem cortes)", "netem")
         self.save()
 
@@ -415,12 +556,26 @@ class Orchestrator:
                         tree.setdefault(f"{r['origin']}:{r['flow']}", []).append(
                             {"from": r["upstream"], "to": spec.id, "active": r["state"] == "ativa"})
         events.sort(key=lambda e: e["t"])
+        interval = self.plan.route_test
+        paths = []
+        for spec in self.plan.nodes.values():   # o caminho que o último ROUTE_TEST fez até cada cliente
+            status = nodes[spec.id]["status"]
+            if not status or nodes[spec.id]["health"] != "up":
+                continue
+            for r in status.get("route_tests", []):
+                if r["delivered"]:
+                    age = round(now - r["t"], 1)
+                    paths.append({"node": spec.id, "key": f"{r['origin']}:{r['flow']}", "path": r["path"], "hops": r["hops"],
+                                  "seq": r["seq"], "age": age, "fresh": bool(interval) and age <= 3 * interval + 3})
+        videos = {f: self.plan.video_label(f) for f in self.plan.all_flows()}
         return {"scenario": self.plan.name, "backend": self.backend.name, "time": round(now, 3),
                 "started": meta.get("started"), "rundir": self.rundir, "nodes": nodes, "edges": self.plan.edges(),
                 "positions": self.plan.positions(), "flows": sorted(flows), "tree": tree,
                 "events": events[-EVENTS_KEPT:], "free": self.plan.free,
                 "actions": meta.get("actions", self.actions)[-100:], "net": list(meta.get("net", self.net_effects).values()),
-                "can_network": isinstance(self.backend, CoreBackend)}
+                "can_network": isinstance(self.backend, CoreBackend), "paths": paths, "route_test": interval,
+                "videos": videos, "publishers": {f: self.plan.publishers_of(f) for f in videos},
+                "options": self.subscription_options(), "subs_changed": sorted(self.sub_override)}
 
 
 def build(scenario, backend="local", session=None, port=5000, data_port=6000, rundir=None, runner=None):

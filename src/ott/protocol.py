@@ -64,6 +64,14 @@ def _is_id_list(v):
     return isinstance(v, list) and all(_is_str(i) for i in v)
 
 
+MAX_PATH = 64
+
+
+def _is_path(v):
+    """Caminho acumulado de um ROUTE_TEST: 1 a MAX_PATH ids de nós."""
+    return _is_id_list(v) and 1 <= len(v) <= MAX_PATH
+
+
 def _is_neighbor_list(v):
     return isinstance(v, list) and all(
         isinstance(n, dict) and _is_str(n.get("id")) and _is_str(n.get("host"))
@@ -85,6 +93,10 @@ REQUIRED = {
     MsgType.ACTIVATE: {"server_id": _is_str, "flow": _is_str},
     MsgType.DEACTIVATE: {"server_id": _is_str, "flow": _is_str},
     MsgType.WITHDRAW: {"server_id": _is_str, "flow": _is_str, "epoch": _is_pos_int},
+    # Etapa 3: seq numera os testes de um servidor; path é o caminho já percorrido
+    # (o servidor é o primeiro; cada nó junta o seu id antes de reenviar)
+    MsgType.ROUTE_TEST: {"server_id": _is_str, "flow": _is_str, "seq": _is_pos_int,
+                         "path": _is_path},
 }
 
 # campos opcionais em "data": se estiverem presentes, têm de ser válidos

@@ -9,6 +9,8 @@ Opções úteis nos testes:
   --publish-flow ID[=VIDEO]  anuncia e emite um fluxo originado neste nó (repetível);
                       VIDEO é o ficheiro MJPEG desse fluxo (por omissão, --video)
   --announce-interval S intervalo entre rondas de anúncios (default: 5 s)
+  --route-test S      o servidor gera um ROUTE_TEST por fluxo a cada S s (Etapa 3): segue as rotas ativas e
+                      cada nó regista o caminho percorrido (default: 0 = não gerar; todos os nós o reencaminham)
   --route-ttl S       esquecer rotas sem anúncios há S segundos (default: 6 x intervalo)
   --stats SEGUNDOS    escreve periodicamente os vizinhos e o RTT de cada um
   --subscribe S:F     subscreve o fluxo F do servidor S (repetível)
@@ -39,6 +41,7 @@ from .forwarding import OverlayForwarder
 from .live import LiveConsole, LiveView, TrafficView
 from .node import OverlayNode
 from .protocol import DEFAULT_PORT
+from .routetest import RouteTester
 from .routing import AnnouncementPublisher, RoutingTable
 from .status import StatusWriter
 from .streaming.client import FrameSaver, StreamReceiver, run_gui
@@ -74,6 +77,8 @@ def build_parser():
     p.add_argument("--announce-interval", type=float, default=5.0, metavar="S",
                    help="intervalo entre rondas de anúncios (default: 5 s); "
                         "usar o mesmo valor em todos os nós")
+    p.add_argument("--route-test", type=float, default=0, metavar="S",
+                   help="gerar um ROUTE_TEST por fluxo publicado a cada S segundos (0 = não gerar)")
     p.add_argument("--route-ttl", type=float, default=None, metavar="S",
                    help="tempo sem anúncios ao fim do qual um caminho é esquecido "
                         "(default: 6 x --announce-interval)")
@@ -132,6 +137,10 @@ def main(argv=None):
                  else args.route_ttl)
     if not math.isfinite(route_ttl) or route_ttl <= args.announce_interval:
         raise SystemExit("--route-ttl tem de ser finito e maior que --announce-interval")
+    if not math.isfinite(args.route_test) or args.route_test < 0:
+        raise SystemExit("--route-test tem de ser finito e maior ou igual a zero")
+    if args.route_test and not args.publish_flow:
+        raise SystemExit("--route-test só serve num servidor (precisa de --publish-flow)")
     if args.publish_flow and (not math.isfinite(args.fps) or args.fps <= 0):
         raise SystemExit("--fps tem de ser finito e maior que zero")
     published = []                      # (fluxo, ficheiro de vídeo)
@@ -191,6 +200,7 @@ def main(argv=None):
     if (args.log_traffic or args.live is not None) and not args.verbose:
         # as linhas da RoutingTable dão lugar ao resumo de tráfego
         logging.getLogger("ott.routing").setLevel(logging.WARNING)
+        logging.getLogger("ott.routetest").setLevel(logging.WARNING)
 
     service = BootstrapService.from_file(args.serve, args.id) if args.serve else None
     node = OverlayNode(args.id, args.bind, args.port, bootstrap_service=service,
@@ -198,6 +208,7 @@ def main(argv=None):
                        replace_interval=args.replace_after)
     routing_table = RoutingTable(route_ttl=route_ttl)
     routing_table.attach(node)
+    route_tester = RouteTester(node, routing_table).attach()
     publisher = (AnnouncementPublisher(node, [flow for flow, _ in published],
                                        args.announce_interval,
                                        routing_table=routing_table)
@@ -205,7 +216,8 @@ def main(argv=None):
     node.start()
     status = None
     if args.status_file:   # logo ao arrancar: um nó à espera do bootstrapper também aparece no painel
-        status = StatusWriter(args.status_file, node, routing_table, interval=args.status_interval)
+        status = StatusWriter(args.status_file, node, routing_table, interval=args.status_interval,
+                              route_tester=route_tester)
         status.phase = "a registar" if args.bootstrapper else "a correr"
         status.start()
 
@@ -243,6 +255,8 @@ def main(argv=None):
 
     if publisher:
         publisher.start()
+    if args.route_test:
+        route_tester.start([flow for flow, _ in published], args.route_test)
 
     sources = [StreamSource(node.id, flow, video, forwarder.send,
                             fps=args.fps, loop=True).start()
@@ -296,6 +310,7 @@ def main(argv=None):
         for source in sources:
             source.join(timeout=2.0)
         manager.stop()   # desativa as subscrições ativas
+        route_tester.stop()
         if publisher:
             publisher.stop()
         forwarder.stop()

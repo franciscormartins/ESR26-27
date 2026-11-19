@@ -40,7 +40,7 @@ não depende de o JSON conter ou não quebras de linha e permite rejeitar mensag
 | `ANNOUNCE` | servidor → overlay | `server_id`, `flow`, `epoch`, `metric` (`delay` opcional) | anúncio periódico de um fluxo; reencaminhado pelos nós |
 | `WITHDRAW` | nó → vizinhos | `server_id`, `flow`, `epoch` | o nó perdeu o caminho para o fluxo e não tem alternativa viável |
 | `ACTIVATE`, `DEACTIVATE` | nó → vizinho de montante | `server_id`, `flow` (`subscriber_id` opcional, informativo) | abrir/fechar o ramo deste nó para um fluxo (subscrições agregadas) |
-| `ROUTE_TEST` | – | a definir (Etapa 3) | teste de caminhos (Etapa 3); ainda não implementado |
+| `ROUTE_TEST` | servidor → árvore do fluxo | `server_id`, `flow`, `seq` (inteiro > 0), `path` (lista de 1 a 64 ids; o servidor é o primeiro) | teste de caminhos (Etapa 3): gerado pelo servidor (`--route-test S`) e reenviado pelos ramos ativos; ver §3.8 |
 
 `PING`/`PONG` cumprem o papel do "HELLO/KEEPALIVE (nó, timestamp)" do guião. O `ts` é o relógio
 **monotónico do emissor do PING**; só ele o interpreta (o outro lado limita-se a devolvê-lo),
@@ -63,6 +63,8 @@ Exemplos:
 {"type":"ACTIVATE","src":"O2","data":{"server_id":"S1","flow":"filme_a","subscriber_id":"C1"}}
 {"type":"ACTIVATE","src":"O5","data":{"server_id":"S1","flow":"filme_a"}}
 {"type":"DEACTIVATE","src":"C1","data":{"server_id":"S1","flow":"filme_a","subscriber_id":"C1"}}
+{"type":"ROUTE_TEST","src":"S1","data":{"server_id":"S1","flow":"filme_a","seq":4,"path":["S1"]}}
+{"type":"ROUTE_TEST","src":"O2","data":{"server_id":"S1","flow":"filme_a","seq":4,"path":["S1","O2"]}}
 ```
 
 Nos exemplos de rota, `src` muda quando a mensagem é reenviada por um nó intermédio;
@@ -302,6 +304,42 @@ S1 reinicia (época = hora do arranque, > retirada) ──ANNOUNCE──> O2 (ac
 clientes ──ACTIVATE──> ... ──> S1                                     (ramos reabertos)
 ```
 
+### 3.7b Porque o `ANNOUNCE` não leva TTL de mensagem
+
+O anúncio não tem campo TTL nem limite de saltos: a inundação termina porque cada nó só reenvia quando aprende algo novo
+(época mais recente, troca de montante ou mudança de saltos), nunca devolve o anúncio ao emissor nem ao montante, ignora
+cópias repetidas e antigas e só aceita candidatos viáveis (D34). Num ciclo, o anúncio voltaria com métrica pior e não seria
+reenviado. O `route_ttl` (§5) é outra coisa: o tempo de vida de um candidato sem anúncios, não de uma mensagem. Na
+terminologia do enunciado, a «Origem» de uma rota (ex.: O1 em O2) é o campo `upstream` (o montante); `origin` no código é o
+servidor, e o «Custo» é a latência acumulada (`delay`) com os saltos (`metric`) a desempatar.
+
+### 3.8 Teste dos percursos (Etapa 3)
+
+Implementação: `src/ott/routetest.py` (`RouteTester`). O servidor gera, com `--route-test S`, um `ROUTE_TEST` por
+fluxo que publica a cada `S` segundos (por omissão não gera; todos os nós o reencaminham sempre). Segue a
+**mesma árvore do vídeo**, isto é, os destinos ativos da rota, por isso um ramo sem clientes não o recebe.
+
+```
+S1 (origem)            O2                       C1 (cliente)
+ |-- ROUTE_TEST path=[S1] -->|                       |
+ |                           |-- path=[S1,O2] ------>|   (só pelos destinos ativos de O2)
+ log: caminho S1             log: caminho S1>O2      log: caminho S1>O2>C1 (2 saltos): entregue ao cliente local
+```
+
+- `seq` numera os testes de cada `(servidor, fluxo)` (recomeça em 1 se o servidor reiniciar); `path` acumula os ids.
+  Cada nó junta o seu id **antes** de reenviar e envia a cópia nova (com `src` = o seu id) a cada destino ativo, exceto
+  ao emissor.
+- Um nó só aceita o `ROUTE_TEST` do seu **vizinho de montante** para essa rota (como o RPF do plano de dados); noutro
+  caso descarta-o e conta-o em `RouteTester.dropped`. Descarta também (com um aviso) um caminho que já contém o seu id
+  (ciclo) ou que chegou a 64 ids.
+- Cada nó que o aceita regista uma linha de log `ROUTE_TEST S1:filme_a #4 caminho S1>O2>C1 (2 saltos): ...`
+  e guarda um `RouteTestResult` (caminho, saltos, se foi entregue a um cliente local, para quem seguiu) em
+  `RouteTester.results`, onde os testes o leem. Com `--live` ou `--log-traffic` estas linhas ficam escondidas (como as
+  das rotas) e voltam com `-v`.
+- Não compara relógios: valida o **caminho** e a existência da árvore; o atraso de cada ligação é o RTT do PING/PONG.
+- Não altera a tabela de rotas (só a lê) e não há retransmissão: um teste perdido é substituído pelo seguinte.
+- Compatibilidade: um nó antigo (sem handler) ignora o tipo `ROUTE_TEST` sem fechar a ligação.
+
 ## 4. Interface para os outros módulos (`OverlayNode`)
 
 | Chamada | Efeito |
@@ -325,6 +363,7 @@ clientes ──ACTIVATE──> ... ──> S1                                   
 | `substitute_wait` | 10 s | tempo que um substituto tem para ligar |
 | `DUPLICATE_GRACE` | 3 s | tempo para a ligação vencedora chegar depois de o vizinho fechar uma duplicada |
 | `--announce-interval` | 5 s | intervalo entre rondas de `ANNOUNCE`; igual em todos os nós |
+| `--route-test` | 0 (não gera) | intervalo (s) entre `ROUTE_TEST` gerados pelo servidor, por fluxo publicado |
 | `--route-ttl` (`route_ttl`) | 6 × intervalo (30 s) | tempo sem anúncios ao fim do qual um candidato é esquecido; tem de ser maior que o intervalo |
 | `delay_hysteresis` / `delay_min_gain` | 20 % / 1 ms | melhoria mínima de latência para trocar de montante; metade disto conta como empate (decidem os saltos) |
 | `min_link_delay` | 0,1 ms | custo mínimo de uma ligação (RTT/2 abaixo disto conta como 0,1 ms) |

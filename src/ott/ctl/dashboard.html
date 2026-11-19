@@ -29,7 +29,7 @@
   @keyframes pulse { 0% { r:26; opacity:.9 } 100% { r:40; opacity:0 } } .ring { fill:none; stroke:var(--accent); stroke-width:3; animation:pulse 1.4s infinite; }
   .legend { color:var(--mute); font-size:.85em; margin-top:4px; } .legend span { margin-right:12px; white-space:nowrap; }
   .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; }
-  .tabs { display:flex; gap:2px; border-bottom:1px solid var(--line); margin:-4px 0 8px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:2px; border-bottom:1px solid var(--line); margin:-4px 0 8px; }
   .tabs button { border:none; border-bottom:3px solid transparent; border-radius:0; background:none; padding:6px 12px; color:var(--mute); }
   .tabs button.on { color:var(--ink); border-bottom-color:var(--accent); font-weight:600; }
   table { border-collapse:collapse; width:100%; font-size:.93em; } th, td { text-align:left; padding:3px 8px 3px 0; border-bottom:1px solid var(--line); vertical-align:top; }
@@ -56,9 +56,16 @@
   .vgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:8px; }
   .tile { position:relative; background:var(--soft); border-radius:8px; padding:6px; font-size:12px; }
   .tile img { width:100%; display:block; border-radius:4px; background:#000; min-height:90px; }
-  .tile .vstall { display:none; position:absolute; left:6px; right:6px; bottom:6px; top:34px; align-items:center; justify-content:center; background:rgba(0,0,0,.55); color:#fff; font-weight:700; border-radius:4px; }
+  .tile .vstall { display:none; position:absolute; left:6px; right:6px; bottom:6px; top:34px; align-items:center; justify-content:center; background:rgba(0,0,0,.88); color:#fff; font-weight:700; border-radius:4px; }
   .tile.stalled .vstall { display:flex; }
   .vinfo { color:var(--mute); }
+  .tile { cursor:pointer; } .tile.hl { outline:3px solid var(--warn); }
+  .vgrid.big { grid-template-columns:repeat(auto-fill,minmax(400px,1fr)); } .vgrid.small { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
+  .chip { display:inline-block; padding:0 7px; border-radius:9px; background:var(--soft); border:1px solid var(--line); font-size:.9em; margin:1px 0; }
+  .chip.srv { background:var(--accent); color:#fff; border-color:var(--accent); } .chip.cli { background:var(--ok); color:#fff; border-color:var(--ok); }
+  tr.pick { background:var(--soft); cursor:pointer; } tr.pick.on { outline:2px solid var(--warn); } tr.stale td { opacity:.55; }
+  .hop { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:4px 0; padding:4px 6px; background:var(--soft); border-radius:8px; }
+  .opt { display:flex; gap:8px; align-items:flex-start; padding:4px 0; border-bottom:1px solid var(--line); } .opt input { margin-top:4px; }
   .ulink { cursor:pointer; }
   .ulink:hover { stroke-width:5; }
 </style>
@@ -84,7 +91,7 @@ const LABELS = {up:"ligado", off:"por lançar", stopped:"parado", dead:"morto", 
 const PALETTE = ["#2f5bea", "#d9467a", "#16a085", "#e08a1e", "#8e44ad", "#7f8c8d"];
 const BAD = ["vizinho_down", "rota_perdida", "withdraw", "fluxo_parou", "fluxo_lacuna", "rota_esquecida", "paragem"];
 const GOOD = ["vizinho_up", "rota_recuperada", "fluxo_voltou", "arranque"];
-const U = {tab:"node", selected:null, flow:"", under:true, metric:"rate", onlySel:false, tests:null, demo:null, underlay:null, picked:new Set(), rtNode:"*", link:0, nf:{d:"",j:"",l:"",r:""}, repeat:1, present:false, built:null};
+const U = {tab:"node", selected:null, flow:"", under:true, metric:"rate", onlySel:false, tests:null, demo:null, underlay:null, picked:new Set(), rtNode:"*", link:0, nf:{d:"",j:"",l:"",r:""}, repeat:1, present:false, built:null, mode:"core", hl:null, vgroup:"client", vsize:"m", pathRow:null, subClient:null, subPick:null, subSig:""};
 let S = null; /* U.router: router escolhido */ const H = {};   // H: histórico (no browser) de cada série
 
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -215,6 +222,15 @@ function renderGraph() {
       }
     }
   });
+  if (U.hl && S.tree[U.hl.key]) {   // o caminho escolhido (separador Caminhos ou clique num vídeo), do servidor ao cliente
+    const up = {}; for (const e of S.tree[U.hl.key]) up[e.to] = e.from;
+    const chain = [U.hl.node]; while (up[chain[0]] && chain.length < 30) chain.unshift(up[chain[0]]);
+    for (let i = 0; i + 1 < chain.length; i++) {
+      const a = chain[i], b = chain[i + 1]; if (!P[a] || !P[b]) continue;
+      let pts = route(S.nodes[a].core, S.nodes[b].core, a + ">" + b); if (!pts || pts.length < 2) pts = [P[a], P[b]];
+      svg.splice(1, 0, `<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="#ffd400" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" opacity=".75" style="pointer-events:none"/>`);
+    }
+  }
   svg.push(...hits);
   const focus = new Set((U.tab === "demo" && U.demo && U.demo.index >= 0 && U.demo.steps[U.demo.index]) ? U.demo.steps[U.demo.index].focus : []);
   for (const id of ids) {
@@ -243,6 +259,8 @@ function tabNode() {
   let h = `<h3>${esc(n.id)} <span class="pill" style="background:${COLORS[n.health]}">${LABELS[n.health] || n.health}</span> <span class="muted">${esc(n.role)}${n.core !== n.id ? " · nó do CORE " + esc(n.core) : ""}</span></h3>`;
   if (!["up", "waiting"].includes(n.health) && n.status) h += '<p class="muted">Último estado conhecido (o nó não está a correr).</p>';
   h += `<div class="row">${["start:Lançar", "stop:Parar (limpo)", "kill:Matar", "freeze:Congelar", "thaw:Retomar"].map(a => { const [k, l] = a.split(":"); return `<button class="${k === "kill" ? "danger" : ""}" data-act="${k}">${l}</button>`; }).join("")}</div>`;
+  if (n.publish && n.publish.length) h += `<p>Publica: ${n.publish.map(f => `<b>${esc(f)}</b> <span class="muted">(${esc((S.videos || {})[f] || "")})</span>`).join(", ")}${S.route_test ? ` · envia um ROUTE_TEST de ${S.route_test} em ${S.route_test} s` : ""}</p>`;
+  if (n.subscribe && n.subscribe.length) h += `<p>Subscreve: ${n.subscribe.map(f => `<b>${esc(f)}</b>`).join(", ")}</p>`;
   h += "<h3>Vizinhos</h3>" + ((st.neighbors || []).length ? `<table><tr><th>nó</th><th>RTT ms</th></tr>${st.neighbors.map(x => `<tr><td>${esc(x.id)}</td><td class="num">${fmt(x.rtt_ms, 2)}</td></tr>`).join("")}</table>` : '<p class="muted">sem vizinhos</p>');
   h += "<h3>Tabela de rotas</h3>";
   const routes = st.routes || [];
@@ -250,6 +268,9 @@ function tabNode() {
       `<tr><td>${esc(r.origin)}:${esc(r.flow)}</td><td>${esc(r.withdrawn ? "(retirada)" : r.upstream || "(origem)")}</td><td class="num">${fmt(r.metric, 0)}</td><td class="num">${fmt(r.delay_ms)}</td><td>${esc(r.state)}</td>`
       + `<td>${esc(r.destinations.join(",") || "–")}${r.local_subscribers.length ? " + local" : ""}</td>`
       + `<td class="muted">${Object.entries(r.candidates).filter(([, c]) => c.metric !== null).map(([k, c]) => esc(k) + ":" + c.metric + (c.delay_ms !== null ? "/" + fmt(c.delay_ms) : "")).join(" ")}</td></tr>`).join("") + "</table>" : '<p class="muted">sem rotas</p>';
+  const rts = (st.route_tests || []).filter(r => r.origin !== n.id);
+  if (rts.length) h += "<h3>Testes de caminho (ROUTE_TEST)</h3><table><tr><th>fluxo</th><th>caminho até aqui</th><th>nº</th><th>segue para</th></tr>" + rts.map(r =>
+      `<tr><td>${esc(r.origin)}:${esc(r.flow)}</td><td>${r.path.map(esc).join(" → ")}</td><td class="num">${r.seq}</td><td>${esc(r.forwarded_to.join(", ") || (r.delivered ? "(cliente)" : "–"))}</td></tr>`).join("") + "</table>";
   const flows = st.flows || [];
   if (flows.length) h += "<h3>Fluxos recebidos</h3><table><tr><th>fluxo</th><th>img/s</th><th>perdidos</th><th>jitter</th><th>estado</th></tr>" + flows.map(f =>
       `<tr><td>${esc(f.origin)}:${esc(f.flow)}</td><td class="num">${fmt(f.rate)}</td><td class="num">${f.lost} (${fmt(f.loss_pct)}%)</td><td class="num">${fmt(f.jitter_ms, 2)} ms</td><td>${f.stalled ? '<b class="ev-bad">parou</b>' : f.active ? "a chegar" : "à espera"}</td></tr>`).join("") + "</table>";
@@ -284,7 +305,7 @@ function tabDemo() {
   h += '<ol class="steps">' + D.steps.map((s, i) => `<li class="${i === D.index ? "cur" : i < D.index ? "done" : ""} ${s.core ? "core" : ""}">${i + 1}. ${esc(s.title)}</li>`).join("") + "</ol>";
   if (cur) {
     const extra = D.log[D.index] || "";
-    h += `<div class="caption"><h2>${D.index + 1}. ${esc(cur.title)}</h2><p>${esc(cur.text)}</p>${D.state === "running" && D.index >= 0 ? '<p class="muted">a executar…</p>' : ""}${extra ? `<div class="measured">${esc(extra)}</div>` : ""}</div>`;
+    h += `<div class="caption"><h2>${D.index + 1}. ${esc(cur.title)}</h2><p>${esc(cur.text)}</p>${D.state === "running" && D.index >= 0 ? '<p class="muted">a executar…</p>' : ""}${extra ? `<div class="measured">${esc(extra)}</div>` : ""}${cur.tab && cur.tab !== "demo" ? `<div class="row"><button data-goto="${esc(cur.tab)}">Ver no separador ${esc(TABS[cur.tab][0])} ▸</button> <span class="muted">(volta ao guião com a tecla →)</span></div>` : ""}</div>`;
   } else h += '<div class="caption"><p>Guião passo a passo para a apresentação: cada passo explica o que vai acontecer, executa-o (falhas reais nos nós) e mostra o que foi medido. Usa <b>espaço</b> ou <b>→</b> para avançar.</p></div>';
   return h;
 }
@@ -339,12 +360,20 @@ function routesMarkdown() {
 
 /* Vídeo: um mosaico com o vídeo que cada cliente está a receber (MJPEG vindo do ficheiro que o próprio nó escreve).
    As <img> não podem ser refeitas a cada atualização (reiniciavam o stream), por isso só se reconstrói o mosaico se mudar a lista de fluxos. */
-function videoTiles() { return Object.values(S.nodes).filter(n => n.subscribe && n.subscribe.length).flatMap(n => n.subscribe.map(f => ({id:n.id, flow:f}))); }
+function videoTiles() {
+  const t = Object.values(S.nodes).filter(n => n.subscribe && n.subscribe.length).flatMap(n => n.subscribe.map(f => ({id:n.id, flow:f})));
+  const name = (x) => x.flow.includes(":") ? x.flow.split(":")[1] : x.flow;
+  return t.sort((p, q) => U.vgroup === "flow" ? (name(p).localeCompare(name(q)) || p.id.localeCompare(q.id)) : 0);
+}
 function tabVideo() {
   const t = videoTiles(); if (!t.length) return '<p class="muted">Este cenário não tem clientes.</p>';
+  const name = (x) => x.flow.includes(":") ? x.flow.split(":")[1] : x.flow;
+  const content = Object.entries(S.videos || {}).map(([f, v]) => `<span class="chip">${esc(f)} = ${esc(v)}${(S.publishers[f] || []).length ? " (" + esc(S.publishers[f].join("+")) + ")" : ""}</span>`).join(" ");
   return `<div class="row"><b id="v-sel"></b> <span id="v-health" class="pill"></span>${["start:Lançar", "stop:Parar (limpo)", "kill:Matar", "freeze:Congelar", "thaw:Retomar"].map(a => { const [k, l] = a.split(":"); return `<button class="${k === "kill" ? "danger" : ""}" data-act="${k}">${l}</button>`; }).join("")}</div>
-    <p class="muted">Clica num nó do grafo e usa os botões para o parar ou matar; vê aqui se os clientes continuam a receber (e por que nó chega agora cada fluxo).</p>
-    <div class="vgrid">${t.map(x => `<div class="tile" data-n="${esc(x.id)}" data-f="${esc(x.flow)}"><div class="vhead"><b>${esc(x.id)}</b> ${esc(x.flow)} <span class="vinfo"></span></div>
+    <div class="row"><label>agrupar por <select id="vgroup"><option value="client" ${U.vgroup === "client" ? "selected" : ""}>cliente</option><option value="flow" ${U.vgroup === "flow" ? "selected" : ""}>fluxo (compara o mesmo filme em clientes diferentes)</option></select></label>
+      <label>tamanho <select id="vsize"><option value="small" ${U.vsize === "small" ? "selected" : ""}>pequeno</option><option value="m" ${U.vsize === "m" ? "selected" : ""}>médio</option><option value="big" ${U.vsize === "big" ? "selected" : ""}>grande</option></select></label></div>
+    <p class="muted">Conteúdo de cada fluxo: ${content}. Um fluxo publicado por dois servidores é o mesmo filme. Clica numa janela para ver o caminho dela no grafo; clica num nó do grafo e usa os botões para o parar ou matar.</p>
+    <div class="vgrid ${U.vsize === "m" ? "" : U.vsize}">${t.map(x => `<div class="tile ${U.hl && U.hl.node === x.id && U.hl.sub === x.flow ? "hl" : ""}" data-n="${esc(x.id)}" data-f="${esc(x.flow)}"><div class="vhead"><b>${esc(x.id)}</b> ${esc(x.flow)} <span class="muted">· ${esc((S.videos || {})[name(x)] || "")}</span> <span class="vinfo"></span></div>
       <img alt="" src="/api/video?node=${encodeURIComponent(x.id)}&flow=${encodeURIComponent(x.flow)}"><div class="vstall">sem imagens</div></div>`).join("")}</div>`;
 }
 function updateVideo() {
@@ -361,17 +390,102 @@ function updateVideo() {
     el.querySelector(".vinfo").innerHTML = f ? `· ${f.stalled ? "✗" : Math.round(f.rate) + " img/s"} · perdas ${fmt(f.loss_pct)}% · jitter ${fmt(f.jitter_ms, 1)} ms` + (fl === undefined ? ` · de <b>${esc(f.origin)}</b>` : "") + (r && r.upstream ? ` · via <b>${esc(r.upstream)}</b>` : "") : "";
   });
 }
-const TABS = {node:["Nó", tabNode], video:["Vídeo", tabVideo], tests:["Testes", tabTests], demo:["Demonstração", tabDemo], routes:["Rotas", tabRoutes], net:["Rede", tabNet]};
-function renderSide() {
+/* Caminhos: o que cada ROUTE_TEST mediu (servidor → nós → cliente), com os obstáculos que se podem pôr em cada troço. */
+function subMatch(p, node, sub) { return p.node === node && (p.key === sub || (!sub.includes(":") && p.key.endsWith(":" + sub))); }
+function pathRows() {
+  const rows = [];
+  for (const n of Object.values(S.nodes)) for (const sub of n.subscribe || []) {
+    const p = (S.paths || []).find(q => subMatch(q, n.id, sub)), key = p ? p.key : sub;
+    const st = (n.status || {}), r = (st.routes || []).find(x => `${x.origin}:${x.flow}` === key);
+    rows.push({node:n.id, sub, key, p, delay:r ? r.delay_ms : null, up:n.health === "up"});
+  }
+  return rows;
+}
+function chips(path, node) { return path.map((x, i) => `<span class="chip ${i === 0 ? "srv" : x === node ? "cli" : ""}">${esc(x)}</span>`).join(" → "); }
+function tabPaths() {
+  const rows = pathRows(); if (!rows.length) return '<p class="muted">Este cenário não tem clientes.</p>';
+  if (!S.route_test) return '<p class="muted">Este cenário não gera ROUTE_TEST (route_test = 0 no plano).</p>';
+  let h = `<h3>Caminho de cada subscrição (ROUTE_TEST)</h3><p class="muted">Cada servidor envia um teste de ${S.route_test} em ${S.route_test} s pela árvore ativa; cada nó junta o seu nome e o cliente mostra o caminho que o pacote fez. Clica numa linha para a ver no grafo e para pôr obstáculos nesse caminho.</p>`;
+  h += "<table><tr><th>cliente</th><th>fluxo</th><th>caminho</th><th>saltos</th><th>latência</th><th>teste</th></tr>" + rows.map((r, i) => {
+    const on = U.pathRow && U.pathRow.node === r.node && U.pathRow.sub === r.sub, stale = !r.p || !r.p.fresh;
+    return `<tr class="pick ${on ? "on" : ""} ${stale ? "stale" : ""}" data-pr="${i}"><td><b>${esc(r.node)}</b></td><td>${esc(r.sub)}<div class="muted">${esc((S.videos || {})[r.key.split(":").pop()] || "")}</div></td>`
+      + `<td>${r.p ? chips(r.p.path, r.node) : '<span class="muted">sem teste ainda</span>'}</td><td class="num">${r.p ? r.p.hops : "–"}</td><td class="num">${fmt(r.delay)} ms</td><td class="muted">${r.p ? "#" + r.p.seq + " há " + fmt(r.p.age, 0) + " s" + (r.p.fresh ? "" : " (antigo)") : "–"}</td></tr>`; }).join("") + "</table>";
+  const keys = [...new Set((S.paths || []).filter(p => p.fresh).map(p => p.key))].sort();
+  if (keys.length) {   // o que a árvore poupa: um só envio por ramo, em vez de uma cópia por cliente ao longo do caminho todo
+    const eff = keys.map(k => { const ps = S.paths.filter(p => p.key === k && p.fresh), act = (S.tree[k] || []).filter(e => e.active);
+      return {k, n:ps.length, out:act.filter(e => e.from === k.split(":")[0]).length, used:act.length, naive:ps.reduce((a, p) => a + p.hops, 0)}; });
+    h += `<h3>Poupança de tráfego</h3><table><tr><th>fluxo</th><th>clientes</th><th>cópias que saem do servidor</th><th>ligações overlay usadas</th><th>sem overlay (soma dos saltos)</th></tr>`
+      + eff.map(e => `<tr><td>${esc(e.k)}</td><td class="num">${e.n}</td><td class="num">${e.out}</td><td class="num"><b>${e.used}</b></td><td class="num">${e.naive}${e.naive > e.used ? ` <span class="ev-good">(−${e.naive - e.used})</span>` : ""}</td></tr>`).join("") + "</table>"
+      + '<p class="muted">Cada ramo comum leva uma só cópia do fluxo: com clientes a partilhar o início do caminho, a árvore usa menos ligações do que enviar um fluxo separado a cada cliente.</p>';
+  }
+  const cur = U.pathRow && rows.find(r => r.node === U.pathRow.node && r.sub === U.pathRow.sub);
+  if (cur && cur.p) {
+    const path = cur.p.path, hops = path.slice(0, -1).map((a, i) => [a, path[i + 1]]), net = S.can_network;
+    h += `<h3>Obstáculos no caminho de ${esc(cur.node)} (${esc(cur.sub)})</h3>`;
+    const mids = path.slice(1, -1);
+    h += `<div class="hop"><b>Nós:</b> ${mids.length ? mids.map(m => `<span>${esc(m)} <button data-nact="kill:${esc(m)}" class="danger">matar</button><button data-nact="freeze:${esc(m)}">congelar</button><button data-nact="stop:${esc(m)}">parar</button></span>`).join(" · ") : '<span class="muted">o cliente liga-se diretamente ao servidor</span>'}</div>`;
+    h += hops.map(([a, b]) => `<div class="hop"><b>${esc(a)} → ${esc(b)}</b>` + (net
+      ? `<button data-hop="netem|${a}|${b}|50ms">+50 ms</button><button data-hop="netem|${a}|${b}|200ms">+200 ms</button><button data-hop="loss|${a}|${b}|10">10 % perdas</button><button data-hop="cut|${a}|${b}" class="danger">cortar</button><button data-hop="up|${a}|${b}">repor ligação</button><button data-hop="clear|${a}|${b}">limpar atraso</button>`
+      : '<span class="muted">atrasos, perdas e cortes só com o CORE</span>') + "</div>").join("");
+    const evs = S.events.filter(e => e.node === cur.node && e.route === cur.key).slice(-6).reverse();
+    if (evs.length) h += "<h3>Histórico deste caminho</h3>" + evs.map(e => `<div class="muted"><span class="t">${clock(e.t)}</span> ${esc(e.text)}</div>`).join("");
+  } else if (cur) h += '<p class="muted">Ainda não há um caminho medido para esta subscrição.</p>';
+  return h;
+}
+function wirePaths() {
+  const rows = pathRows();
+  document.querySelectorAll("tr[data-pr]").forEach(tr => tr.onclick = () => { const r = rows[+tr.dataset.pr]; U.pathRow = {node:r.node, sub:r.sub}; U.hl = {node:r.node, key:r.key, sub:r.sub}; U.selected = r.node; render(); });
+  document.querySelectorAll("button[data-nact]").forEach(b => b.onclick = () => { const [k, n] = b.dataset.nact.split(":"); act({action:k, node:n}); });
+  document.querySelectorAll("button[data-hop]").forEach(b => b.onclick = () => {
+    const [kind, a, c, v] = b.dataset.hop.split("|");
+    if (kind === "netem") act({action:"hop_netem", a, b:c, delay:v}); else if (kind === "loss") act({action:"hop_netem", a, b:c, loss:v});
+    else if (kind === "cut") act({action:"hop_set", a, b:c, up:false}); else if (kind === "up") act({action:"hop_set", a, b:c, up:true}); else act({action:"hop_clear", a, b:c});
+  });
+}
+function wireVideo() {
+  $("vgroup").onchange = () => { U.vgroup = $("vgroup").value; renderSide(true); };
+  $("vsize").onchange = () => { U.vsize = $("vsize").value; renderSide(true); };
+  document.querySelectorAll(".tile").forEach(t => t.onclick = () => {
+    const n = S.nodes[t.dataset.n], st = (n && n.status) || {}, sub = t.dataset.f, f = (st.flows || []).find(x => `${x.origin}:${x.flow}` === sub || x.subscription === sub);
+    U.hl = {node:t.dataset.n, key:f ? `${f.origin}:${f.flow}` : sub, sub}; U.selected = t.dataset.n; renderGraph(); document.querySelectorAll(".tile").forEach(x => x.classList.toggle("hl", x === t));
+  });
+}
+
+/* Clientes: o professor escolhe que filmes cada cliente vê (o cliente é relançado com as subscrições novas). */
+function tabClients() {
+  const cands = Object.values(S.nodes).filter(n => n.role !== "servidor");
+  if (!cands.length) return '<p class="muted">Sem clientes.</p>';
+  if (!U.subClient || !S.nodes[U.subClient] || S.nodes[U.subClient].role === "servidor") U.subClient = (cands.find(n => n.id === U.selected) || cands.find(n => n.role === "cliente") || cands[0]).id;
+  const n = S.nodes[U.subClient], sig = U.subClient + "|" + (n.subscribe || []).join(",");
+  if (U.subSig !== sig) { U.subSig = sig; U.subPick = new Set(n.subscribe || []); }
+  let h = `<h3>Que filmes vê cada cliente</h3><div class="row"><label>nó <select id="sc-node">${cands.map(c => `<option value="${esc(c.id)}" ${c.id === U.subClient ? "selected" : ""}>${esc(c.id)}${c.spare ? " (suplente)" : ""}${(S.subs_changed || []).includes(c.id) ? " *" : ""}</option>`).join("")}</select></label><span class="pill" style="background:${COLORS[n.health]}">${LABELS[n.health] || n.health}</span></div>`;
+  h += `<p class="muted">Escolhe os fluxos e carrega em <b>Aplicar</b>: o nó é parado (BYE) e relançado com essas subscrições. O servidor só emite o que alguém pede; o ramo novo sobe do cliente ao servidor pelo caminho inverso. «qualquer servidor» usa o mais perto e passa para o outro se esse cair.</p>`;
+  h += (S.options || []).map(o => `<label class="opt"><input type="checkbox" data-sub="${esc(o.key)}" ${U.subPick.has(o.key) ? "checked" : ""}><span><b>${esc(o.server ? o.key : o.flow + " (qualquer servidor)")}</b> <span class="muted">${esc(o.video)} · publicado por ${esc(o.publishers.join(" e "))}</span></span></label>`).join("");
+  h += `<div class="row"><button id="sc-apply" class="primary" ${S.busy ? "disabled" : ""}>Aplicar</button><button id="sc-reset" ${(S.subs_changed || []).length ? "" : "disabled"}>Repor as do plano (todos)</button></div>`;
+  const flows = ((n.status || {}).flows || []).filter(f => f.active);
+  if (flows.length) h += "<h3>A receber agora</h3><table>" + flows.map(f => `<tr><td>${esc(f.origin)}:${esc(f.flow)}</td><td class="num">${f.stalled ? "✗" : Math.round(f.rate) + " img/s"}</td></tr>`).join("") + "</table>";
+  return h;
+}
+function wireClients() {
+  const sel = $("sc-node"); if (!sel) return;
+  sel.onchange = () => { U.subClient = sel.value; U.selected = sel.value; renderSide(true); renderGraph(); };
+  document.querySelectorAll("input[data-sub]").forEach(c => c.onchange = () => c.checked ? U.subPick.add(c.dataset.sub) : U.subPick.delete(c.dataset.sub));
+  $("sc-apply").onclick = async () => { await act({action:"subs", node:U.subClient, subs:[...U.subPick]}); U.subSig = ""; };
+  $("sc-reset").onclick = async () => { await act({action:"subs_reset"}); U.subSig = ""; };
+}
+const TABS = {node:["Nó", tabNode], video:["Vídeo", tabVideo], paths:["Caminhos", tabPaths], clients:["Clientes", tabClients], tests:["Testes", tabTests], demo:["Demonstração", tabDemo], routes:["Rotas", tabRoutes], net:["Rede", tabNet]};
+function renderSide(force) {
   const side = $("side");
   const keep = document.activeElement && side.contains(document.activeElement) && ["INPUT", "SELECT"].includes(document.activeElement.tagName);
-  if (keep) return;   // não estragar o que se está a escrever
-  if (U.tab === "video" && side.dataset.vsig === videoTiles().map(x => x.id + x.flow).join("|") && $("v-sel")) return updateVideo();
-  side.dataset.vsig = U.tab === "video" ? videoTiles().map(x => x.id + x.flow).join("|") : "";
+  if (keep && !force) return;   // não estragar o que se está a escrever (uma escolha num <select> pede a atualização à força)
+  const vsig = () => U.vgroup + U.vsize + videoTiles().map(x => x.id + x.flow).join("|");
+  if (U.tab === "video" && side.dataset.vsig === vsig() && $("v-sel")) return updateVideo();
+  side.dataset.vsig = U.tab === "video" ? vsig() : "";
   side.innerHTML = '<div class="tabs">' + Object.entries(TABS).map(([k, [l]]) => `<button data-tab="${k}" class="${U.tab === k ? "on" : ""}">${l}</button>`).join("") + "</div>" + TABS[U.tab][1]();
   side.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { U.tab = b.dataset.tab; if (U.tab === "tests") refreshTests(); if (U.tab === "demo") refreshDemo(); render(); });
+  side.querySelectorAll("button[data-goto]").forEach(b => b.onclick = () => { U.tab = b.dataset.goto; if (U.tab === "tests") refreshTests(); render(); });
   side.querySelectorAll("button[data-act]").forEach(b => b.onclick = () => act({action:b.dataset.act, node:U.selected}));
-  if (U.tab === "video") updateVideo(); if (U.tab === "tests") wireTests(); if (U.tab === "demo") wireDemo(); if (U.tab === "net") wireNet(); if (U.tab === "routes") wireRoutes();
+  if (U.tab === "video") { updateVideo(); wireVideo(); } if (U.tab === "paths") wirePaths(); if (U.tab === "clients") wireClients(); if (U.tab === "tests") wireTests(); if (U.tab === "demo") wireDemo(); if (U.tab === "net") wireNet(); if (U.tab === "routes") wireRoutes();
 }
 function wireTests() {
   const T = U.tests; if (!T) return;
@@ -388,7 +502,7 @@ function wireDemo() {
   bind("d-next", "next"); bind("d-prev", "prev"); bind("d-reset", "reset");
 }
 function wireRoutes() {
-  $("rt-node").onchange = () => { U.rtNode = $("rt-node").value; renderSide(); };
+  $("rt-node").onchange = () => { U.rtNode = $("rt-node").value; renderSide(true); };
   $("rt-copy").onclick = () => navigator.clipboard.writeText(routesMarkdown()).then(() => toast("tabela copiada"), () => toast("não consegui copiar", true));
 }
 function wireNet() {
@@ -490,7 +604,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "f") { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); }
 });
 { const h = location.hash.replace("#", "").split(","); // ex.: #demo,present
-  if (["node", "video", "tests", "demo", "routes", "net"].includes(h[0])) U.tab = h[0]; else if (h[0] === "testes") U.tab = "tests"; else if (h[0] === "rotas") U.tab = "routes";
+  if (["node", "video", "paths", "clients", "tests", "demo", "routes", "net"].includes(h[0])) U.tab = h[0]; else if (h[0] === "testes") U.tab = "tests"; else if (h[0] === "rotas") U.tab = "routes"; else if (h[0] === "caminhos") U.tab = "paths"; else if (h[0] === "clientes") U.tab = "clients";
   if (h.includes("present")) $("btn-present").click();
   if (U.tab === "tests") refreshTests(); if (U.tab === "demo") refreshDemo(); }
 poll(); setInterval(poll, 1000);

@@ -808,6 +808,10 @@ class LoopFreedomTest(unittest.TestCase):
         def rtt(self, neighbor):
             return self.net.rtt.get(frozenset((self.id, neighbor)))
 
+        def neighbor_ids(self):
+            # a exceção das folhas (D36, RoutingTable._only_neighbor) usa-o
+            return sorted(self.net.adj[self.id])
+
         def send(self, neighbor, msg):
             if neighbor not in self.net.adj[self.id]:
                 return False
@@ -819,10 +823,10 @@ class LoopFreedomTest(unittest.TestCase):
                 if neighbor not in exclude:
                     self.net.queue.append((self.id, neighbor, msg))
 
-    def build(self, seed):
+    def build(self, seed, links=None):
         import random
         net = self.Net(random.Random(seed))
-        for a, b in self.LINKS:
+        for a, b in (links or self.LINKS):
             for x in (a, b):
                 net.adj.setdefault(x, set())
                 if x not in net.nodes:
@@ -861,8 +865,16 @@ class LoopFreedomTest(unittest.TestCase):
                 current = upstream.get(current)
 
     def test_upstream_graph_never_has_cycles(self):
-        for seed in range(40):
-            net = self.build(seed)
+        self.run_random_network(self.LINKS, ["C", "D", "E", "F"])
+
+    def test_upstream_graph_never_has_cycles_with_leaf_nodes(self):
+        """D36: folhas (um só vizinho) aceitam anúncios não viáveis do montante; sem ciclos."""
+        links = self.LINKS + [("D", "G"), ("F", "H"), ("E", "I")]
+        self.run_random_network(links, ["C", "D", "G", "H", "I"], seeds=60)
+
+    def run_random_network(self, links, activators, seeds=40):
+        for seed in range(seeds):
+            net = self.build(seed, links)
             epoch = 1
             self.publish(net, epoch)
             down = []
@@ -872,10 +884,10 @@ class LoopFreedomTest(unittest.TestCase):
                     epoch += 1
                     self.publish(net, epoch)
                 elif r < 0.12:                  # RTT muda sem anúncio nenhum
-                    a, b = net.rng.choice(self.LINKS)
+                    a, b = net.rng.choice(links)
                     net.rtt[frozenset((a, b))] = net.rng.uniform(0.0005, 0.080)
                 elif r < 0.14 and len(down) < 2:
-                    a, b = net.rng.choice([l for l in self.LINKS if l not in down])
+                    a, b = net.rng.choice([l for l in links if l not in down])
                     down.append((a, b))
                     net.adj[a].discard(b)
                     net.adj[b].discard(a)
@@ -888,7 +900,7 @@ class LoopFreedomTest(unittest.TestCase):
                     net.tables[a].handle_neighbor_up(net.nodes[a], b)
                     net.tables[b].handle_neighbor_up(net.nodes[b], a)
                 elif r < 0.18:
-                    nid = net.rng.choice(["C", "D", "E", "F"])
+                    nid = net.rng.choice(activators)
                     net.tables[nid].activate(net.nodes[nid], "S1", "filme_a")
                 elif net.queue:
                     self.deliver(net)
@@ -1109,6 +1121,44 @@ class RouteTtlTest(unittest.TestCase):
         route = self.feed(table, node, ("O1", 1, 1), ("O5", 1, 1))
         self.assertEqual(table.expire(node, now=self.later(self.TTL - 1)), 0)
         self.assertEqual(set(route.candidates), {"O1", "O5"})
+
+    def test_dead_route_is_removed_only_after_the_hold_down(self):
+        table, node = RoutingTable(route_ttl=self.TTL), self.Node()
+        route = self.feed(table, node, ("O1", 1, 1))
+        table.handle_withdraw(node, "O1", make_msg(
+            MsgType.WITHDRAW, "O1", server_id="S1", flow="filme_a", epoch=1))
+        self.assertIsNone(route.upstream)
+        self.assertIsNotNone(route.withdrawn_at)
+        table.expire(node, now=self.later(self.TTL - 1))        # ainda em retenção
+        self.assertIs(table.get("S1", "filme_a"), route)
+        table.expire(node, now=self.later(self.TTL + 1))
+        self.assertIsNone(table.get("S1", "filme_a"))
+
+    def test_dead_route_with_local_subscriber_or_branch_is_kept(self):
+        for what in ("local_subscribers", "destinations"):
+            with self.subTest(what=what):
+                table, node = RoutingTable(route_ttl=self.TTL), self.Node()
+                route = self.feed(table, node, ("O1", 1, 1))
+                table.handle_withdraw(node, "O1", make_msg(
+                    MsgType.WITHDRAW, "O1", server_id="S1", flow="filme_a", epoch=1))
+                getattr(route, what).add("X")
+                table.expire(node, now=self.later(self.TTL * 10))
+                self.assertIs(table.get("S1", "filme_a"), route)
+
+    def test_live_route_and_own_route_are_never_removed(self):
+        table, node = RoutingTable(route_ttl=self.TTL), self.Node()
+        route = self.feed(table, node, ("O1", 1, 1))
+        table.expire(node, now=self.later(self.TTL * 10))
+        # o único candidato expirou: perde o montante, retira-se (WITHDRAW) e só
+        # depois de nova retenção sai da tabela
+        self.assertIsNone(route.upstream)
+        self.assertIs(table.get("S1", "filme_a"), route)
+        table.expire(node, now=self.later(self.TTL * 20))
+        self.assertIsNone(table.get("S1", "filme_a"))
+        server = RoutingTable(route_ttl=self.TTL)
+        server.publish_local("S1", "filme_a", 1)
+        server.expire(self.Node(), now=self.later(self.TTL * 100))
+        self.assertIsNotNone(server.get("S1", "filme_a"))
 
     def test_stale_alternative_is_forgotten_silently(self):
         table, node = RoutingTable(route_ttl=self.TTL), self.Node()
